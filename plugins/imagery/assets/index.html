@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSNT Imagery</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; background: #0f1419; color: #e6e6e6; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid #243040; }
+    header h1 { margin: 0; font-size: 16px; letter-spacing: .08em; } header a { color: inherit; text-decoration: none; }
+    #bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 8px 16px; border-bottom: 1px solid #243040; font-size: 13px; }
+    #bar label { display: flex; gap: 6px; align-items: center; color: #9fb0c0; }
+    input, select, button { background: #151c24; color: inherit; border: 1px solid #2d3a4a; border-radius: 4px; padding: 4px 8px; }
+    button { cursor: pointer; }
+    #map { flex: 1; }
+    #status { font-size: 12px; color: #8aa; }
+  </style>
+</head>
+<body>
+  <header><h1><a href="/">&larr; OSNT</a> / IMAGERY TIMELINE</h1><span id="status"></span></header>
+  <div id="bar">
+    <label>Imagery <select id="product"></select></label>
+    <label>Date A <input id="dateA" type="date"></label>
+    <button id="prevA">&lt;</button><button id="nextA">&gt;</button>
+    <label>Date B <input id="dateB" type="date"></label>
+    <label>Blend A &harr; B <input id="blend" type="range" min="0" max="100" value="0"></label>
+    <label><input id="fires" type="checkbox"> Fire/thermal detections (VIIRS, Date A)</label>
+    <label>Go to <select id="place"></select></label>
+  </div>
+  <div id="map"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    // NASA GIBS (public, no key). Daily products appear with about a day of latency, so default to yesterday.
+    const PRODUCTS = {
+      'MODIS Terra true colour':  { id: 'MODIS_Terra_CorrectedReflectance_TrueColor',  level: 9, ext: 'jpg' },
+      'MODIS Aqua true colour':   { id: 'MODIS_Aqua_CorrectedReflectance_TrueColor',   level: 9, ext: 'jpg' },
+      'VIIRS SNPP true colour':   { id: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',   level: 9, ext: 'jpg' },
+      'VIIRS NOAA-20 true colour':{ id: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor', level: 9, ext: 'jpg' },
+    };
+    const FIRES = { id: 'VIIRS_SNPP_Thermal_Anomalies_375m_All', level: 9, ext: 'png' };
+    const PLACES = { 'World': [20, 0, 2], 'Ukraine': [48.8, 33, 6], 'Eastern Ukraine': [48.3, 37.5, 7], 'Black Sea': [43.5, 34, 6],
+                     'Gaza / Levant': [31.8, 35, 7], 'Taiwan Strait': [24, 120, 6], 'Gainesville, FL': [29.65, -82.34, 9] };
+    const $ = id => document.getElementById(id);
+    const iso = d => d.toISOString().slice(0, 10);
+    const shift = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+    const url = (p, date) => `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${p.id}/default/${date}/GoogleMapsCompatible_Level${p.level}/{z}/{y}/{x}.${p.ext}`;
+    const attr = 'Imagery &copy; NASA GIBS / EOSDIS';
+
+    (async () => {
+      const { map } = await OSNT.createMap('map');
+      for (const k of Object.keys(PRODUCTS)) $('product').add(new Option(k, k));
+      for (const k of Object.keys(PLACES)) $('place').add(new Option(k, k));
+      const yesterday = shift(iso(new Date()), -1);
+      $('dateA').value = yesterday; $('dateB').value = shift(yesterday, -7);
+      $('dateA').max = $('dateB').max = yesterday;
+      let a, b, fires;
+      const tile = (p, date, opacity, z) => L.tileLayer(url(p, date), { attribution: attr, maxNativeZoom: p.level, maxZoom: 19, opacity, zIndex: z });
+      function rebuild() {
+        for (const l of [a, b, fires]) if (l) map.removeLayer(l);
+        const p = PRODUCTS[$('product').value], t = $('blend').value / 100;
+        b = tile(p, $('dateB').value, 1, 200).addTo(map);
+        a = tile(p, $('dateA').value, 1 - t, 210).addTo(map);
+        fires = $('fires').checked ? tile(FIRES, $('dateA').value, 1, 300).addTo(map) : null;
+        $('status').textContent = `A ${$('dateA').value} · B ${$('dateB').value}`;
+      }
+      for (const id of ['product', 'dateA', 'dateB', 'fires']) $(id).addEventListener('change', rebuild);
+      $('blend').addEventListener('input', () => a && a.setOpacity(1 - $('blend').value / 100));
+      $('prevA').onclick = () => { $('dateA').value = shift($('dateA').value, -1); rebuild(); };
+      $('nextA').onclick = () => { if ($('dateA').value < yesterday) { $('dateA').value = shift($('dateA').value, 1); rebuild(); } };
+      $('place').onchange = () => map.setView(PLACES[$('place').value].slice(0, 2), PLACES[$('place').value][2]);
+      $('place').value = 'Ukraine'; $('place').onchange();
+      rebuild();
+    })();
+  </script>
+</body>
+</html>

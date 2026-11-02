@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSNT Image Forensics</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #0f1419; color: #e6e6e6; }
+    header { padding: 10px 16px; border-bottom: 1px solid #243040; font-size: 16px; letter-spacing: .08em; }
+    header a { color: inherit; text-decoration: none; }
+    main { max-width: 980px; margin: 0 auto; padding: 16px; }
+    #drop { border: 2px dashed #2d3a4a; border-radius: 10px; padding: 28px; text-align: center; color: #8aa; cursor: pointer; }
+    #drop.over { border-color: #3fae91; color: #3fae91; }
+    section { margin-top: 16px; padding: 12px 14px; border: 1px solid #243040; border-radius: 8px; background: #151c24; }
+    h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7f93a8; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    td, th { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; word-break: break-all; }
+    th { color: #8aa; font-weight: 500; white-space: nowrap; }
+    .flag { color: #ffd54f; margin: 3px 0; } .err { color: #ef6c6c; } .muted { color: #8aa; }
+    img { max-width: 100%; max-height: 260px; border-radius: 6px; }
+    a { color: #6fc3ff; } input { padding: 7px 9px; background: #0f1419; color: inherit; border: 1px solid #2d3a4a; border-radius: 6px; width: 70%; }
+    code { font: 12px ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <header><a href="/">&larr; OSNT</a> / IMAGE FORENSICS</header>
+  <main>
+    <div id="drop">Drop an image here or click to choose<input id="file" type="file" accept="image/*" hidden></div>
+    <p class="muted">Analysed in memory on your Pi and never stored. Missing metadata is normal for social-media images and is not evidence of manipulation.</p>
+    <div id="out"></div>
+    <section>
+      <h2>Reverse image search (opens the search engine in a new tab)</h2>
+      <p class="muted">Paste a public image URL. To search a local file, upload it to the engine's own page.</p>
+      <input id="url" placeholder="https://example.com/photo.jpg"> <button id="go">Build links</button>
+      <div id="links"></div>
+    </section>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const rows = o => `<table>${o.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
+    const section = (t, h) => out.insertAdjacentHTML('beforeend', `<section><h2>${esc(t)}</h2>${h}</section>`);
+
+    async function analyse(file) {
+      out.innerHTML = '<span class="muted">analysing…</span>';
+      const r = await fetch('api/analyze', { method: 'POST', body: file });
+      const d = await r.json();
+      if (!r.ok) { out.innerHTML = `<span class="err">${esc(d.error || r.status)}</span>`; return; }
+      out.innerHTML = '';
+      section('Preview', `<img src="${URL.createObjectURL(file)}" alt="uploaded image">`);
+      section('File', rows([['name', esc(file.name)], ['format', esc(d.format)], ['size', `${d.bytes.toLocaleString()} bytes`],
+        ['dimensions', d.dimensions && `${d.dimensions.width} × ${d.dimensions.height}`], ['SHA-256', `<code>${esc(d.sha256)}</code>`]]));
+      if (d.flags.length) section('Worth a closer look', d.flags.map(f => `<div class="flag">${esc(f)}</div>`).join(''));
+      if (d.exif) {
+        const e = d.exif, g = e.gps;
+        section('Camera and time', rows([['make', esc(e.make)], ['model', esc(e.model)], ['lens', esc(e.lens)], ['software', esc(e.software)], ['captured', esc(e.captured)], ['modified', esc(e.modified)]]));
+        if (g) section('GPS', rows([['position', `${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}`], ['altitude', esc(g.altitude)],
+          ['map', `<a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${g.lat}&mlon=${g.lon}#map=16/${g.lat}/${g.lon}">OpenStreetMap</a>`]]));
+        section(`All EXIF fields (${e.field_count})`, `<table>${e.fields.map(f => `<tr><th>${esc(f.tag)}</th><td>${esc(f.value)}</td></tr>`).join('')}</table>`);
+      }
+    }
+    $('drop').onclick = () => $('file').click();
+    $('file').onchange = e => e.target.files[0] && analyse(e.target.files[0]);
+    $('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
+    $('drop').ondragleave = () => $('drop').classList.remove('over');
+    $('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); e.dataTransfer.files[0] && analyse(e.dataTransfer.files[0]); };
+    $('go').onclick = () => {
+      let u; try { u = new URL($('url').value.trim()); if (!/^https?:$/.test(u.protocol)) throw 0; } catch { $('links').innerHTML = '<span class="err">enter a valid http(s) URL</span>'; return; }
+      const enc = encodeURIComponent(u.href);
+      $('links').innerHTML = [['Google Lens', `https://lens.google.com/uploadbyurl?url=${enc}`], ['TinEye', `https://tineye.com/search?url=${enc}`],
+        ['Yandex Images', `https://yandex.com/images/search?rpt=imageview&url=${enc}`], ['Bing Visual Search', `https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:${enc}`]]
+        .map(([n, h]) => `<div><a target="_blank" rel="noopener noreferrer" href="${h}">${n}</a></div>`).join('');
+    };
+  </script>
+</body>
+</html>

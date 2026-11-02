@@ -1,0 +1,12 @@
+id = "imagery"
+name = "Imagery timeline"
+description = "Compare NASA satellite imagery across dates, with fire and thermal detections."
+grid = "Geospatial"
+port = 8102
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_IMAGERY_BIND = "127.0.0.1:{port}"

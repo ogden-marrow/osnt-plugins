@@ -1,0 +1,12 @@
+id = "map"
+name = "Map"
+description = "Base maps, satellite, terrain and elevation layers streamed on demand."
+grid = "Geospatial"
+port = 8107
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_MAP_BIND = "127.0.0.1:{port}"

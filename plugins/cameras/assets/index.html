@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSNT Cameras</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #0f1419; color: #e6e6e6; }
+    header { display: flex; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #243040; font-size: 16px; letter-spacing: .08em; }
+    header a { color: inherit; text-decoration: none; } #status { font-size: 12px; color: #8aa; letter-spacing: 0; }
+    main { padding: 8px 16px 32px; }
+    h2 { margin: 20px 0 8px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7f93a8; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+    figure { margin: 0; border: 1px solid #243040; border-radius: 8px; overflow: hidden; background: #151c24; }
+    figure.stale { border-color: #c0392b; }
+    img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #000; }
+    figcaption { padding: 6px 10px; font-size: 12px; color: #9fb0c0; display: flex; justify-content: space-between; }
+    #map { height: 260px; margin-top: 8px; border-radius: 8px; display: none; }
+  </style>
+</head>
+<body>
+  <header><span><a href="/">&larr; OSNT</a> / CAMERAS</span><span id="status"></span></header>
+  <main><div id="map"></div><div id="groups"></div></main>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const REFRESH_MS = 2000;
+    (async () => {
+      const cams = await (await fetch('api/cameras')).json();
+      const groups = {};
+      for (const c of cams) (groups[c.group || 'Cameras'] ??= []).push(c);
+      const root = document.getElementById('groups');
+      const frames = [];
+      for (const [name, list] of Object.entries(groups)) {
+        root.insertAdjacentHTML('beforeend', `<h2></h2><div class="grid"></div>`);
+        root.querySelector('h2:last-of-type').textContent = name;
+        const grid = root.querySelector('.grid:last-of-type');
+        for (const c of list) {
+          const fig = document.createElement('figure'), img = document.createElement('img'), cap = document.createElement('figcaption');
+          cap.innerHTML = '<span></span><span class="ts"></span>'; cap.firstChild.textContent = c.name;
+          img.alt = c.name; img.onload = () => { fig.classList.remove('stale'); cap.lastChild.textContent = new Date().toLocaleTimeString(); };
+          img.onerror = () => fig.classList.add('stale');
+          fig.append(img, cap); grid.append(fig); frames.push({ c, img });
+        }
+      }
+      const tick = () => { if (!document.hidden) for (const { c, img } of frames) img.src = `snap/${c.id}?t=${Date.now()}`; };
+      tick(); setInterval(tick, REFRESH_MS);
+      document.getElementById('status').textContent = `${cams.length} cameras · refreshing every ${REFRESH_MS / 1000}s`;
+
+      const placed = cams.filter(c => c.lat != null && c.lon != null);
+      if (placed.length) {
+        document.getElementById('map').style.display = 'block';
+        const { map } = await OSNT.createMap('map');
+        const pts = placed.map(c => L.marker([c.lat, c.lon]).addTo(map).bindPopup(c.name).getLatLng());
+        map.fitBounds(L.latLngBounds(pts).pad(0.4), { maxZoom: 17 });
+      }
+    })();
+  </script>
+</body>
+</html>

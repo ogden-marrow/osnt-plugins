@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSNT Image Source Finder</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #0f1419; color: #e6e6e6; }
+    header { padding: 10px 16px; border-bottom: 1px solid #243040; font-size: 16px; letter-spacing: .08em; }
+    header a { color: inherit; text-decoration: none; }
+    main { max-width: 980px; margin: 0 auto; padding: 16px; }
+    #drop { border: 2px dashed #2d3a4a; border-radius: 10px; padding: 24px; text-align: center; color: #8aa; cursor: pointer; }
+    #drop.over { border-color: #3fae91; color: #3fae91; }
+    section { margin-top: 16px; padding: 12px 14px; border: 1px solid #243040; border-radius: 8px; background: #151c24; }
+    h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7f93a8; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    td, th { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; word-break: break-word; }
+    th { color: #8aa; font-weight: 500; white-space: nowrap; }
+    .muted { color: #8aa; } .err { color: #ef6c6c; } .warn { color: #ffd54f; }
+    .notice { border-left: 3px solid #ffd54f; padding: 6px 10px; background: #1b1f1a; margin: 10px 0; font-size: 14px; }
+    .cand { border-top: 1px solid #243040; padding: 8px 0; } .cand:first-of-type { border-top: 0; }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+    .low { background: #4a2a2a; color: #ffb3b3; } .medium { background: #4a432a; color: #ffe08a; } .high { background: #234a3a; color: #8ee6bd; }
+    a { color: #6fc3ff; word-break: break-all; }
+    input[type=text] { padding: 7px 9px; background: #0f1419; color: inherit; border: 1px solid #2d3a4a; border-radius: 6px; width: 70%; }
+    button { padding: 8px 16px; background: #1f6f5a; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    button:disabled { background: #2d3a4a; cursor: default; }
+    ul { margin: 4px 0 4px 18px; padding: 0; } li { margin: 2px 0; }
+    code { font: 12px ui-monospace, monospace; } img { max-width: 100%; max-height: 220px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <header><a href="/">&larr; OSNT</a> / IMAGE SOURCE FINDER</header>
+  <main>
+    <div class="notice">
+      <b>Privacy.</b> Running an investigation sends the image (or its URL) to third-party services: Google Cloud Vision and/or SerpAPI (Google Lens)
+      for reverse image search, and the search results and page text (never the image itself) to DeepSeek for analysis. Nothing is sent until you press
+      <b>Run investigation</b>. The Pi never stores the image.<br>
+      <b>People.</b> This tool does not identify people from their faces or appearance and does not use face recognition. If a source names someone, the
+      report only repeats what that source says.
+      <b>Reliability.</b> "Earliest found" is not "original". Treat the result as leads for a human to check.
+    </div>
+
+    <div id="drop">Choose or drop an image (it is only selected, not sent)<input id="file" type="file" accept="image/*" hidden></div>
+    <p class="muted" style="text-align:center;margin:8px 0">or</p>
+    <div><input id="url" type="text" placeholder="https://example.com/photo.jpg  (public image URL)"></div>
+    <p id="sel" class="muted"></p>
+    <button id="go">Run investigation</button> <span id="status" class="muted"></span>
+    <p class="muted">Takes up to about 90 seconds. Credentials are managed on the portal's <a href="/credentials">Credentials page</a>.</p>
+    <div id="out"></div>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    let file = null, previewUrl = null;
+    const el = (tag, props = {}, ...kids) => {
+      const e = document.createElement(tag);
+      for (const [k, v] of Object.entries(props)) k === 'class' ? e.className = v : e.setAttribute(k, v);
+      for (const k of kids) e.append(k);
+      return e;
+    };
+    // All text from upstream pages goes in through textContent, never innerHTML.
+    const safeLink = (href, text) => {
+      if (!/^https?:\/\//i.test(href || '')) return document.createTextNode(String(href ?? ''));
+      return el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text || href);
+    };
+    const section = (title, ...kids) => { const s = el('section', {}, el('h2', {}, title), ...kids); out.append(s); return s; };
+    const list = items => el('ul', {}, ...(items || []).map(i => el('li', {}, String(i))));
+
+    function pick(f) {
+      if (!f) return;
+      file = f; $('url').value = '';
+      $('sel').textContent = `Selected: ${f.name} (${f.type || 'image'}, ${(f.size / 1024).toFixed(0)} KB). Not sent yet.`;
+    }
+    $('drop').onclick = () => $('file').click();
+    $('file').onchange = e => pick(e.target.files[0]);
+    $('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
+    $('drop').ondragleave = () => $('drop').classList.remove('over');
+    $('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); pick(e.dataTransfer.files[0]); };
+    $('url').oninput = () => { if ($('url').value) { file = null; $('sel').textContent = ''; } };
+
+    $('go').onclick = async () => {
+      const u = $('url').value.trim();
+      if (!file && !u) { $('status').textContent = 'Choose an image or enter a URL first.'; return; }
+      if (file && file.size > 15 * 1024 * 1024) { $('status').textContent = 'Image is larger than 15 MB.'; return; }
+      $('go').disabled = true; $('status').textContent = 'Investigating… (up to ~90 s)'; out.replaceChildren();
+      try {
+        const r = file
+          ? await fetch('api/investigate', { method: 'POST', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file })
+          : await fetch('api/investigate?url=' + encodeURIComponent(u));
+        const d = await r.json();
+        if (!r.ok) { out.append(el('p', { class: 'err' }, d.error || ('HTTP ' + r.status))); }
+        else render(d, file);
+        $('status').textContent = r.ok ? `Done in ${(d.total_ms / 1000).toFixed(1)} s` : '';
+      } catch (e) { out.append(el('p', { class: 'err' }, 'Request failed: ' + e)); $('status').textContent = ''; }
+      $('go').disabled = false;
+    };
+
+    function render(d, f) {
+      if (f) { if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = URL.createObjectURL(f); section('Image (local preview)', el('img', { src: previewUrl, alt: 'selected image' })); }
+      const rep = d.report;
+      const status = section('Result');
+      status.append(el('p', {}, 'AI analysis: ', el('b', {}, d.llm)));
+      if (rep) {
+        status.append(el('p', {}, 'Confidence: ', el('span', { class: 'badge ' + rep.confidence }, rep.confidence),
+          ' ', el('span', { class: 'muted' }, '("earliest found" is not "original")')));
+        const e = rep.earliest_known_appearance;
+        if (e) status.append(el('p', {}, 'Earliest known appearance: ', el('b', {}, e.date || 'date unknown'), ' ', e.url ? safeLink(e.url) : '',
+          e.basis ? el('div', { class: 'muted' }, e.basis) : ''));
+        const cs = section('Ranked candidates');
+        if (!rep.candidates.length) cs.append(el('p', { class: 'muted' }, 'No candidates found.'));
+        rep.candidates.forEach((c, i) => cs.append(el('div', { class: 'cand' },
+          el('div', {}, `${i + 1}. `, el('b', {}, c.publisher || 'unknown publisher'), '  ', el('span', { class: 'muted' }, c.earliest_date_seen || 'no date')),
+          el('div', {}, safeLink(c.url)), el('div', {}, c.why), c.evidence.length ? list(c.evidence) : '')));
+        section('Caveats', list(rep.caveats));
+        if (rep.checks_not_done.length) section('Checks not done (for you)', list(rep.checks_not_done));
+      }
+      (d.notes || []).forEach(n => status.append(el('p', { class: 'warn' }, n)));
+      const bk = d.backends || {};
+      status.append(el('table', {}, ...Object.entries(bk).map(([k, v]) => el('tr', {}, el('th', {}, k), el('td', {}, String(v))))));
+
+      if (!rep && d.raw_candidates && d.raw_candidates.length) {
+        const rc = section('Raw search results (unranked, not conclusions)');
+        d.raw_candidates.forEach(c => rc.append(el('div', { class: 'cand' }, el('div', {}, safeLink(c.url, c.title || c.url)),
+          el('div', { class: 'muted' }, (c.found_by || []).join(', ') + (c.dates && c.dates.length ? ' | ' + c.dates.join('; ') : '')))));
+      }
+      const l = d.local || {};
+      const rows = [['format', l.format], ['size', l.bytes + ' bytes'], ['dimensions', l.dimensions ? `${l.dimensions.width} x ${l.dimensions.height}` : null], ['SHA-256', l.sha256]];
+      if (l.exif) rows.push(['camera', [l.exif.make, l.exif.model].filter(Boolean).join(' ')], ['software', l.exif.software], ['captured', l.exif.captured], ['modified', l.exif.modified],
+        ['GPS', l.exif.gps ? `${l.exif.gps.lat.toFixed(5)}, ${l.exif.gps.lon.toFixed(5)}` : null]);
+      const ls = section('Local analysis', el('table', {}, ...rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => el('tr', {}, el('th', {}, k), el('td', {}, String(v))))));
+      if ((l.flags || []).length) ls.append(list(l.flags));
+
+      const rs = d.reverse_search;
+      if (rs) section('Reverse image search by hand', el('p', { class: 'muted' }, rs.note), ...rs.links.map(x => el('div', {}, safeLink(x.href, x.name))));
+      section('What the agent did', el('table', {}, el('tr', {}, el('th', {}, '#'), el('th', {}, 'tool'), el('th', {}, 'summary'), el('th', {}, 'ms')),
+        ...(d.trace || []).map(t => el('tr', {}, el('td', {}, String(t.step)), el('td', {}, el('code', {}, t.tool)), el('td', {}, t.summary), el('td', {}, String(t.ms))))));
+    }
+  </script>
+</body>
+</html>

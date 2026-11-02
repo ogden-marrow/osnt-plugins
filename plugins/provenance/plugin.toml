@@ -1,0 +1,30 @@
+id = "provenance"
+name = "Image source finder"
+description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback, with honest confidence and caveats."
+grid = "Media & Verification"
+port = 8106
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_PROVENANCE_BIND = "127.0.0.1:{port}"
+
+[[secret]]
+name = "DEEPSEEK_API_KEY"
+label = "DeepSeek API key (reasoning loop)"
+help_url = "https://platform.deepseek.com/api_keys"
+required = true
+
+[[secret]]
+name = "GOOGLE_VISION_API_KEY"
+label = "Google Cloud Vision API key (web detection)"
+help_url = "https://console.cloud.google.com/apis/library/vision.googleapis.com"
+required = false
+
+[[secret]]
+name = "SERPAPI_API_KEY"
+label = "SerpAPI key (Google Lens matches)"
+help_url = "https://serpapi.com/manage-api-key"
+required = false

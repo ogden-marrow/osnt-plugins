@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSNT Map</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; background: #0f1419; color: #e6e6e6; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid #243040; }
+    header h1 { margin: 0; font-size: 16px; letter-spacing: .08em; }
+    #status { font-size: 12px; color: #8aa; }
+    #map { flex: 1; }
+    #readout { position: absolute; z-index: 1000; left: 10px; bottom: 28px; padding: 4px 8px; font: 12px ui-monospace, monospace;
+               background: rgba(15,20,25,.85); color: #e6e6e6; border-radius: 4px; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <header><h1><a href="/" style="color:inherit;text-decoration:none">&larr; OSNT</a> / MAP</h1><span id="status">connecting…</span></header>
+  <div id="map"></div>
+  <div id="readout">move the cursor over the map</div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    (async () => {
+      const status = document.getElementById('status');
+      try {
+        const { cfg } = await OSNT.createMap('map', { readout: 'readout' });
+        const h = await (await fetch('/api/health')).json();
+        status.textContent = `server ${h.status} · v${h.version} · ${cfg.layer.length} layers`;
+      } catch { status.textContent = 'failed to load'; }
+    })();
+  </script>
+</body>
+</html>

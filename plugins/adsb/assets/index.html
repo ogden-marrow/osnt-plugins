@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSNT Aircraft</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; background: #0f1419; color: #e6e6e6; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid #243040; }
+    header h1 { margin: 0; font-size: 16px; letter-spacing: .08em; }
+    header a { color: inherit; text-decoration: none; }
+    #status { font-size: 12px; color: #8aa; }
+    #layout { flex: 1; display: flex; min-height: 0; }
+    #map { flex: 1; }
+    aside { width: 300px; overflow-y: auto; border-left: 1px solid #243040; padding: 12px; font-size: 13px; }
+    aside h2 { margin: 14px 0 6px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7f93a8; }
+    aside h2:first-child { margin-top: 0; }
+    input[type=search] { width: 100%; box-sizing: border-box; padding: 6px 8px; background: #151c24; color: inherit; border: 1px solid #2d3a4a; border-radius: 4px; }
+    button { background: #151c24; color: inherit; border: 1px solid #2d3a4a; border-radius: 4px; padding: 5px 9px; cursor: pointer; }
+    button.on { border-color: #3fae91; color: #3fae91; }
+    .row { display: flex; gap: 6px; margin: 6px 0; }
+    .item { padding: 6px 8px; margin: 4px 0; border: 1px solid #243040; border-radius: 6px; background: #151c24; cursor: pointer; }
+    .item.alert { border-color: #c0392b; }
+    .item small { color: #8aa; display: block; }
+    #readout { position: absolute; z-index: 1000; left: 10px; bottom: 28px; padding: 4px 8px; font: 12px ui-monospace, monospace;
+               background: rgba(15,20,25,.85); border-radius: 4px; pointer-events: none; }
+    .plane svg { filter: drop-shadow(0 0 1px #000); }
+    .muted { color: #8aa; }
+    @media (max-width: 700px) { aside { display: none; } }
+  </style>
+</head>
+<body>
+  <header><h1><a href="/">&larr; OSNT</a> / AIRCRAFT</h1><span id="status">starting…</span></header>
+  <div id="layout">
+    <div id="map"></div>
+    <aside>
+      <h2>Find aircraft</h2>
+      <input id="q" type="search" placeholder="hex, registration or callsign">
+      <h2>View</h2>
+      <div class="row">
+        <button id="modeView" class="on">In view</button>
+        <button id="modeMil">Military (world)</button>
+      </div>
+      <div class="muted" id="count"></div>
+      <h2>Emergencies</h2>
+      <div id="emerg" class="muted">none right now</div>
+      <div class="row"><button id="notify">Enable alerts</button></div>
+      <h2>Selected</h2>
+      <div id="sel" class="muted">click an aircraft</div>
+    </aside>
+  </div>
+  <div id="readout"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    // Relative URLs throughout: the core mounts this page at /p/adsb/.
+    const $ = id => document.getElementById(id);
+    const markers = new Map();           // hex -> L.marker
+    let map, trailLine = null, selected = null, mode = 'view', lastList = [];
+    const seenEmergencies = new Set();
+
+    function altColour(a) {
+      if (a.on_ground) return '#9aa5b1';
+      const ft = a.alt ?? 0;
+      return ft < 5000 ? '#4fc3f7' : ft < 15000 ? '#66bb6a' : ft < 30000 ? '#ffd54f' : '#ef6c6c';
+    }
+    function icon(a) {
+      const stroke = a.mil ? '#ff5252' : '#0b0f14', w = a.mil ? 1.6 : 0.8;
+      return L.divIcon({ className: 'plane', iconSize: [22, 22], iconAnchor: [11, 11],
+        html: `<svg width="22" height="22" viewBox="0 0 24 24" style="transform:rotate(${a.track ?? 0}deg)">
+                 <path d="M12 2l2.2 8.5 8.3 3.5v2l-8.3-1.6L13.6 20l2.4 1.6V23L12 21.8 8 23v-1.4l2.4-1.6-.9-5.6L1.5 16v-2l8.3-3.5z"
+                       fill="${altColour(a)}" stroke="${stroke}" stroke-width="${w}"/></svg>` });
+    }
+    const label = a => a.flight || a.reg || a.hex.toUpperCase();
+    const fmtAlt = a => a.on_ground ? 'ground' : a.alt == null ? '—' : `${a.alt.toLocaleString()} ft`;
+    const details = a => `<b>${label(a)}</b>${a.mil ? ' <span style="color:#ff5252">MIL</span>' : ''}
+      <small>${[a.type, a.reg, a.hex.toUpperCase()].filter(Boolean).join(' · ')}</small>
+      <small>${fmtAlt(a)} · ${a.gs != null ? Math.round(a.gs) + ' kt' : '—'} · ${a.track != null ? Math.round(a.track) + '°' : '—'}${a.squawk ? ' · sqk ' + a.squawk : ''}</small>`;
+
+    function render(list) {
+      lastList = list;
+      const keep = new Set();
+      for (const a of list) {
+        keep.add(a.hex);
+        let m = markers.get(a.hex);
+        if (!m) {
+          m = L.marker([a.lat, a.lon], { icon: icon(a) }).addTo(map).on('click', () => select(m._ac));
+          markers.set(a.hex, m);
+        } else { m.setLatLng([a.lat, a.lon]).setIcon(icon(a)); }
+        m._ac = a;
+      }
+      for (const [hex, m] of markers) if (!keep.has(hex)) { map.removeLayer(m); markers.delete(hex); }
+      $('count').textContent = `${list.length} aircraft${list.filter(a => a.mil).length ? ` · ${list.filter(a => a.mil).length} military` : ''}`;
+      if (selected && markers.has(selected)) $('sel').innerHTML = details(markers.get(selected)._ac);
+    }
+
+    async function api(path) {
+      const r = await fetch(path);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+      return r.json();
+    }
+
+    async function refresh() {
+      try {
+        if (mode === 'mil') { render(await api('api/military')); $('status').textContent = 'military · live'; return; }
+        const c = map.getCenter(), b = map.getBounds();
+        const nm = c.distanceTo(b.getNorthEast()) / 1852;
+        const radius = Math.min(250, Math.ceil(nm));   // the aggregator caps point queries at 250 nm
+        render(await api(`api/aircraft?lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}&radius=${radius}`));
+        if (nm > 250) $('count').textContent += ' · showing 250 nm around centre, zoom in for the rest';
+        $('status').textContent = `live · ${new Date().toLocaleTimeString()}`;
+      } catch (e) { $('status').textContent = 'error: ' + e.message; }
+    }
+
+    async function select(a) {
+      selected = a.hex; $('sel').innerHTML = details(a);
+      if (trailLine) map.removeLayer(trailLine);
+      try {
+        const pts = await api(`api/trail/${a.hex}?minutes=180`);
+        trailLine = L.polyline(pts.map(p => [p.lat, p.lon]), { color: altColour(a), weight: 2, opacity: .8 }).addTo(map);
+        $('sel').innerHTML += `<small class="muted">${pts.length} recorded positions in the last 3 h</small>`;
+      } catch { /* no trail yet */ }
+    }
+
+    async function checkEmergencies() {
+      try {
+        const list = await api('api/emergencies');
+        $('emerg').innerHTML = list.length ? '' : 'none right now';
+        for (const a of list) {
+          const d = document.createElement('div'); d.className = 'item alert';
+          d.innerHTML = `${details(a)}<small>${a.squawk} — ${a.meaning}</small>`;
+          d.onclick = () => { map.setView([a.lat, a.lon], 8); if (mode === 'view') refresh(); };
+          $('emerg').append(d);
+          if (!seenEmergencies.has(a.hex + a.squawk)) {
+            seenEmergencies.add(a.hex + a.squawk);
+            if (seenEmergencies.size > list.length && 'Notification' in window && Notification.permission === 'granted')
+              new Notification(`Squawk ${a.squawk}: ${label(a)}`, { body: a.meaning });
+          }
+        }
+      } catch { /* leave previous list */ }
+    }
+
+    $('q').addEventListener('keydown', async e => {
+      if (e.key !== 'Enter' || !e.target.value.trim()) return;
+      try {
+        const res = await api('api/search?q=' + encodeURIComponent(e.target.value.trim()));
+        if (!res.length) { $('sel').textContent = 'not found (or not broadcasting right now)'; return; }
+        const a = res[0]; mode = 'view'; $('modeView').classList.add('on'); $('modeMil').classList.remove('on');
+        map.setView([a.lat, a.lon], 9); render(res); select(a);
+      } catch (err) { $('sel').textContent = 'search failed: ' + err.message; }
+    });
+    $('modeView').onclick = () => { mode = 'view'; $('modeView').classList.add('on'); $('modeMil').classList.remove('on'); refresh(); };
+    $('modeMil').onclick = () => { mode = 'mil'; $('modeMil').classList.add('on'); $('modeView').classList.remove('on'); refresh(); };
+    $('notify').onclick = async () => {
+      if (!('Notification' in window)) { $('notify').textContent = 'not supported'; return; }
+      const p = await Notification.requestPermission();
+      $('notify').textContent = p === 'granted' ? 'Alerts on' : 'Alerts blocked';
+    };
+
+    (async () => {
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      map.setView([29.65, -82.34], 7);
+      map.on('moveend', () => mode === 'view' && refresh());
+      refresh(); checkEmergencies();
+      setInterval(refresh, 6000);
+      setInterval(checkEmergencies, 30000);
+      if ('Notification' in window && Notification.permission === 'granted') $('notify').textContent = 'Alerts on';
+    })();
+  </script>
+</body>
+</html>

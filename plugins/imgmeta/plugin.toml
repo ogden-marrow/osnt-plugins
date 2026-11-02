@@ -1,0 +1,12 @@
+id = "imgmeta"
+name = "Image forensics"
+description = "EXIF, hashes and editing/GPS flags for an image, plus reverse-image-search links."
+grid = "Media & Verification"
+port = 8104
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_IMGMETA_BIND = "127.0.0.1:{port}"
