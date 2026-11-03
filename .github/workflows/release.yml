@@ -1,0 +1,38 @@
+# Builds every plugin for the Raspberry Pi and publishes the result as the rolling `latest` release.
+# The hub's Packages page installs from that release (checksums come from manifest.json).
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - name: Build and package every plugin
+        id: package
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target
+        run: python3 tools/package.py
+      # Publish whatever built, even when one plugin failed (the failed step still marks the run red).
+      - name: Publish the latest release
+        if: ${{ !cancelled() && hashFiles('dist/manifest.json') != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest dist/* --target "$GITHUB_SHA" --prerelease \
+            --title "Latest build" --notes "Built from $GITHUB_SHA. Installed by the hub's Packages page."
