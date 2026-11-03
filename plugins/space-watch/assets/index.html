@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <title>Launches &amp; orbital objects · OSNT</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 380px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 12px 16px 20px; font-size: 13px; }
+    aside h2 { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .tabs2 { display: flex; gap: 2px; margin: 0 -4px 10px; border-bottom: 1px solid var(--edge); overflow-x: auto; }
+    .tabs2 button { min-height: 40px; padding: 0 12px; background: none; border: 0; font: 500 13px var(--font); color: var(--ink-2); cursor: pointer; white-space: nowrap; position: relative; }
+    .tabs2 button[aria-selected=true] { color: var(--ink); font-weight: 650; }
+    .tabs2 button[aria-selected=true]::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--accent); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .item { padding: 10px 12px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); line-height: 1.45; }
+    .item.click { cursor: pointer; } .item.click:hover, .item.click:focus-visible { border-color: var(--edge-strong); }
+    .item b { font-weight: 600; overflow-wrap: anywhere; } .item small { display: block; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+    .cd { font: 650 15px var(--font-mono); font-variant-numeric: tabular-nums; }
+    .item p { margin: 4px 0 0; color: var(--ink-2); font-size: 12.5px; }
+    .src { color: var(--ink-3); font-size: 11.5px; line-height: 1.5; margin-top: 16px; }
+    .pin { width: 14px; height: 14px; border-radius: 3px; transform: rotate(45deg); background: var(--accent); border: 2px solid #10151a; }
+    .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 12.5px; }
+    #panelBtn { display: none; }
+    @media (max-width: 700px) {
+      #panelBtn { display: inline-flex; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 66dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); padding-bottom: 28px; }
+      aside#panel.open { display: block; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Launches &amp; orbits</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Loading…</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Panel</button></div>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map" role="application" aria-label="Launch site map"></div>
+    <aside id="panel" aria-label="Launches and objects">
+      <div class="tabs2" role="tablist">
+        <button role="tab" id="t-up" aria-selected="true">Upcoming</button>
+        <button role="tab" id="t-prev" aria-selected="false">Past launches</button>
+        <button role="tab" id="t-obj" aria-selected="false">Objects</button>
+        <button role="tab" id="t-rec" aria-selected="false">Recent &amp; decaying</button>
+      </div>
+
+      <section id="s-launch">
+        <label class="sr-only" for="lq">Search launches</label>
+        <input id="lq" type="search" placeholder="Filter by rocket, provider, pad or mission" style="width:100%">
+        <div id="lcount" class="muted small" style="margin:6px 0"></div>
+        <div id="llist"></div>
+      </section>
+
+      <section id="s-obj" hidden>
+        <form id="of" class="grid2" role="search">
+          <label class="field" style="grid-column:1/3"><span class="label">NORAD ID, name or international designator</span><input id="oq" placeholder="25544, ISS, 1998-067A" autocomplete="off" spellcheck="false"></label>
+          <label class="field" style="grid-column:1/3"><span class="label">or a group</span><select id="og"><option value="">Choose a group…</option></select></label>
+          <div style="grid-column:1/3"><button class="btn primary sm">Search</button></div>
+        </form>
+        <div id="olist" style="margin-top:8px"><div class="state"><div class="h3">Look up an object</div><p>Search by NORAD catalog number, name, international designator or pick a group such as stations.</p></div></div>
+      </section>
+
+      <section id="s-rec" hidden>
+        <div class="seg" role="group" aria-label="List" style="width:100%"><button id="r-l" class="on" style="flex:1">Launched, 30 days</button><button id="r-d" style="flex:1">Lowest perigee</button></div>
+        <div id="rnote" class="muted small" style="margin:8px 0"></div>
+        <div id="rlist"></div>
+      </section>
+
+      <div class="links"><a href="/p/satellite/">Satellite scenes</a><a href="/p/doppler/">Doppler</a><span class="muted">for passes and tracking</span></div>
+      <p class="src">Launch data: <a href="https://thespacedevs.com" target="_blank" rel="noopener">Launch Library 2 / The Space Devs</a> (free tier, cached; times are estimates). Orbital data: <a href="https://celestrak.org" target="_blank" rel="noopener">CelesTrak</a> from US Space Force 18th SDS element sets (updated about every 2 h). Apogee and perigee here are two-body estimates. This page does not predict reentries.</p>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let map, padLayer, which = 'upcoming', launches = [], timer;
+    function toast(msg, kind = '') { const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg; $('toasts').append(t); setTimeout(() => t.remove(), 6000); }
+    async function api(path) { const r = await fetch(path), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+    const fmtT = iso => iso ? iso.replace('T', ' ').replace('Z', ' UTC') : 'TBD';
+    function countdown(sec) {
+      if (sec == null) return '';
+      const neg = sec < 0, s = Math.abs(sec), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+      const t = d ? `${d}d ${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m` : `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}`;
+      return (neg ? 'T+ ' : 'T- ') + t;
+    }
+    const badge = l => { const k = /success/i.test(l.status) ? 'ok' : /fail|partial/i.test(l.status) ? 'err' : /go/i.test(l.status_abbrev) ? 'ok' : 'warn'; return `<span class="badge ${k}">${esc(l.status || 'Unknown')}</span>`; };
+    function renderLaunches() {
+      const q = $('lq').value.trim().toLowerCase();
+      const list = launches.filter(l => !q || [l.name, l.provider, l.mission, l.pad, l.rocket, l.location].some(x => (x || '').toLowerCase().includes(q)));
+      $('lcount').textContent = `${list.length} of ${launches.length} ${which === 'upcoming' ? 'upcoming' : 'recent'} launches`;
+      const el = $('llist'); el.innerHTML = '';
+      if (!list.length) el.innerHTML = '<div class="state"><div class="h3">No launches</div><p>Nothing matches the filter.</p></div>';
+      for (const l of list) {
+        const d = document.createElement('div'); d.className = 'item click'; d.tabIndex = 0; d.setAttribute('role', 'button');
+        d.innerHTML = `<b>${esc(l.name)}</b> ${badge(l)}${l.seconds_to_net != null && which === 'upcoming' ? `<div class="cd" data-net="${esc(l.net)}">${countdown(l.seconds_to_net)}</div>` : ''}
+          <small>${esc(fmtT(l.net))}${l.net_precision && l.net_precision !== 'Minute' ? ' (' + esc(l.net_precision) + ')' : ''}</small>
+          <small>${esc([l.provider, l.rocket].filter(Boolean).join(' · '))}</small>
+          <small>${esc([l.pad, l.location].filter(Boolean).join(', '))}${l.orbit ? ' · ' + esc(l.orbit) : ''}${l.probability != null ? ' · ' + l.probability + '% go' : ''}</small>
+          ${l.hold_reason ? `<small class="warn-text">Hold: ${esc(l.hold_reason)}</small>` : ''}${l.fail_reason ? `<small class="warn-text">${esc(l.fail_reason)}</small>` : ''}
+          ${l.description ? `<p>${esc(l.description)}</p>` : ''}
+          <div class="links">${l.link ? `<a href="${esc(l.link)}" target="_blank" rel="noopener">Launch page</a>` : ''}${l.pad_map ? `<a href="${esc(l.pad_map)}" target="_blank" rel="noopener">Pad on map</a>` : ''}${l.pad_wiki ? `<a href="${esc(l.pad_wiki)}" target="_blank" rel="noopener">Pad wiki</a>` : ''}</div>`;
+        const go = e => { if (e.target.closest('a')) return; if (l.pad_lat != null) { map.setView([l.pad_lat, l.pad_lon], 7); if (innerWidth < 700) toggle(false); } };
+        d.onclick = go; d.onkeydown = e => { if (e.key === 'Enter') go(e); };
+        el.append(d);
+      }
+    }
+    async function loadLaunches() {
+      $('status').textContent = 'Loading…'; $('llist').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Loading launches…</div>';
+      try {
+        const d = await api('api/launches?limit=40&which=' + which);
+        launches = d.launches; renderLaunches();
+        $('status').textContent = (d.stale ? 'cached · ' : '') + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (d.stale) toast('Launch Library is unreachable or rate limited; showing a cached copy.', 'warn');
+      } catch (e) { $('status').textContent = 'Error'; $('lcount').textContent = ''; $('llist').innerHTML = `<div class="state error" role="alert"><div class="h3">Could not load launches</div><p>${esc(e.message)}</p><button class="btn sm" id="retry">Retry</button></div>`; $('retry').onclick = loadLaunches; }
+    }
+    async function loadPads() {
+      try {
+        const d = await api('api/pads'); padLayer.clearLayers();
+        for (const p of d.pads) L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', iconSize: [14, 14], iconAnchor: [7, 7], html: '<div class="pin"></div>' }) })
+          .bindPopup(`<b>${esc(p.pad)}</b><br>${esc(p.location || '')}<br>${p.launches} upcoming<br>Next: ${esc(p.next.name)}<br>${esc(fmtT(p.next.net))}`).addTo(padLayer);
+      } catch { /* the list shows the error */ }
+    }
+    function objCard(o) {
+      const c = o.catalog || {}, noEl = o.no_elements;
+      return `<div class="item"><b>${esc(o.name || c.name)}</b> <span class="badge">${o.norad_id}</span>${c.status ? ` <span class="badge ${c.decayed ? 'warn' : ''}">${esc(c.decayed ? 'Decayed' : c.status)}</span>` : ''}
+        <small>${esc([c.object_type, o.intl_designator, c.owner && 'owner ' + c.owner].filter(Boolean).join(' · '))}</small>
+        ${c.launch_date ? `<small>Launched ${esc(c.launch_date)}${c.launch_site ? ' from ' + esc(c.launch_site) : ''}${c.decay_date ? ' · decayed ' + esc(c.decay_date) : ''}</small>` : ''}
+        ${noEl ? '<small>No current element set (decayed or not tracked).</small>' : `<small>${esc(o.orbit_class)} · period ${o.period_min} min · inc ${o.inclination_deg?.toFixed(2)}° · ${Math.round(o.perigee_km)} × ${Math.round(o.apogee_km)} km</small>
+        <small>Epoch ${esc(fmtT(o.epoch))} (${o.epoch_age_days} d old) · ecc ${o.eccentricity} · ${o.mean_motion_rev_day.toFixed(4)} rev/day</small>`}</div>`;
+    }
+    async function runObj(qs) {
+      $('olist').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Searching…</div>';
+      try {
+        const d = await api('api/object?' + qs);
+        $('olist').innerHTML = (d.count ? `<div class="muted small">${d.count}${d.total > d.count ? ' of ' + d.total : ''} objects</div>` : '') + (d.objects.map(objCard).join('') || '<div class="state"><div class="h3">Nothing found</div></div>');
+      } catch (e) { $('olist').innerHTML = `<div class="state error" role="alert"><div class="h3">Search failed</div><p>${esc(e.message)}</p></div>`; }
+    }
+    $('of').onsubmit = e => {
+      e.preventDefault();
+      const g = $('og').value, q = $('oq').value.trim();
+      if (g) return runObj('group=' + encodeURIComponent(g));
+      if (!q) return toast('Enter an ID, name or designator, or choose a group.', 'warn');
+      if (/^\d{1,9}$/.test(q)) return runObj('catnr=' + q);
+      if (/^\d{4}-\d{3}[A-Za-z]{1,3}$/.test(q)) return runObj('intl=' + encodeURIComponent(q));
+      runObj('name=' + encodeURIComponent(q));
+    };
+    $('og').onchange = () => { if ($('og').value) $('oq').value = ''; };
+    let rmode = 'launched';
+    async function loadRec() {
+      $('rlist').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Loading…</div>';
+      $('rnote').textContent = rmode === 'launched' ? 'Objects catalogued as launched in the last 30 days (payloads, rocket bodies, debris).' : 'Active objects with the lowest perigee: a drag-exposure ranking, not a reentry prediction.';
+      try {
+        const d = await api('api/recent?list=' + rmode + '&limit=60');
+        $('rlist').innerHTML = (d.objects.map(objCard).join('')) || '<div class="state"><div class="h3">None</div></div>';
+      } catch (e) { $('rlist').innerHTML = `<div class="state error" role="alert"><div class="h3">Could not load</div><p>${esc(e.message)}</p></div>`; }
+    }
+    $('r-l').onclick = () => { rmode = 'launched'; $('r-l').classList.add('on'); $('r-d').classList.remove('on'); loadRec(); };
+    $('r-d').onclick = () => { rmode = 'decaying'; $('r-d').classList.add('on'); $('r-l').classList.remove('on'); loadRec(); };
+    function tab(id) {
+      for (const [t, s] of [['t-up', 's-launch'], ['t-prev', 's-launch'], ['t-obj', 's-obj'], ['t-rec', 's-rec']]) { $(t).setAttribute('aria-selected', String(t === id)); }
+      $('s-launch').hidden = !(id === 't-up' || id === 't-prev'); $('s-obj').hidden = id !== 't-obj'; $('s-rec').hidden = id !== 't-rec';
+      if (id === 't-up' || id === 't-prev') { which = id === 't-up' ? 'upcoming' : 'previous'; loadLaunches(); }
+      if (id === 't-rec') loadRec();
+    }
+    for (const id of ['t-up', 't-prev', 't-obj', 't-rec']) $(id).onclick = () => tab(id);
+    $('lq').oninput = renderLaunches;
+    function toggle(f) { const o = $('panel').classList.toggle('open', f); $('panelBtn').setAttribute('aria-expanded', String(o)); }
+    $('panelBtn').onclick = () => toggle();
+    setInterval(() => document.querySelectorAll('.cd[data-net]').forEach(e => { e.textContent = countdown(Math.round((Date.parse(e.dataset.net) - Date.now()) / 1000)); }), 1000);
+    (async () => {
+      ({ map } = await OSNT.createMap('map')); padLayer = L.layerGroup().addTo(map); map.setView([25, 0], 2);
+      api('api/sources').then(s => { for (const g of s.groups) $('og').insertAdjacentHTML('beforeend', `<option>${esc(g)}</option>`); }).catch(() => {});
+      loadLaunches(); loadPads();
+    })();
+  </script>
+</body>
+</html>

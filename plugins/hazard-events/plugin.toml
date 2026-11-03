@@ -1,0 +1,20 @@
+id = "hazard-events"
+name = "Hazard events"
+description = "One map of active disasters: GDACS alerts, NASA EONET, NWS alerts, volcano reports, active storms."
+grid = "Hazards"
+port = 8154
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_HAZARD_BIND = "127.0.0.1:{port}"
+OSNT_HAZARD_STATE = "{state_dir}"
+
+# Optional: ReliefWeb v2 only answers requests that carry an approved application name.
+[[secret]]
+name = "RELIEFWEB_APPNAME"
+label = "ReliefWeb approved appname (optional)"
+help_url = "https://apidoc.reliefweb.int/parameters#appname"
+required = false

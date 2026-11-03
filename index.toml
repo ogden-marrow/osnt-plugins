@@ -111,3 +111,31 @@ name = "Disaster imagery (Maxar Open Data)"
 description = "Browse Maxar's free event imagery for disasters and crises, and compare acquisitions before and after."
 version = "0.1.0"
 path = "plugins/opendata"
+
+[[plugin]]
+id = "quake-tsunami"
+name = "Earthquakes & tsunami"
+description = "Recent and historical earthquakes (USGS, EMSC) on a map, plus live PTWC/NTWC tsunami bulletins."
+version = "0.1.0"
+path = "plugins/quake-tsunami"
+
+[[plugin]]
+id = "hazard-events"
+name = "Hazard events"
+description = "One map of active disasters: GDACS alerts, NASA EONET, NWS alerts, volcano reports, active storms."
+version = "0.1.0"
+path = "plugins/hazard-events"
+
+[[plugin]]
+id = "fire-watch"
+name = "Fire watch"
+description = "Active-fire detections as clusters with FRP statistics, daily trends and area watches that flag new fires."
+version = "0.1.0"
+path = "plugins/fire-watch"
+
+[[plugin]]
+id = "space-watch"
+name = "Launches & orbital objects"
+description = "Upcoming and past rocket launches with a pad map, and CelesTrak orbital elements and catalog data by name, NORAD ID or group."
+version = "0.1.0"
+path = "plugins/space-watch"

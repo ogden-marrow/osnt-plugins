@@ -1,0 +1,20 @@
+id = "fire-watch"
+name = "Fire watch"
+description = "Active-fire detections as clusters with FRP statistics, daily trends and area watches that flag new fires."
+grid = "Hazards"
+port = 8155
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_FIRE_BIND = "127.0.0.1:{port}"
+OSNT_FIRE_STATE = "{state_dir}"
+
+# Optional: the free regional files need no key; a FIRMS MAP_KEY unlocks arbitrary-area queries for 1-10 days.
+[[secret]]
+name = "FIRMS_MAP_KEY"
+label = "NASA FIRMS MAP_KEY (optional)"
+help_url = "https://firms.modaps.eosdis.nasa.gov/api/map_key/"
+required = false

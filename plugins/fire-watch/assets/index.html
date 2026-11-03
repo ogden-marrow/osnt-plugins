@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <title>Fire watch · OSNT</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 360px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px 20px; font-size: 13px; }
+    aside h2 { margin: 18px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    aside h2:first-child { margin-top: 0; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .field > .label { margin-bottom: 2px; font-size: 12px; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat { background: var(--surface-2); border: 1px solid var(--edge); border-radius: var(--radius-sm); padding: 8px 10px; }
+    .stat b { display: block; font: 650 17px/1.2 var(--font); font-variant-numeric: tabular-nums; }
+    .stat span { color: var(--ink-2); font-size: 11.5px; }
+    .bars { display: flex; align-items: flex-end; gap: 4px; height: 64px; padding: 4px 0; }
+    .bars div { flex: 1; min-width: 6px; background: var(--accent); border-radius: 3px 3px 0 0; position: relative; }
+    .bars + .bars-l { display: flex; gap: 4px; font-size: 10.5px; color: var(--ink-3); }
+    .bars-l span { flex: 1; text-align: center; overflow: hidden; }
+    .split { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-3); margin: 6px 0 2px; }
+    .split i { background: var(--warn); } .split i + i { background: var(--link); }
+    .item { padding: 9px 11px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; line-height: 1.4; }
+    .item:hover, .item:focus-visible { border-color: var(--edge-strong); }
+    .item b { font-weight: 600; } .item small { display: block; color: var(--ink-2); font-size: 12px; }
+    .src { color: var(--ink-3); font-size: 11.5px; line-height: 1.5; margin-top: 16px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(0,0,0,.35); }
+    #panelBtn { display: none; }
+    @media (max-width: 700px) {
+      #panelBtn { display: inline-flex; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 64dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); padding-bottom: 28px; }
+      aside#panel.open { display: block; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Fire watch</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Ready</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Panel</button></div>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map" role="application" aria-label="Fire map"></div>
+    <aside id="panel" aria-label="Fire controls">
+      <h2>Area and window</h2>
+      <p class="muted small" style="margin:0 0 8px">Pan and zoom the map, then analyse the current view. Regional boxes allow 7 days; the whole world is 24 or 48 h.</p>
+      <div class="grid2">
+        <label class="field"><span class="label">Window</span><select id="window"><option value="24h">Last 24 h</option><option value="48h">Last 48 h</option><option value="7d">Last 7 days (regional)</option></select></label>
+        <label class="field"><span class="label">Satellite</span><select id="sensor"><option value="snpp">Suomi NPP</option><option value="noaa20">NOAA-20</option><option value="noaa21">NOAA-21</option></select></label>
+        <label class="field"><span class="label">Min FRP (MW)</span><input id="minfrp" type="number" min="0" step="0.5" value="0" inputmode="decimal"></label>
+        <label class="field"><span class="label">Min confidence</span><select id="conf"><option value="">Any</option><option value="nominal">Nominal+</option><option value="high">High</option></select></label>
+        <label class="field"><span class="label">Link within (km)</span><input id="eps" type="number" min="0.5" max="20" step="0.5" value="2"></label>
+        <label class="field" id="daysF" hidden><span class="label">Days (key)</span><input id="days" type="number" min="1" max="10" placeholder="1-10"></label>
+      </div>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button id="go" class="btn primary sm">Analyse this view</button><button id="pts" class="btn sm" aria-pressed="false">Show detections</button></div>
+
+      <div id="out" aria-live="polite">
+        <div class="state" style="margin-top:14px"><div class="h3">No analysis yet</div><p>Choose a window and press Analyse this view.</p></div>
+      </div>
+
+      <h2>Watches</h2>
+      <div id="watches" class="muted">Loading…</div>
+      <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><input id="wname" placeholder="Watch name" maxlength="60" style="flex:1 1 140px"><button id="wadd" class="btn sm">Watch this view</button><button id="wcheck" class="btn sm">Check now</button></div>
+      <div class="muted small" style="margin-top:4px">A watch records the fires present now and flags clusters that appear later (checked every 30 min).</div>
+
+      <h2>Legend</h2>
+      <div class="legend"><span><i style="background:#f1d34a"></i>&lt; 30 MW</span><span><i style="background:#f5a524"></i>30&ndash;150</span><span><i style="background:#e5484d"></i>150&ndash;500</span><span><i style="background:#9b1c4a"></i>&gt; 500 MW</span></div>
+      <div class="muted small" style="margin-top:4px">Circle size grows with the cluster's total fire radiative power. See also the <a href="/p/imagery/">Imagery timeline</a> for satellite pictures of the same places.</div>
+
+      <p class="src">Fire detections: <a href="https://firms.modaps.eosdis.nasa.gov" target="_blank" rel="noopener">NASA FIRMS</a> VIIRS 375 m (public domain; please acknowledge NASA FIRMS). Detections include gas flares and other industrial heat, and clouds hide fires; they are not confirmed wildfires. Not an official warning source.</p>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let map, layer, ptsLayer, showPts = false, last = null;
+    function toast(msg, kind = '') { const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg; $('toasts').append(t); setTimeout(() => t.remove(), 6000); }
+    async function api(path, opt) { const r = await fetch(path, opt), d = await r.json().catch(() => ({})); if (!r.ok) { const e = new Error(d.error || ('HTTP ' + r.status)); e.status = r.status; throw e; } return d; }
+    const frpColour = f => f < 30 ? '#f1d34a' : f < 150 ? '#f5a524' : f < 500 ? '#e5484d' : '#9b1c4a';
+    const view = () => { const b = map.getBounds(); const c = v => Math.max(-180, Math.min(180, v)), l = v => Math.max(-90, Math.min(90, v)); return [c(b.getWest()), l(b.getSouth()), c(b.getEast()), l(b.getNorth())].map(x => +x.toFixed(3)).join(','); };
+    function qs() {
+      const p = new URLSearchParams({ bbox: view(), window: $('window').value, sensor: $('sensor').value, eps_km: $('eps').value || '2' });
+      if ($('minfrp').value > 0) p.set('min_frp', $('minfrp').value); if ($('conf').value) p.set('confidence', $('conf').value); if ($('days').value) p.set('days', $('days').value);
+      return p;
+    }
+    const ago = iso => { const s = (Date.now() - Date.parse(iso)) / 1000; return s < 3600 ? Math.max(1, Math.round(s / 60)) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago'; };
+    function drawStats(d) {
+      const s = d.stats, tl = s.timeline, max = Math.max(1, ...tl.map(t => t.detections));
+      const dn = s.detections ? Math.round(100 * s.night / s.detections) : 0;
+      $('out').innerHTML = `<h2>Summary</h2><div class="cards">
+        <div class="stat"><b>${s.clusters.toLocaleString()}</b><span>fire clusters</span></div>
+        <div class="stat"><b>${s.detections.toLocaleString()}</b><span>detections</span></div>
+        <div class="stat"><b>${Math.round(s.frp_total_mw).toLocaleString()}</b><span>total FRP, MW</span></div>
+        <div class="stat"><b>${s.frp_max_mw}</b><span>peak FRP, MW</span></div>
+        <div class="stat"><b>${s.frp_mean_mw}</b><span>mean FRP, MW</span></div>
+        <div class="stat"><b>${s.confidence.high.toLocaleString()}</b><span>high confidence</span></div></div>
+        <div class="muted small" style="margin-top:8px">Day / night: ${s.day.toLocaleString()} day, ${s.night.toLocaleString()} night (${dn}% night)</div>
+        <div class="split" role="img" aria-label="${dn}% of detections at night"><i style="width:${100 - dn}%"></i><i style="width:${dn}%"></i></div>
+        <h2>Detections per day (UTC)</h2>
+        ${tl.length ? `<div class="bars" role="img" aria-label="Detections per day">${tl.map(t => `<div title="${esc(t.date)}: ${t.detections} detections, ${t.frp_mw} MW" style="height:${Math.max(4, 100 * t.detections / max)}%"></div>`).join('')}</div><div class="bars-l">${tl.map(t => `<span>${esc(t.date.slice(5))}</span>`).join('')}</div>` : '<div class="muted">No detections in this window.</div>'}
+        <h2>Largest clusters</h2><div id="clist"></div>
+        <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><a class="btn sm" id="xg" href="#">GeoJSON</a><a class="btn sm" id="xc" href="#">CSV</a></div>
+        <p class="muted small" style="margin:8px 0 0">${esc(d.meta.source)}${d.meta.stale ? ' (cached copy: the data service is unreachable)' : ''}${d.meta.truncated ? ' · result truncated at the row cap' : ''}</p>`;
+      const p = qs(); $('xg').href = 'api/export?' + p + '&format=geojson'; $('xc').href = 'api/export?' + p + '&format=csv';
+      const list = $('clist');
+      if (!d.clusters.length) list.innerHTML = '<div class="state"><div class="h3">No fires detected</div><p>Nothing in this view and window, or clouds and filters hid it.</p></div>';
+      d.clusters.slice(0, 40).forEach(c => {
+        const el = document.createElement('div'); el.className = 'item'; el.tabIndex = 0; el.setAttribute('role', 'button');
+        el.innerHTML = `<b>${c.lat.toFixed(3)}, ${c.lon.toFixed(3)}</b><small>${c.count} detections · ${Math.round(c.frp_total)} MW total (peak ${c.frp_max}) · ${c.night} night</small><small>last ${ago(c.last)} · radius ${c.radius_km} km</small>`;
+        const go = () => { map.setView([c.lat, c.lon], 10); if (innerWidth < 700) toggle(false); };
+        el.onclick = go; el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+        list.append(el);
+      });
+    }
+    function drawMap(d) {
+      layer.clearLayers(); ptsLayer.clearLayers();
+      for (const c of d.clusters) L.circleMarker([c.lat, c.lon], { radius: Math.max(5, Math.min(26, 3 + 1.6 * Math.sqrt(c.frp_total))), color: '#10151a', weight: 1, fillColor: frpColour(c.frp_total), fillOpacity: .72 })
+        .bindPopup(`<b>${c.count} detections</b><br>${Math.round(c.frp_total)} MW total, peak ${c.frp_max} MW<br>${c.day} day / ${c.night} night · ${c.high_confidence} high confidence<br>First ${esc(c.first.replace('T', ' ').replace('Z', ' UTC'))}<br>Last ${esc(c.last.replace('T', ' ').replace('Z', ' UTC'))} (${ago(c.last)})<br>Radius ${c.radius_km} km`).addTo(layer);
+      for (const h of d.points || []) L.circleMarker([h.lat, h.lon], { radius: 2.5, color: frpColour(h.frp), weight: 1, fillOpacity: .9 }).bindPopup(`${h.frp} MW · ${esc(h.confidence)} · ${h.night ? 'night' : 'day'}<br>${esc(h.time.replace('T', ' ').replace('Z', ' UTC'))}`).addTo(ptsLayer);
+    }
+    async function analyse() {
+      $('status').textContent = 'Analysing…'; $('go').disabled = true;
+      $('out').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Reading fire detections…</div>';
+      try {
+        const p = qs(); if (showPts) p.set('points', '1');
+        const d = await api('api/fires?' + p); last = d;
+        drawMap(d); drawStats(d);
+        $('status').textContent = `${d.stats.clusters} clusters · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      } catch (e) {
+        $('status').textContent = 'Error'; toast(e.message, 'err');
+        $('out').innerHTML = `<div class="state error" role="alert" style="margin-top:14px"><div class="h3">Analysis failed</div><p>${esc(e.message)}</p></div>`;
+      } finally { $('go').disabled = false; }
+    }
+    async function watches() {
+      try {
+        const d = await api('api/watches');
+        $('watches').innerHTML = d.watches.length ? '' : 'No watches yet.';
+        for (const w of d.watches) {
+          const el = document.createElement('div'); el.className = 'item'; el.style.cursor = 'default';
+          el.innerHTML = `<b>${esc(w.name)}</b> ${w.new_count ? `<span class="badge err">${w.new_count} new</span>` : '<span class="badge ok">no new fires</span>'}
+            <small>${w.clusters_now} clusters now · ${w.new_total} new since created · ${w.last_check ? 'checked ' + ago(w.last_check) : 'not checked'}</small>
+            ${w.last_error ? `<small class="warn-text">${esc(w.last_error)}</small>` : ''}
+            ${(w.new_clusters || []).slice(0, 5).map(c => `<small><a href="#" data-ll="${c.lat},${c.lon}">${c.lat.toFixed(3)}, ${c.lon.toFixed(3)}</a> · ${c.count} det · ${Math.round(c.frp_total)} MW</small>`).join('')}
+            <div class="row" style="gap:6px;margin-top:6px"><button class="btn sm" data-box="${w.bbox.join(',')}">Show</button><button class="btn sm" data-del="${esc(w.id)}">Delete</button></div>`;
+          $('watches').append(el);
+        }
+        $('watches').querySelectorAll('[data-box]').forEach(b => b.onclick = () => { const [w, s, e, n] = b.dataset.box.split(',').map(Number); map.fitBounds([[s, w], [n, e]]); });
+        $('watches').querySelectorAll('[data-ll]').forEach(a => a.onclick = ev => { ev.preventDefault(); map.setView(a.dataset.ll.split(',').map(Number), 11); });
+        $('watches').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { try { await api('api/watches/' + b.dataset.del, { method: 'DELETE' }); watches(); } catch (e) { toast(e.message, 'err'); } });
+      } catch (e) { $('watches').textContent = e.status === 401 ? 'Sign in to the hub to use watches.' : 'Watches unavailable: ' + e.message; }
+    }
+    $('wadd').onclick = async () => {
+      const name = $('wname').value.trim(); if (!name) return toast('Name the watch first.', 'warn');
+      try { await api('api/watches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, bbox: view(), min_frp: +$('minfrp').value || 0 }) }); $('wname').value = ''; toast('Watch saved; current fires recorded as the baseline.'); watches(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    $('wcheck').onclick = async () => { try { await api('api/watches/check', { method: 'POST' }); watches(); } catch (e) { toast(e.message, 'err'); } };
+    $('go').onclick = () => { analyse(); if (innerWidth < 700) toggle(false); };
+    $('pts').onclick = () => { showPts = !showPts; $('pts').setAttribute('aria-pressed', String(showPts)); $('pts').classList.toggle('primary', showPts); analyse(); };
+    function toggle(f) { const o = $('panel').classList.toggle('open', f); $('panelBtn').setAttribute('aria-expanded', String(o)); }
+    $('panelBtn').onclick = () => toggle();
+    (async () => {
+      ({ map } = await OSNT.createMap('map')); layer = L.layerGroup().addTo(map); ptsLayer = L.layerGroup().addTo(map);
+      map.setView([39, -100], 4);
+      try { const i = await api('api/info'); $('daysF').hidden = !i.map_key_configured; } catch {}
+      watches(); analyse(); setInterval(watches, 120000);
+    })();
+  </script>
+</body>
+</html>

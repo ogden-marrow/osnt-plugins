@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <title>Hazard events · OSNT</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 340px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px 20px; font-size: 13px; }
+    aside h2 { margin: 18px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    aside h2:first-child { margin-top: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 1px solid var(--edge-strong); border-radius: 999px; background: var(--surface-2); font-size: 12.5px; cursor: pointer; color: var(--ink); }
+    .chip input { margin: 0; width: 14px; height: 14px; }
+    .chip i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(0,0,0,.4); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .field > .label { margin-bottom: 2px; font-size: 12px; }
+    .item { padding: 9px 11px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; line-height: 1.4; }
+    .item:hover, .item:focus-visible { border-color: var(--edge-strong); }
+    .item.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .item b { font-weight: 600; overflow-wrap: anywhere; }
+    .item small { display: block; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+    .src { color: var(--ink-3); font-size: 11.5px; line-height: 1.5; margin-top: 16px; }
+    .srcs { display: grid; gap: 4px; font-size: 12px; }
+    .srcs div { display: flex; justify-content: space-between; gap: 8px; }
+    .pin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #10151a; box-shadow: 0 0 0 1px rgba(255,255,255,.7); }
+    #panelBtn { display: none; }
+    @media (max-width: 700px) {
+      #panelBtn { display: inline-flex; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 62dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); padding-bottom: 28px; }
+      aside#panel.open { display: block; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Hazard events</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Loading…</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Panel</button></div>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map" role="application" aria-label="Hazard map"></div>
+    <aside id="panel" aria-label="Hazard controls">
+      <h2>Hazard types</h2>
+      <div id="types" class="chips" role="group" aria-label="Hazard types"></div>
+      <h2>Minimum alert level</h2>
+      <label class="sr-only" for="level">Minimum alert level</label>
+      <select id="level" style="width:100%"><option value="">All levels</option><option value="yellow">Yellow and up</option><option value="orange">Orange and up</option><option value="red">Red only</option></select>
+      <label class="check" style="margin-top:8px;display:flex;gap:8px;align-items:center"><input id="green" type="checkbox"> Include GDACS green alerts</label>
+      <h2>US weather alerts (NWS)</h2>
+      <div class="grid2">
+        <label class="field"><span class="label">State code</span><input id="area" maxlength="2" placeholder="CA" autocapitalize="characters" spellcheck="false"></label>
+        <div style="display:flex;align-items:flex-end"><button id="here" class="btn sm" style="width:100%">At map centre</button></div>
+      </div>
+      <div class="muted small" style="margin-top:4px">Alerts are added to the list and map when set. US only.</div>
+      <div class="row" style="margin-top:10px;gap:8px"><button id="refresh" class="btn sm primary">Refresh</button><button id="clearNws" class="btn sm">Clear alerts</button></div>
+      <h2>Sources</h2>
+      <div id="srcs" class="srcs muted">Loading…</div>
+      <h2 id="listTitle">Events</h2>
+      <div id="count" class="muted" style="margin-bottom:4px"></div>
+      <div id="list"></div>
+      <p class="src">Data: GDACS (EC JRC / UN OCHA), NASA EONET, NOAA/NWS, Smithsonian Global Volcanism Program with USGS (weekly report), USGS Volcano Hazards Program, NOAA National Hurricane Center, and ReliefWeb (OCHA) when configured. Informational only; not an official warning channel. Follow your local authorities.</p>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const TYPES = { earthquake: ['Earthquake', '#c2410c'], cyclone: ['Cyclone', '#2563eb'], flood: ['Flood', '#0891b2'], volcano: ['Volcano', '#dc2626'], drought: ['Drought', '#a16207'], wildfire: ['Wildfire', '#ea580c'], storm: ['Storm', '#7c3aed'], ice: ['Ice', '#64748b'], landslide: ['Landslide', '#78350f'], dust: ['Dust', '#ca8a04'], 'weather-alert': ['NWS alert', '#0d9488'], other: ['Other', '#6b7280'] };
+    const LEVEL = { red: '#e5484d', orange: '#f5a524', yellow: '#f1d34a', green: '#3fb97a' };
+    let map, layer, events = [], markers = new Map(), enabled = new Set(Object.keys(TYPES)), nws = null, seq = 0;
+    function toast(msg, kind = '') { const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg; $('toasts').append(t); setTimeout(() => t.remove(), 6000); }
+    function ago(iso) { if (!iso) return ''; const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000); return s < 3600 ? Math.max(1, Math.round(s / 60)) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago'; }
+    async function api(path) { const r = await fetch(path), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+    const pinColour = e => LEVEL[e.level] || (TYPES[e.hazard] || TYPES.other)[1];
+    function popup(e) {
+      const b = [`<b>${esc(e.title)}</b>`, `${esc((TYPES[e.hazard] || TYPES.other)[0])} · ${esc(e.source.toUpperCase())}${e.level ? ' · ' + esc(e.level) + ' alert' : ''}`];
+      if (e.time) b.push(esc(e.time.replace('T', ' ').replace('Z', ' UTC')) + ' (' + ago(e.time) + ')');
+      for (const k of ['severity', 'magnitude', 'area', 'observatory', 'alert_level', 'report_type']) if (e[k]) b.push(esc(k.replace('_', ' ')) + ': ' + esc(e[k]));
+      if (e.countries?.length) b.push(esc(e.countries.join(', ')));
+      if (e.summary) b.push(esc(e.summary));
+      if (e.url) b.push(`<a href="${esc(e.url)}" target="_blank" rel="noopener">Source page</a>`);
+      return b.join('<br>');
+    }
+    function render() {
+      layer.clearLayers(); markers.clear();
+      const shown = events.filter(e => enabled.has(e.hazard));
+      for (const e of shown) {
+        if (e.lat == null) continue;
+        if (e.track?.length > 1) L.polyline(e.track, { color: pinColour(e), weight: 2, opacity: .7, dashArray: '4 4' }).addTo(layer);
+        const m = L.marker([e.lat, e.lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: `<div class="pin" style="background:${pinColour(e)}"></div>` }) }).bindPopup(popup(e)).addTo(layer);
+        markers.set(e.id, m);
+      }
+      const list = $('list'); list.innerHTML = '';
+      if (!shown.length) list.innerHTML = '<div class="state"><div class="h3">No events</div><p>Nothing active matches these filters, or the feeds are quiet.</p></div>';
+      for (const e of shown.slice(0, 200)) {
+        const d = document.createElement('div'); d.className = 'item'; d.tabIndex = 0; d.setAttribute('role', 'button');
+        d.innerHTML = `<b>${esc(e.title)}</b><small><span class="badge ${e.level === 'red' ? 'err' : e.level === 'orange' || e.level === 'yellow' ? 'warn' : e.level === 'green' ? 'ok' : ''}">${esc(e.level || (TYPES[e.hazard] || TYPES.other)[0])}</span> ${esc((TYPES[e.hazard] || TYPES.other)[0])} · ${esc(e.source.toUpperCase())} · ${ago(e.time)}</small>${e.summary ? `<small>${esc(e.summary.slice(0, 110))}</small>` : ''}`;
+        const go = () => { const m = markers.get(e.id); if (m) { map.setView(m.getLatLng(), Math.max(map.getZoom(), 5)); m.openPopup(); if (innerWidth < 700) togglePanel(false); } else toast('This event has no map position; see its source page.'); };
+        d.onclick = go; d.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } };
+        list.append(d);
+      }
+      $('count').textContent = `${shown.length} shown of ${events.length}`;
+    }
+    function typeChips() {
+      const counts = {}; for (const e of events) counts[e.hazard] = (counts[e.hazard] || 0) + 1;
+      $('types').innerHTML = Object.entries(TYPES).filter(([k]) => counts[k] || !events.length).map(([k, [n, c]]) =>
+        `<label class="chip"><input type="checkbox" data-k="${k}" ${enabled.has(k) ? 'checked' : ''}><i style="background:${c}"></i>${n} <span class="muted">${counts[k] || 0}</span></label>`).join('');
+      $('types').querySelectorAll('input').forEach(i => i.onchange = () => { i.checked ? enabled.add(i.dataset.k) : enabled.delete(i.dataset.k); render(); });
+    }
+    async function load() {
+      const my = ++seq; $('status').textContent = 'Loading…';
+      try {
+        const p = new URLSearchParams({ limit: '1000' });
+        let srcs = 'gdacs,eonet,gvp,hans,nhc'; if (nws) srcs += ',nws';
+        p.set('sources', srcs); if ($('level').value) p.set('level', $('level').value); if ($('green').checked) p.set('gdacs_green', '1');
+        if (nws) for (const [k, v] of Object.entries(nws)) p.set(k, v);
+        const d = await api('api/active?' + p);
+        if (my !== seq) return;
+        events = d.events; typeChips(); render();
+        $('srcs').innerHTML = d.sources.map(s => `<div><span>${esc(s.source)}</span><span class="${s.ok ? '' : 'warn-text'}">${s.ok ? s.count + ' events' + (s.stale ? ' (cached)' : '') : esc(s.error)}</span></div>`).join('');
+        $('status').textContent = `${d.count} events · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        const bad = d.sources.filter(s => !s.ok); if (bad.length) toast(bad.length + ' source(s) did not answer; see Sources.', 'warn');
+      } catch (err) {
+        if (my !== seq) return;
+        $('status').textContent = 'Error'; toast(err.message, 'err'); events = []; render();
+        $('list').innerHTML = `<div class="state error" role="alert"><div class="h3">Could not load hazards</div><p>${esc(err.message)}</p><button class="btn sm" onclick="load()">Retry</button></div>`;
+      }
+    }
+    function togglePanel(f) { const o = $('panel').classList.toggle('open', f); $('panelBtn').setAttribute('aria-expanded', String(o)); }
+    $('panelBtn').onclick = () => togglePanel();
+    $('refresh').onclick = () => { const a = $('area').value.trim().toUpperCase(); if (a) { if (!/^[A-Z]{2}$/.test(a)) return toast('State code must be two letters.', 'err'); nws = { area: a }; } load(); };
+    $('here').onclick = () => { const c = map.getCenter(); nws = { lat: c.lat.toFixed(3), lon: (((c.lng + 540) % 360) - 180).toFixed(3) }; $('area').value = ''; load(); };
+    $('clearNws').onclick = () => { nws = null; $('area').value = ''; load(); };
+    $('level').onchange = load; $('green').onchange = load;
+    (async () => { ({ map } = await OSNT.createMap('map')); layer = L.layerGroup().addTo(map); map.setView([20, 10], 2); typeChips(); load(); setInterval(load, 300000); })();
+  </script>
+</body>
+</html>

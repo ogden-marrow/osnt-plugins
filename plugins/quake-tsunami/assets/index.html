@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <title>Earthquakes &amp; tsunami · OSNT</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 340px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px 20px; font-size: 13px; }
+    aside h2 { margin: 18px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    aside h2:first-child { margin-top: 0; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .grid2 .field input, .grid2 .field select { min-height: 34px; }
+    .field > .label { margin-bottom: 2px; font-size: 12px; }
+    .item { padding: 9px 11px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; line-height: 1.4; display: grid; grid-template-columns: 46px 1fr; gap: 10px; align-items: start; }
+    .item:hover, .item:focus-visible { border-color: var(--edge-strong); }
+    .item.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .mag { font: 650 15px/1 var(--font); font-variant-numeric: tabular-nums; text-align: center; padding: 7px 0; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--edge-strong); }
+    .item b { font-weight: 600; overflow-wrap: anywhere; }
+    .item small { display: block; color: var(--ink-2); font-size: 12px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.35); }
+    #tsunami { padding: 0 var(--gutter); }
+    #tsunami:empty { display: none; }
+    #tsunami .notice { margin: 8px 0 0; align-items: center; flex-wrap: wrap; }
+    #tsunami .notice:last-child { margin-bottom: 8px; }
+    .src { color: var(--ink-3); font-size: 11.5px; line-height: 1.5; margin-top: 16px; }
+    .cat { font-weight: 650; }
+    #panelBtn { display: none; }
+    .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
+    @media (max-width: 700px) {
+      #tsunami { padding: 0 16px; }
+      #panelBtn { display: inline-flex; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 62dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); padding-bottom: 28px; }
+      aside#panel.open { display: block; }
+      .topbar h1 { font-size: 14px; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Earthquakes &amp; tsunami</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Loading…</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Panel</button></div>
+  </header>
+  <div id="tsunami" aria-live="polite"></div>
+  <div id="layout" class="fill map-box">
+    <div id="map" role="application" aria-label="Earthquake map"></div>
+    <aside id="panel" aria-label="Earthquake controls">
+      <div class="seg" role="group" aria-label="Mode" style="width:100%">
+        <button id="mRecent" class="on" style="flex:1">Recent</button>
+        <button id="mArea" style="flex:1">Area history</button>
+      </div>
+
+      <div id="recentBox">
+        <h2>Feed</h2>
+        <div class="grid2">
+          <label class="field"><span class="label">Source</span><select id="source"><option value="usgs">USGS</option><option value="emsc">EMSC (Euro-Med)</option></select></label>
+          <label class="field"><span class="label">Period</span><select id="period"><option value="hour">Past hour</option><option value="day" selected>Past day</option><option value="week">Past week</option><option value="month">Past month</option></select></label>
+          <label class="field" id="levelF" style="grid-column:1/3"><span class="label">USGS feed</span><select id="level"><option value="significant">Significant events</option><option value="4.5">M4.5 and up</option><option value="2.5" selected>M2.5 and up</option><option value="1.0">M1.0 and up (busy)</option></select></label>
+        </div>
+      </div>
+
+      <div id="areaBox" hidden>
+        <h2>Area and time</h2>
+        <div class="grid2">
+          <label class="field"><span class="label">Latitude</span><input id="lat" type="number" step="any" min="-90" max="90" inputmode="decimal"></label>
+          <label class="field"><span class="label">Longitude</span><input id="lon" type="number" step="any" min="-180" max="180" inputmode="decimal"></label>
+          <label class="field"><span class="label">Radius (km)</span><input id="rad" type="number" min="1" max="5000" value="300"></label>
+          <label class="field"><span class="label">Look back (days)</span><input id="days" type="number" min="1" max="3650" value="7"></label>
+          <label class="field" style="grid-column:1/3"><span class="label">Source</span><select id="asource"><option value="usgs">USGS ComCat</option><option value="emsc">EMSC</option></select></label>
+        </div>
+        <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><button id="useCentre" class="btn sm">Use map centre</button><button id="runArea" class="btn sm primary">Search area</button></div>
+      </div>
+
+      <h2>Filters</h2>
+      <div class="grid2">
+        <label class="field"><span class="label">Min magnitude</span><input id="minmag" type="number" step="0.1" min="-2" max="10" inputmode="decimal"></label>
+        <label class="field"><span class="label">Max magnitude</span><input id="maxmag" type="number" step="0.1" min="-2" max="10" inputmode="decimal"></label>
+        <label class="field"><span class="label">Min depth (km)</span><input id="mindepth" type="number" min="0" max="800" inputmode="decimal"></label>
+        <label class="field"><span class="label">Max depth (km)</span><input id="maxdepth" type="number" min="0" max="800" inputmode="decimal"></label>
+      </div>
+      <div class="row" style="margin-top:8px"><button id="apply" class="btn sm primary">Apply</button></div>
+
+      <h2>Legend</h2>
+      <div class="legend" aria-label="Depth colours"><span><i style="background:#e5484d"></i>&lt; 35 km</span><span><i style="background:#f5a524"></i>35&ndash;70</span><span><i style="background:#f1d34a"></i>70&ndash;150</span><span><i style="background:#3fb97a"></i>150&ndash;300</span><span><i style="background:#4d8ee6"></i>&gt; 300 km</span></div>
+      <div class="muted small" style="margin-top:4px">Circle size grows with magnitude.</div>
+
+      <h2 id="listTitle">Events</h2>
+      <div id="count" class="muted" style="margin-bottom:4px"></div>
+      <div id="list"></div>
+
+      <h2>Tsunami bulletins</h2>
+      <div id="bulletins" class="muted">Loading…</div>
+
+      <p class="src">Earthquakes: <a href="https://earthquake.usgs.gov" target="_blank" rel="noopener">USGS</a> (public domain) and <a href="https://www.emsc-csem.org" target="_blank" rel="noopener">EMSC</a> (attribution required; contributing agencies keep rights to their solutions). Tsunami messages: <a href="https://www.tsunami.gov" target="_blank" rel="noopener">NOAA/NWS PTWC and NTWC</a>. This page is not an official warning channel; follow your local authorities.</p>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    // Relative URLs throughout: the hub mounts this page at /p/quake-tsunami/.
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let map, layer, mode = 'recent', events = [], markers = new Map(), selected = null, seq = 0;
+
+    function toast(msg, kind = '') {
+      const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg; $('toasts').append(t);
+      setTimeout(() => t.remove(), 6000);
+    }
+    const depthColour = d => d == null ? '#9aa5b1' : d < 35 ? '#e5484d' : d < 70 ? '#f5a524' : d < 150 ? '#f1d34a' : d < 300 ? '#3fb97a' : '#4d8ee6';
+    const radius = m => m == null ? 4 : Math.max(3, Math.min(30, 2.2 * m + 2));
+    function ago(ms) {
+      const s = Math.max(0, (Date.now() - ms) / 1000);
+      if (s < 90) return 'just now';
+      if (s < 3600) return Math.round(s / 60) + ' min ago';
+      if (s < 86400) return Math.round(s / 3600) + ' h ago';
+      return Math.round(s / 86400) + ' d ago';
+    }
+    const num = id => { const v = $(id).value.trim(); return v === '' ? '' : v; };
+    function filterQS() {
+      const p = new URLSearchParams();
+      for (const k of ['minmag', 'maxmag', 'mindepth', 'maxdepth']) if (num(k) !== '') p.set(k, num(k));
+      return p;
+    }
+    async function api(path) {
+      const r = await fetch(path), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      return d;
+    }
+
+    function popup(e) {
+      const bits = [`<b>M ${e.mag == null ? '?' : e.mag.toFixed(1)}</b> ${esc(e.mag_type || '')}`, esc(e.place || 'Unnamed location'),
+        `${esc(e.time.replace('T', ' ').replace('Z', ' UTC'))} (${ago(e.time_ms)})`, `Depth ${e.depth_km == null ? '?' : e.depth_km.toFixed(1)} km`];
+      if (e.felt) bits.push(`Felt reports: ${e.felt}`);
+      if (e.alert) bits.push(`PAGER alert: ${esc(e.alert)}`);
+      if (e.tsunami) bits.push('<b>Tsunami flag set by USGS</b>');
+      if (e.url) bits.push(`<a href="${esc(e.url)}" target="_blank" rel="noopener">Event page</a>`);
+      return bits.join('<br>');
+    }
+
+    function render() {
+      layer.clearLayers(); markers.clear();
+      const list = $('list'); list.innerHTML = '';
+      const big = [...events].sort((a, b) => (a.mag ?? -9) - (b.mag ?? -9)); // draw big ones on top
+      for (const e of big) {
+        const m = L.circleMarker([e.lat, e.lon], { radius: radius(e.mag), color: '#10151a', weight: 1, fillColor: depthColour(e.depth_km), fillOpacity: .72 })
+          .bindPopup(popup(e)).on('click', () => mark(e.id, false)).addTo(layer);
+        markers.set(e.id, m);
+      }
+      if (!events.length) { list.innerHTML = '<div class="state"><div class="h3">No earthquakes match</div><p>Loosen the filters, choose a longer period, or a lower USGS feed level.</p></div>'; }
+      for (const e of events.slice(0, 150)) {
+        const d = document.createElement('div'); d.className = 'item'; d.tabIndex = 0; d.dataset.id = e.id; d.setAttribute('role', 'button');
+        d.innerHTML = `<div class="mag" style="border-color:${depthColour(e.depth_km)}">${e.mag == null ? '?' : e.mag.toFixed(1)}</div>
+          <div><b>${esc(e.place || 'Unnamed location')}</b><small>${ago(e.time_ms)} · ${e.depth_km == null ? '?' : Math.round(e.depth_km)} km deep · ${esc(e.source.toUpperCase())}${e.felt ? ' · felt ' + e.felt : ''}${e.tsunami ? ' · tsunami flag' : ''}</small></div>`;
+        const go = () => { mark(e.id, true); if (innerWidth < 700) togglePanel(false); };
+        d.onclick = go; d.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } };
+        list.append(d);
+      }
+      if (events.length > 150) list.insertAdjacentHTML('beforeend', `<div class="muted small">Showing the 150 newest of ${events.length} in the list; all are on the map.</div>`);
+    }
+    function mark(id, fly) {
+      selected = id;
+      document.querySelectorAll('.item').forEach(i => i.classList.toggle('on', i.dataset.id === id));
+      const m = markers.get(id); if (!m) return;
+      if (fly) map.setView(m.getLatLng(), Math.max(map.getZoom(), 6));
+      m.openPopup();
+      document.querySelector(`.item[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' });
+    }
+
+    async function load(fit) {
+      const my = ++seq;
+      $('status').textContent = 'Loading…'; $('count').textContent = '';
+      try {
+        let d;
+        if (mode === 'recent') {
+          const p = filterQS(); p.set('source', $('source').value); p.set('period', $('period').value); p.set('limit', '500');
+          if ($('source').value === 'usgs') p.set('level', $('level').value);
+          d = await api('api/recent?' + p);
+          $('listTitle').textContent = 'Recent events';
+        } else {
+          const p = filterQS(); p.set('source', $('asource').value); p.set('limit', '500');
+          const lat = num('lat'), lon = num('lon');
+          if (lat === '' || lon === '') throw new Error('Enter a latitude and longitude, or press "Use map centre".');
+          p.set('lat', lat); p.set('lon', lon); p.set('radius_km', num('rad') || 300); p.set('days', num('days') || 7);
+          d = await api('api/search?' + p);
+          $('listTitle').textContent = 'Area history';
+        }
+        if (my !== seq) return;
+        events = d.events;
+        render();
+        $('count').textContent = mode === 'recent' ? `${d.count} shown of ${d.total_in_feed} in the feed` : `${d.count} events${d.largest_mag != null ? ', largest M' + d.largest_mag.toFixed(1) : ''}`;
+        $('status').textContent = (d.stale ? 'cached (upstream unreachable) · ' : '') + `${d.source.toUpperCase()} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        if (d.stale) toast('The data service is unreachable; showing a recent cached copy.', 'warn');
+        if (fit && events.length) { const b = L.latLngBounds(events.map(e => [e.lat, e.lon])); if (mode === 'area' || b.getSouthWest().distanceTo(b.getNorthEast()) < 6e6) map.fitBounds(b.pad(.15), { maxZoom: 8 }); }
+      } catch (err) {
+        if (my !== seq) return;
+        $('status').textContent = 'Error'; toast(err.message, 'err');
+        events = []; render();
+        $('list').innerHTML = `<div class="state error" role="alert"><div class="h3">Could not load earthquakes</div><p>${esc(err.message)}</p></div>`;
+      }
+    }
+
+    async function loadTsunami() {
+      try {
+        const d = await api('api/tsunami');
+        const cur = d.bulletins.filter(b => b.current);
+        $('tsunami').innerHTML = cur.map(b => {
+          const sev = /warning|watch/i.test(b.category || '') ? 'err' : /advisory/i.test(b.category || '') ? 'warn' : 'info';
+          return `<div class="notice ${sev}" role="alert"><span><span class="cat">Tsunami ${esc((b.category || 'message').toLowerCase())}</span> · ${esc(b.region)}${b.magnitude ? ' · M ' + esc(b.magnitude) : ''} · ${esc(b.centre_name)} · ${ago(b.issued_ms)}</span>${b.bulletin_url ? ` <a href="${esc(b.bulletin_url)}" target="_blank" rel="noopener">Read bulletin</a>` : ''}</div>`;
+        }).join('');
+        $('bulletins').innerHTML = d.bulletins.length ? d.bulletins.map(b => `<div class="item" style="cursor:default;grid-template-columns:1fr"><div><b>${esc(b.region)}</b>
+          <small><span class="badge ${/warning|watch/i.test(b.category || '') ? 'err' : /advisory/i.test(b.category || '') ? 'warn' : ''}">${esc(b.category || 'message')}</span> ${b.current ? '' : '<span class="badge">older than 48 h</span> '}${esc(b.centre_name)}</small>
+          <small>Issued ${esc(b.issued.replace('T', ' ').replace('Z', ' UTC'))} (${ago(b.issued_ms)})${b.magnitude ? ' · M ' + esc(b.magnitude) : ''}</small>
+          <small>${b.bulletin_url ? `<a href="${esc(b.bulletin_url)}" target="_blank" rel="noopener">Bulletin text</a>` : ''}${b.cap_url ? ` · <a href="${esc(b.cap_url)}" target="_blank" rel="noopener">CAP</a>` : ''}</small></div></div>`).join('')
+          : 'No bulletins published right now.';
+        if (d.errors?.length) $('bulletins').insertAdjacentHTML('beforeend', `<div class="muted small">Partial: ${esc(d.errors.join('; '))}</div>`);
+      } catch (err) { $('bulletins').textContent = 'Tsunami bulletins unavailable: ' + err.message; }
+    }
+
+    function setMode(m) {
+      mode = m;
+      $('mRecent').classList.toggle('on', m === 'recent'); $('mArea').classList.toggle('on', m === 'area');
+      $('recentBox').hidden = m !== 'recent'; $('areaBox').hidden = m !== 'area';
+      if (m === 'recent') load(true);
+    }
+    function togglePanel(force) { const o = $('panel').classList.toggle('open', force); $('panelBtn').setAttribute('aria-expanded', String(o)); }
+    $('panelBtn').onclick = () => togglePanel();
+    $('mRecent').onclick = () => setMode('recent');
+    $('mArea').onclick = () => { setMode('area'); if (!num('lat')) $('useCentre').click(); };
+    $('apply').onclick = () => { load(true); if (innerWidth < 700) togglePanel(false); };
+    $('runArea').onclick = () => { load(true); if (innerWidth < 700) togglePanel(false); };
+    $('useCentre').onclick = () => { const c = map.getCenter(); $('lat').value = c.lat.toFixed(3); $('lon').value = (((c.lng + 540) % 360) - 180).toFixed(3); };
+    $('source').onchange = () => { $('levelF').hidden = $('source').value !== 'usgs'; if ($('source').value === 'emsc' && $('period').value === 'month') $('period').value = 'week'; $('period').querySelector('[value=month]').disabled = $('source').value === 'emsc'; load(true); };
+    for (const id of ['period', 'level']) $(id).onchange = () => load(true);
+
+    (async () => {
+      ({ map } = await OSNT.createMap('map'));
+      layer = L.layerGroup().addTo(map);
+      map.setView([20, 10], 2);
+      load(true); loadTsunami();
+      setInterval(() => mode === 'recent' && load(false), 120000);
+      setInterval(loadTsunami, 180000);
+    })();
+  </script>
+</body>
+</html>

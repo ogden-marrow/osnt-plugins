@@ -1,0 +1,13 @@
+id = "quake-tsunami"
+name = "Earthquakes & tsunami"
+description = "Recent and historical earthquakes (USGS, EMSC) on a map, plus live PTWC/NTWC tsunami bulletins."
+grid = "Hazards"
+port = 8153
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_QUAKE_BIND = "127.0.0.1:{port}"
+OSNT_QUAKE_STATE = "{state_dir}"
