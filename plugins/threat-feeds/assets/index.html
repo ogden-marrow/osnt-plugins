@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Threat feeds · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Cpath d=%27M4 5h16M4 12h16M4 19h10%27 stroke-linecap=%27round%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    html.embedded .topbar { display: none; }
+    form.inline { display: flex; flex-wrap: wrap; gap: 8px; }
+    form.inline input { flex: 1 1 260px; min-height: 44px; font-size: 16px; }
+    form.inline select, form.inline .btn { min-height: 44px; }
+    .stack > * + * { margin-top: 16px; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .tile { border: 1px solid var(--edge); border-radius: var(--radius); background: var(--surface); padding: 12px 14px; min-width: 0; }
+    .tile .n { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .tile .t { font-weight: 600; font-size: var(--fs-md); }
+    .tile .s { font-size: var(--fs-sm); color: var(--ink-2); margin-top: 2px; overflow-wrap: anywhere; }
+    .tile.dim { opacity: .7; }
+    .hit-list { list-style: none; margin: 6px 0 0; padding: 0; font-size: var(--fs-sm); }
+    .hit-list li { padding: 3px 0; overflow-wrap: anywhere; }
+    .verdict { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+    .verdict .big { font-size: 20px; font-weight: 650; }
+    .nowrap { white-space: nowrap; }
+    @media (max-width: 640px) { table.resp thead { display: none; } table.resp tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--edge); } table.resp td { display: block; border: 0; padding: 2px 0; } table.resp td.nowrap { white-space: normal; } }
+    .hidden { display: none !important; }
+    .attr { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 20px; }
+    td .badge { margin-right: 4px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Threat feeds</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Is it on a blocklist?</h2>
+      <p>Check an IP, network, domain, URL or file hash against open threat feeds, with the feed's own first-seen date and how fresh each feed is.</p></div></div>
+
+    <form class="inline" id="f" role="search">
+      <label class="sr-only" for="q">Indicator</label>
+      <input id="q" placeholder="IP, CIDR, domain, URL or hash (hxxp and [.] are fine)" autocomplete="off" spellcheck="false" autofocus>
+      <button class="btn primary" id="go">Check</button>
+    </form>
+    <div id="out" class="stack" style="margin-top:16px" aria-live="polite"></div>
+
+    <h3 class="h2" style="margin-top:28px">Feeds</h3>
+    <div id="tiles" class="tiles" aria-live="polite"></div>
+    <p class="hint" id="tilehint"></p>
+
+    <div class="card" style="margin-top:24px">
+      <div class="card-head"><h3 class="h3">Recent entries</h3>
+        <form class="inline" id="fr"><label class="sr-only" for="rf">Feed</label><select id="rf"></select><button class="btn sm">Show</button></form></div>
+      <div id="recent" class="table-wrap"><span class="muted small">Pick a feed to list its newest or highest-confidence entries.</span></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><h3 class="h3">Tor relay lookup</h3></div>
+      <form class="inline" id="ft"><label class="sr-only" for="tq">Relay</label><input id="tq" placeholder="relay IP, fingerprint or nickname" autocomplete="off" spellcheck="false"><button class="btn">Look up</button></form>
+      <div id="tor" style="margin-top:10px" aria-live="polite"></div>
+    </div>
+
+    <p class="attr">Feeds: <a href="https://feodotracker.abuse.ch/" target="_blank" rel="noopener noreferrer">abuse.ch Feodo Tracker</a> (CC0), <a href="https://www.spamhaus.org/drop/" target="_blank" rel="noopener noreferrer">Spamhaus DROP</a> (&copy; The Spamhaus Project, free under its DROP terms), <a href="https://github.com/stamparm/ipsum" target="_blank" rel="noopener noreferrer">IPsum</a> (Unlicense), <a href="https://check.torproject.org/torbulkexitlist" target="_blank" rel="noopener noreferrer">Tor bulk exit list</a> and <a href="https://metrics.torproject.org/onionoo.html" target="_blank" rel="noopener noreferrer">Onionoo</a> (The Tor Project), <a href="https://openphish.com/" target="_blank" rel="noopener noreferrer">OpenPhish community feed</a> (personal, non-commercial use). With a free <a href="https://auth.abuse.ch/" target="_blank" rel="noopener noreferrer">abuse.ch Auth-Key</a> (set on the Credentials page) URLhaus, ThreatFox and MalwareBazaar are queried live. A feed hit means a list contains the indicator; it is not proof of present maliciousness, and absence is not proof of safety. Tor relay operator contact lines are never shown.</p>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const safe = u => /^https?:\/\//i.test(u || '') ? u : '';
+    const busy = (el, m) => { el.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
+    const fail = (el, m, t = 'Request failed') => { el.innerHTML = `<div class="state error" role="alert"><div class="h3">${esc(t)}</div><p>${esc(m)}</p></div>`; };
+    async function api(path, opts) {
+      const r = await fetch(path, opts), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(r.status === 401 ? 'Sign in through the OSNT hub to use this page.' : (d.error || 'HTTP ' + r.status));
+      return d;
+    }
+    const ago = s => s == null ? 'never' : s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago';
+    const lnk = (u, t) => safe(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>` : esc(t);
+
+    let feedList = [];
+    function tiles(d) {
+      feedList = d.feeds;
+      $('tiles').innerHTML = d.feeds.map(f => `<div class="tile ${f.loaded ? '' : 'dim'}"><div class="t">${lnk(f.info, f.name)}</div>
+        <div class="n">${f.loaded ? f.entries.toLocaleString() : '–'} <span class="small muted" style="font-weight:400">${f.kind === 'cidr' ? 'networks' : f.kind === 'url' ? 'URLs' : 'addresses'}</span></div>
+        <div class="s">${f.error ? `<span class="err">${esc(f.error)}</span>` : f.loaded ? 'Fetched ' + ago(f.age_secs) + (f.source_updated ? ', source updated ' + esc(f.source_updated) : '') : 'Not downloaded yet'}</div>
+        <div class="s faint">${esc(f.licence)}</div></div>`).join('') +
+        d.keyed.map(k => `<div class="tile ${k.enabled ? '' : 'dim'}"><div class="t">${lnk(k.info, k.name)}</div><div class="n"><span class="badge ${k.enabled ? 'ok' : ''}">${k.enabled ? 'live queries on' : 'needs key'}</span></div><div class="s">${k.enabled ? 'Queried live per lookup; nothing is mirrored.' : 'Set ABUSECH_AUTH_KEY (free) on the Credentials page.'}</div></div>`).join('');
+      $('rf').innerHTML = d.feeds.map(f => `<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('') + d.keyed.filter(k => k.enabled).map(k => `<option value="${esc(k.id)}">${esc(k.name)}</option>`).join('');
+    }
+    async function loadTiles() {
+      try { tiles(await api('api/feeds')); } catch (e) { fail($('tiles'), e.message, 'Could not load feed status'); return; }
+      if (feedList.some(f => !f.loaded)) {
+        $('tilehint').textContent = 'Downloading feeds for the first time…';
+        try { const d = await api('api/refresh?feed=all', { method: 'POST' }); const k = await api('api/feeds'); tiles(k);
+          $('tilehint').textContent = d.errors.length ? 'Some feeds could not be downloaded: ' + d.errors.map(e => e.feed + ' (' + e.error + ')').join('; ') : ''; }
+        catch (e) { $('tilehint').textContent = e.message; }
+      }
+    }
+
+    const STATUS = { hit: ['err', 'Listed'], clear: ['ok', 'Not listed'], error: ['warn', 'Unavailable'], 'n/a': ['', 'Not applicable'], needs_key: ['', 'Needs key'] };
+    function renderCheck(d) {
+      const rel = d.feeds.filter(f => f.status !== 'n/a');
+      const rows = (d.feeds).map(f => {
+        const [cls, label] = STATUS[f.status] || ['', f.status];
+        const h = f.hits;
+        const items = h && h.items.length ? `<ul class="hit-list">${h.items.map(e => `<li><span class="mono">${esc(e.indicator)}</span> ${e.since ? `<span class="muted">since ${esc(e.since)}</span>` : ''} ${lnk(e.link, esc(e.detail)) === esc(e.detail) ? esc(e.detail) : lnk(e.link, e.detail)}</li>`).join('')}${h.count > h.items.length ? `<li class="muted">and ${h.count - h.items.length} more</li>` : ''}</ul>` : '';
+        const fresh = f.fetched_at ? `<div class="small faint">${f.entries?.toLocaleString() ?? ''} entries${f.stale ? ', <b>stale copy (feed unreachable)</b>' : ''}${f.source_updated ? ', source updated ' + esc(f.source_updated) : ''}</div>` : '';
+        return `<tr class="${f.status === 'n/a' ? 'faint' : ''}"><td style="min-width:150px"><b>${esc(f.name)}</b>${fresh}</td><td><span class="badge ${cls}">${label}${h && h.count ? ' · ' + h.count : ''}</span></td><td>${esc(f.note)}${items}</td></tr>`;
+      }).join('');
+      return `<div class="card"><div class="verdict"><span class="big">${d.feeds_with_hits ? `Listed in ${d.feeds_with_hits} of ${d.feeds_answered} feeds that answered` : `Not listed in any of the ${d.feeds_answered} feeds that answered`}</span><span class="badge">${esc(d.kind)}</span><span class="mono wrap-anywhere small">${esc(d.query)}</span></div>
+        ${d.note ? `<div class="notice info" style="margin-top:10px"><div>${esc(d.note)}</div></div>` : ''}
+        <div class="table-wrap" style="margin-top:10px"><table class="data resp"><thead><tr><th>Feed</th><th>Result</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="hint">Not being listed does not make an indicator safe, and being listed can be out of date: check the dates.</p></div>`;
+    }
+    $('f').onsubmit = async e => {
+      e.preventDefault(); const q = $('q').value.trim(); if (!q) return;
+      busy($('out'), 'Checking feeds (the first check downloads them)…'); $('go').setAttribute('aria-busy', 'true');
+      try { $('out').innerHTML = renderCheck(await api('api/check?q=' + encodeURIComponent(q))); loadTiles(); }
+      catch (err) { fail($('out'), err.message, 'Check failed'); }
+      $('go').removeAttribute('aria-busy');
+    };
+    $('fr').onsubmit = async e => {
+      e.preventDefault(); const el = $('recent'); busy(el, 'Loading…');
+      try {
+        const d = await api('api/recent?limit=50&feed=' + encodeURIComponent($('rf').value));
+        el.innerHTML = d.items.length ? `<p class="small muted">${esc(d.name)}: ${esc(d.label)}</p><table class="data"><thead><tr><th>Indicator</th><th>Since</th><th>Detail</th></tr></thead><tbody>${d.items.map(i => `<tr><td class="mono wrap-anywhere">${esc(i.indicator)}</td><td class="nowrap">${esc(i.since || '')}</td><td>${lnk(i.link, i.detail)}</td></tr>`).join('')}</tbody></table>` : '<span class="muted">No entries.</span>';
+      } catch (err) { fail(el, err.message, 'Could not load entries'); }
+    };
+    $('ft').onsubmit = async e => {
+      e.preventDefault(); const el = $('tor'); busy(el, 'Asking Onionoo…');
+      try {
+        const d = await api('api/tor?q=' + encodeURIComponent($('tq').value));
+        el.innerHTML = d.relays.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Relay</th><th>Flags</th><th>Where</th><th>Seen</th></tr></thead><tbody>${d.relays.map(r => `<tr><td><b>${lnk(r.link, r.nickname)}</b><div class="mono small wrap-anywhere">${esc(r.fingerprint)}</div><div class="small muted">${esc((r.addresses || []).join(', '))}</div></td><td>${(r.flags || []).map(f => `<span class="badge">${esc(f)}</span>`).join(' ')}</td><td>${esc((r.country || '').toUpperCase())} ${esc(r.as || '')}</td><td class="small">${r.running ? '<span class="badge ok">running</span>' : '<span class="badge">offline</span>'}<div class="muted">first ${esc((r.first_seen || '').slice(0, 10))}, last ${esc((r.last_seen || '').slice(0, 10))}</div></td></tr>`).join('')}</tbody></table></div>` : '<span class="muted">No relay matches.</span>';
+      } catch (err) { fail(el, err.message, 'Relay lookup failed'); }
+    };
+    loadTiles();
+  </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+id = "threat-feeds"
+name = "Threat feeds"
+description = "Is this IP, network, domain, URL or hash on an open blocklist (Feodo, Spamhaus DROP, IPsum, Tor exits, OpenPhish, abuse.ch)? Shows since when and how fresh each feed is."
+grid = "Threat Intel"
+port = 8135
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_THREAT_FEEDS_BIND = "127.0.0.1:{port}"
+OSNT_THREAT_FEEDS_STATE = "{state_dir}"
+
+[[secret]]
+name = "ABUSECH_AUTH_KEY"
+label = "abuse.ch Auth-Key (optional, free: enables URLhaus, ThreatFox and MalwareBazaar lookups)"
+help_url = "https://auth.abuse.ch/"
+required = false

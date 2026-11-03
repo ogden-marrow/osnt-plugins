@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Netblock exposure · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Crect x=%274%27 y=%274%27 width=%277%27 height=%277%27/%3E%3Crect x=%2713%27 y=%274%27 width=%277%27 height=%277%27/%3E%3Crect x=%274%27 y=%2713%27 width=%277%27 height=%277%27/%3E%3Crect x=%2713%27 y=%2713%27 width=%277%27 height=%277%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    html.embedded .topbar { display: none; }
+    form.inline { display: flex; flex-wrap: wrap; gap: 8px; }
+    form.inline input { flex: 1 1 240px; min-height: 44px; font-size: 16px; }
+    form.inline .btn { min-height: 44px; }
+    .stack > * + * { margin-top: 16px; }
+    .cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+    .heat { display: grid; gap: 2px; width: 100%; max-width: 560px; }
+    .cell { aspect-ratio: 1; border-radius: 2px; border: 0; padding: 0; background: var(--surface-3); cursor: default; min-width: 0; }
+    .cell.seen { background: color-mix(in srgb, var(--accent) 35%, var(--surface-3)); cursor: pointer; }
+    .cell.open { background: var(--accent); cursor: pointer; }
+    .cell.high { background: var(--err); cursor: pointer; }
+    .cell.pending { background: var(--surface-2); outline: 1px dashed var(--edge-strong); outline-offset: -1px; }
+    .cell.dim { opacity: .18; }
+    .cell.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: var(--fs-xs); color: var(--ink-2); margin-top: 8px; }
+    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+    .bar { display: grid; grid-template-columns: 56px minmax(0, 1fr) 36px; gap: 8px; align-items: center; font-size: var(--fs-sm); padding: 2px 0; }
+    .bar .t { height: 10px; background: var(--surface-3); border-radius: 99px; overflow: hidden; }
+    .bar .t i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+    .bar button { all: unset; cursor: pointer; color: var(--link); }
+    .bar .l { overflow-wrap: anywhere; }
+    .prog { height: 8px; background: var(--surface-3); border-radius: 99px; overflow: hidden; margin: 8px 0 4px; }
+    .prog i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+    .kpi { border: 1px solid var(--edge); border-radius: var(--radius); padding: 10px 12px; background: var(--surface); }
+    .kpi .n { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .kpi .k { font-size: var(--fs-xs); color: var(--ink-3); }
+    .hidden { display: none !important; }
+    .attr { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 20px; }
+    .chip { display: inline-flex; gap: 6px; align-items: center; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Netblock exposure</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">What does a netblock expose?</h2>
+      <p>Open ports, products and known CVEs per address, read from Shodan InternetDB's existing data. Completely passive: nothing is sent to the addresses.</p></div></div>
+
+    <form class="inline" id="f">
+      <label class="sr-only" for="cidr">IPv4 block</label>
+      <input id="cidr" placeholder="IPv4 block, e.g. 203.0.113.0/24" autocomplete="off" spellcheck="false" autofocus>
+      <button class="btn primary" id="go">Summarise</button>
+      <button class="btn hidden" type="button" id="stop">Cancel</button>
+    </form>
+    <p class="hint" id="limit"></p>
+    <div id="out" class="stack" style="margin-top:12px" aria-live="polite">
+      <div class="state"><div class="h3">Enter a block</div><p>Blocks up to the configured limit are expanded and looked up one address at a time at a polite rate. Results are cached for six hours, so repeating a scan is quick.</p></div>
+    </div>
+    <p class="attr">Data: <a href="https://internetdb.shodan.io/" target="_blank" rel="noopener noreferrer">Shodan InternetDB</a>, a free API for non-commercial use (see Shodan's terms); it reports what Shodan last observed, which can be days old, and omits addresses it never indexed. No port scanning is done by this tool. Use it on networks you own, administer or have a legitimate reason to assess.</p>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    async function api(path, opts) {
+      const r = await fetch(path, opts), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(r.status === 401 ? 'Sign in through the OSNT hub to use this page.' : (d.error || 'HTTP ' + r.status));
+      return d;
+    }
+    let cur = null, timer = null, filter = '', sel = -1, last = null;
+
+    function cols(total) { return total <= 16 ? total : total <= 64 ? 8 : total <= 256 ? 16 : 32; }
+    function matches(c) {
+      if (!filter) return true; const f = filter.toLowerCase();
+      return (c.vulns || []).some(v => v.toLowerCase().includes(f)) || (c.products || []).some(p => p.toLowerCase().includes(f)) || (c.ports || []).some(p => String(p) === f) || (c.hostnames || []).some(h => h.toLowerCase().includes(f)) || (c.tags || []).some(t => t.toLowerCase().includes(f)) || c.ip.includes(f);
+    }
+    function heat(d) {
+      const byI = new Map(d.cells.map(c => [c.i, c])), n = cols(d.total), base = d.first.split('.').map(Number);
+      let h = '';
+      for (let i = 0; i < d.total; i++) {
+        const c = byI.get(i), ip = base.slice(0, 3).join('.') + '.' + ((base[3] + i) & 255);
+        const cls = c ? c.risk : (i < d.done ? '' : 'pending');
+        const dim = filter && (!c || !matches(c)) ? ' dim' : '';
+        const lab = c ? `${c.ip}: ${c.ports.length} open port(s)${c.vulns.length ? ', ' + c.vulns.length + ' CVE(s)' : ''}` : `${d.first.split('.').slice(0, 3).join('.')}.${(base[3] + i) & 255}: ${i < d.done ? 'no data' : 'not checked yet'}`;
+        h += c ? `<button class="cell ${cls}${dim}${i === sel ? ' sel' : ''}" data-i="${i}" title="${esc(lab)}" aria-label="${esc(lab)}"></button>` : `<span class="cell ${cls}${dim}" title="${esc(lab)}"></span>`;
+      }
+      return `<div class="heat" style="grid-template-columns:repeat(${n},minmax(0,1fr))" role="group" aria-label="Address map, one square per address">${h}</div>
+        <div class="legend"><span><i style="background:var(--err)"></i>known CVE or malware tag</span><span><i style="background:var(--accent)"></i>open ports</span><span><i style="background:color-mix(in srgb,var(--accent) 35%,var(--surface-3))"></i>seen, no ports</span><span><i style="background:var(--surface-3)"></i>no data</span></div>`;
+    }
+    function bars(list, key) {
+      if (!list.length) return '<span class="muted small">None.</span>';
+      const max = Math.max(...list.map(x => x.hosts));
+      return list.map(x => `<div class="bar"><span class="l"><button data-f="${esc(x.name)}" title="Filter the map">${esc(x.name)}</button></span><span class="t"><i style="width:${Math.max(4, x.hosts / max * 100)}%"></i></span><span class="num">${x.hosts}</span></div>`).join('');
+    }
+    function detail(d) {
+      const c = d.cells.find(x => x.i === sel); if (!c) return '<span class="muted small">Select a coloured square for details.</span>';
+      return `<table class="kv"><tr><th>Address</th><td class="mono">${esc(c.ip)}</td></tr><tr><th>Ports</th><td>${esc(c.ports.join(', ') || 'none')}</td></tr>${c.hostnames.length ? `<tr><th>Hostnames</th><td>${c.hostnames.map(esc).join(', ')}</td></tr>` : ''}${c.products.length ? `<tr><th>Products</th><td>${c.products.map(esc).join(', ')}</td></tr>` : ''}${c.tags.length ? `<tr><th>Tags</th><td>${c.tags.map(esc).join(', ')}</td></tr>` : ''}${c.vulns.length ? `<tr><th>CVEs</th><td>${c.vulns.map(v => `<span class="badge err">${esc(v)}</span>`).join(' ')}</td></tr>` : ''}<tr><th>Open at</th><td><a href="https://www.shodan.io/host/${esc(c.ip)}" target="_blank" rel="noopener noreferrer">Shodan</a></td></tr></table>`;
+    }
+    function render(d) {
+      last = d; const s = d.summary, pct = Math.round(d.done / d.total * 100);
+      const running = d.state === 'running';
+      $('go').classList.toggle('hidden', false); $('stop').classList.toggle('hidden', !running);
+      const note = d.state === 'cancelled' ? '<div class="notice warn"><div>Cancelled: partial results.</div></div>' : d.state === 'stopped' ? `<div class="notice warn"><div>${esc(d.error)}</div></div>` : '';
+      $('out').innerHTML = `
+        <div class="card"><div class="card-head"><h3 class="h3">${esc(d.cidr)}</h3><span class="badge ${running ? '' : d.state === 'done' ? 'ok' : 'warn'}">${running ? 'Scanning' : d.state}</span></div>
+          ${running ? `<div class="prog" role="progressbar" aria-valuemin="0" aria-valuemax="${d.total}" aria-valuenow="${d.done}"><i style="width:${pct}%"></i></div><div class="small muted">${d.done} of ${d.total} addresses${d.from_cache ? ` (${d.from_cache} from cache)` : ''}; about ${d.remaining_estimate_secs} s left</div>` : ''}
+          ${note}
+          <div class="kpis" style="margin-top:10px"><div class="kpi"><div class="n">${s.hosts_with_data}</div><div class="k">hosts with data</div></div><div class="kpi"><div class="n">${s.vulnerable_hosts}</div><div class="k">hosts with known CVEs</div></div><div class="kpi"><div class="n">${s.ports.length}</div><div class="k">distinct open ports</div></div><div class="kpi"><div class="n">${s.hosts_with_hostnames}</div><div class="k">hosts with hostnames</div></div></div>
+          ${d.failed ? `<p class="hint">${d.failed} address(es) could not be looked up and were skipped.</p>` : ''}
+        </div>
+        <div class="cols"><div class="card"><div class="card-head"><h3 class="h3">Map</h3><div class="row"><label class="sr-only" for="flt">Filter</label><input id="flt" placeholder="Filter: CVE, product, port…" value="${esc(filter)}" style="min-height:36px;max-width:220px"><button class="btn sm" id="csvb" ${d.done ? '' : 'disabled'}>CSV</button></div></div>${heat(d)}<div id="det" style="margin-top:12px">${detail(d)}</div></div>
+          <div class="stack"><div class="card"><h3 class="h3" style="margin-bottom:6px">Open ports</h3>${bars(s.ports.slice(0, 12))}</div><div class="card"><h3 class="h3" style="margin-bottom:6px">Products</h3>${bars(s.products.slice(0, 10))}</div><div class="card"><h3 class="h3" style="margin-bottom:6px">Known CVEs</h3>${bars(s.cves.slice(0, 10))}</div></div></div>`;
+      const f = $('flt'); f.oninput = () => { filter = f.value.trim(); const pos = f.selectionStart; render(last); const g = $('flt'); g.focus(); g.setSelectionRange(pos, pos); };
+      $('csvb').onclick = csv;
+    }
+    document.addEventListener('click', e => {
+      const c = e.target.closest('.cell[data-i]'); if (c && last) { sel = +c.dataset.i; render(last); return; }
+      const b = e.target.closest('button[data-f]'); if (b && last) { filter = b.dataset.f; render(last); }
+    });
+    async function csv() {
+      try { const r = await fetch(`api/scan/${cur}/csv`); if (!r.ok) throw new Error('HTTP ' + r.status); const u = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = u; a.download = 'exposure-' + last.cidr.replace(/\W+/g, '_') + '.csv'; a.click(); URL.revokeObjectURL(u); }
+      catch (e) { alert('Export failed: ' + e.message); }
+    }
+    async function poll() {
+      clearTimeout(timer);
+      try {
+        const d = await api('api/scan/' + cur); render(d);
+        if (d.state === 'running') timer = setTimeout(poll, 1500); else $('go').removeAttribute('aria-busy');
+      } catch (e) { $('go').removeAttribute('aria-busy'); $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">Lost the scan</div><p>${esc(e.message)}</p></div>`; }
+    }
+    $('f').onsubmit = async e => {
+      e.preventDefault(); filter = ''; sel = -1; $('go').setAttribute('aria-busy', 'true');
+      $('out').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Starting…</div>';
+      try { const r = await api('api/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cidr: $('cidr').value }) }); cur = r.id; poll(); }
+      catch (err) { $('go').removeAttribute('aria-busy'); $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">Cannot scan that</div><p>${esc(err.message)}</p></div>`; }
+    };
+    $('stop').onclick = async () => { try { await api(`api/scan/${cur}/cancel`, { method: 'POST' }); } catch (e) {} };
+    api('api/config').then(c => { $('limit').textContent = `Largest block: /${c.min_prefix} (${c.max_addresses} addresses), one lookup about every ${c.delay_ms} ms.`; }).catch(() => {});
+  </script>
+</body>
+</html>

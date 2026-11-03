@@ -1,0 +1,12 @@
+id = "site-fingerprint"
+name = "Site fingerprint"
+description = "Fingerprint one URL: redirect chain, server and technology hints, security-header scorecard, cookie flags, robots and sitemap, favicon hash and TLS certificate chain."
+grid = "Network & Infrastructure"
+port = 8138
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_SITE_FINGERPRINT_BIND = "127.0.0.1:{port}"

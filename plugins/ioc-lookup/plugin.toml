@@ -1,0 +1,42 @@
+id = "ioc-lookup"
+name = "IOC reputation lookup"
+description = "One IP, domain, URL or hash fanned out to urlscan, OTX, GreyNoise, mnemonic passive DNS, InternetDB and (with keys) VirusTotal and AbuseIPDB, one verdict per source."
+grid = "Threat Intel"
+port = 8136
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_IOC_LOOKUP_BIND = "127.0.0.1:{port}"
+
+[[secret]]
+name = "VIRUSTOTAL_API_KEY"
+label = "VirusTotal API key (optional)"
+help_url = "https://www.virustotal.com/gui/my-apikey"
+required = false
+
+[[secret]]
+name = "ABUSEIPDB_API_KEY"
+label = "AbuseIPDB API key (optional)"
+help_url = "https://www.abuseipdb.com/account/api"
+required = false
+
+[[secret]]
+name = "URLSCAN_API_KEY"
+label = "urlscan.io API key (optional: higher search limits; also enables the opt-in scan submission)"
+help_url = "https://urlscan.io/user/profile/"
+required = false
+
+[[secret]]
+name = "OTX_API_KEY"
+label = "AlienVault OTX API key (optional)"
+help_url = "https://otx.alienvault.com/settings"
+required = false
+
+[[secret]]
+name = "GREYNOISE_API_KEY"
+label = "GreyNoise API key (optional)"
+help_url = "https://viz.greynoise.io/account/api-key"
+required = false

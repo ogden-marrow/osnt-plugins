@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>IOC reputation lookup · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2710.5%27 cy=%2710.5%27 r=%276.5%27/%3E%3Cpath d=%27M15.5 15.5L21 21%27 stroke-linecap=%27round%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    html.embedded .topbar { display: none; }
+    form.inline { display: flex; flex-wrap: wrap; gap: 8px; }
+    form.inline input[type=text], form.inline input:not([type]) { flex: 1 1 260px; min-height: 44px; font-size: 16px; }
+    form.inline .btn { min-height: 44px; }
+    .stack > * + * { margin-top: 16px; }
+    .head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+    .src-name { font-weight: 600; }
+    tr.off td { color: var(--ink-3); }
+    td.det div { font-size: var(--fs-sm); color: var(--ink-2); margin-top: 2px; overflow-wrap: anywhere; }
+    td.det b { color: var(--ink); font-weight: 600; }
+    .nowrap { white-space: nowrap; }
+    .attr { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 20px; }
+    .warnbox label { display: flex; gap: 8px; align-items: flex-start; }
+    @media (max-width: 640px) { table.resp thead { display: none; } table.resp tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--edge); } table.resp td { display: block; border: 0; padding: 2px 0; } table.resp td.nowrap { white-space: normal; } }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>IOC reputation lookup</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">What do the sources say?</h2>
+      <p>One indicator, asked of several independent services. You get each source's own answer, never a made-up combined score.</p></div></div>
+
+    <form class="inline" id="f" role="search">
+      <label class="sr-only" for="q">Indicator</label>
+      <input id="q" placeholder="IP, domain, URL or file hash (hxxp and [.] are fine)" autocomplete="off" spellcheck="false" autofocus>
+      <button class="btn primary" id="go">Look up</button>
+    </form>
+    <div id="out" class="stack" style="margin-top:16px" aria-live="polite">
+      <div class="state"><div class="h3">Enter an indicator</div><p>Sources without an API key are greyed out; add keys on the Credentials page. Only public data is queried and nothing is submitted for scanning.</p></div>
+    </div>
+
+    <div class="card hidden warnbox" id="scanbox" style="margin-top:16px">
+      <div class="card-head"><h3 class="h3">Submit a URL to urlscan.io (optional)</h3></div>
+      <div class="notice warn"><div><b>This sends the URL to a third party,</b> which will visit it with its own browser and may keep the result. Pick "private" unless you want it public. Nothing is sent unless you press the button.</div></div>
+      <form class="inline" id="fs" style="margin-top:10px">
+        <label class="sr-only" for="su">URL</label><input id="su" placeholder="https://…" autocomplete="off">
+        <label class="sr-only" for="sv">Visibility</label><select id="sv" style="min-height:44px"><option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select>
+        <label class="check"><input type="checkbox" id="sc"> I understand this URL will be sent to urlscan.io</label>
+        <button class="btn" id="sb">Submit scan</button>
+      </form>
+      <div id="sout" style="margin-top:10px" aria-live="polite"></div>
+    </div>
+
+    <p class="attr">Sources: <a href="https://urlscan.io/" target="_blank" rel="noopener noreferrer">urlscan.io</a> search (public scans; their terms apply), <a href="https://otx.alienvault.com/" target="_blank" rel="noopener noreferrer">AlienVault OTX</a>, <a href="https://www.greynoise.io/" target="_blank" rel="noopener noreferrer">GreyNoise Community API</a> (non-commercial use), <a href="https://www.mnemonic.no/" target="_blank" rel="noopener noreferrer">mnemonic passive DNS</a> (public, limited), <a href="https://internetdb.shodan.io/" target="_blank" rel="noopener noreferrer">Shodan InternetDB</a> (free for non-commercial use), and with your own keys <a href="https://www.virustotal.com/" target="_blank" rel="noopener noreferrer">VirusTotal</a> and <a href="https://www.abuseipdb.com/" target="_blank" rel="noopener noreferrer">AbuseIPDB</a> (each under its own terms). Results are cached for 15 minutes. Verdict wording belongs to each source; this page does not combine them. Domain and URL indicators can belong to private websites: use this for infrastructure, not to profile people.</p>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const safe = u => /^https?:\/\//i.test(u || '') ? u : '';
+    const busy = (el, m) => { el.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
+    const fail = (el, m, t = 'Request failed') => { el.innerHTML = `<div class="state error" role="alert"><div class="h3">${esc(t)}</div><p>${esc(m)}</p></div>`; };
+    async function api(path, opts) {
+      const r = await fetch(path, opts), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(r.status === 401 ? 'Sign in through the OSNT hub to use this page.' : (d.error || 'HTTP ' + r.status));
+      return d;
+    }
+    const BADGE = { hit: ['err', 'Reported'], clear: ['ok', 'Nothing found'], info: ['', 'Context'], error: ['warn', 'Unavailable'], 'n/a': ['', 'Not applicable'], needs_key: ['', 'No key'] };
+    function render(d) {
+      const rows = d.rows.map(r => {
+        const [cls, label] = BADGE[r.status] || ['', r.status];
+        const off = r.status === 'n/a' || r.status === 'needs_key';
+        const det = (r.details || []).map(([k, v]) => `<div><b>${esc(k)}:</b> ${esc(v)}</div>`).join('');
+        return `<tr class="${off ? 'off' : ''}"><td class="nowrap src-name">${esc(r.name)}</td><td><span class="badge ${cls}">${label}</span></td>
+          <td class="det">${esc(r.summary)}${det}</td><td class="nowrap">${safe(r.link) ? `<a href="${esc(r.link)}" target="_blank" rel="noopener noreferrer">Open at source</a>` : ''}</td></tr>`;
+      }).join('');
+      return `<div class="card"><div class="head"><span class="badge">${esc(d.kind)}</span><span class="mono wrap-anywhere">${esc(d.query)}</span></div>
+        <div class="table-wrap" style="margin-top:10px"><table class="data resp"><thead><tr><th>Source</th><th>Answer</th><th>What it says</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="hint">${esc(d.note)}</p></div>`;
+    }
+    $('f').onsubmit = async e => {
+      e.preventDefault(); const q = $('q').value.trim(); if (!q) return;
+      busy($('out'), 'Asking each source…'); $('go').setAttribute('aria-busy', 'true');
+      try { const d = await api('api/lookup?q=' + encodeURIComponent(q)); $('out').innerHTML = render(d); if (d.kind === 'url') $('su').value = d.query; }
+      catch (err) { fail($('out'), err.message, 'Lookup failed'); }
+      $('go').removeAttribute('aria-busy');
+    };
+    $('fs').onsubmit = async e => {
+      e.preventDefault(); const el = $('sout');
+      if (!$('sc').checked) { el.innerHTML = '<span class="err">Tick the box to confirm first.</span>'; return; }
+      busy(el, 'Submitting…');
+      try {
+        const d = await api('api/urlscan/submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: $('su').value, visibility: $('sv').value, confirm: true }) });
+        el.innerHTML = `<div class="notice ok"><div>Submitted (${esc(d.visibility)}). ${safe(d.result) ? `<a href="${esc(d.result)}" target="_blank" rel="noopener noreferrer">Open the result</a>` : ''} It may take about a minute to finish.</div></div>`;
+        $('sc').checked = false;
+      } catch (err) { fail(el, err.message, 'Submission failed'); }
+    };
+    api('api/sources').then(d => { if (d.urlscan_submit_available) $('scanbox').classList.remove('hidden'); }).catch(() => {});
+  </script>
+</body>
+</html>

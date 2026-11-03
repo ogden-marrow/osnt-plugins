@@ -1,0 +1,14 @@
+id = "cidr-exposure"
+name = "Netblock exposure"
+description = "Passive exposure summary for a small IPv4 block (up to /22): open ports, products, CVEs and hostnames per address from Shodan InternetDB, as a heatmap. Sends nothing to the targets."
+grid = "Threat Intel"
+port = 8137
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_CIDR_EXPOSURE_BIND = "127.0.0.1:{port}"
+# Smallest allowed prefix length (largest block). 24 by default; may be lowered to 22 (1024 addresses).
+OSNT_CIDR_EXPOSURE_MIN_PREFIX = "24"
