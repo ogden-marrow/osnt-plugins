@@ -3,51 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OSNT Image Source Finder</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Image source finder · OSNT</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
   <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #0f1419; color: #e6e6e6; }
-    header { padding: 10px 16px; border-bottom: 1px solid #243040; font-size: 16px; letter-spacing: .08em; }
-    header a { color: inherit; text-decoration: none; }
-    main { max-width: 980px; margin: 0 auto; padding: 16px; }
-    #drop { border: 2px dashed #2d3a4a; border-radius: 10px; padding: 24px; text-align: center; color: #8aa; cursor: pointer; }
-    #drop.over { border-color: #3fae91; color: #3fae91; }
-    section { margin-top: 16px; padding: 12px 14px; border: 1px solid #243040; border-radius: 8px; background: #151c24; }
-    h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7f93a8; }
-    table { border-collapse: collapse; width: 100%; font-size: 13px; }
-    td, th { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; word-break: break-word; }
-    th { color: #8aa; font-weight: 500; white-space: nowrap; }
-    .muted { color: #8aa; } .err { color: #ef6c6c; } .warn { color: #ffd54f; }
-    .notice { border-left: 3px solid #ffd54f; padding: 6px 10px; background: #1b1f1a; margin: 10px 0; font-size: 14px; }
-    .cand { border-top: 1px solid #243040; padding: 8px 0; } .cand:first-of-type { border-top: 0; }
-    .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-    .low { background: #4a2a2a; color: #ffb3b3; } .medium { background: #4a432a; color: #ffe08a; } .high { background: #234a3a; color: #8ee6bd; }
-    a { color: #6fc3ff; word-break: break-all; }
-    input[type=text] { padding: 7px 9px; background: #0f1419; color: inherit; border: 1px solid #2d3a4a; border-radius: 6px; width: 70%; }
-    button { padding: 8px 16px; background: #1f6f5a; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-size: 14px; }
-    button:disabled { background: #2d3a4a; cursor: default; }
-    ul { margin: 4px 0 4px 18px; padding: 0; } li { margin: 2px 0; }
-    code { font: 12px ui-monospace, monospace; } img { max-width: 100%; max-height: 220px; border-radius: 6px; }
+    #out { display: grid; gap: 12px; margin-top: 20px; }
+    #out:empty { display: none; }
+    #out img { display: block; max-height: 260px; border-radius: var(--radius-sm); }
+    #out p { margin: 6px 0; }
+    .warn { color: var(--warn); }
+    .cand { border-top: 1px solid var(--edge); padding: 10px 0; overflow-wrap: anywhere; }
+    .cand:first-of-type { border-top: 0; }
+    .cand a { word-break: break-all; }
+    #url { width: 100%; }
+    .or { display: flex; align-items: center; gap: 12px; color: var(--ink-3); font-size: 13px; margin: 12px 0; }
+    .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--edge); }
+    .run { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 16px; }
+    #sel:empty { display: none; }
   </style>
 </head>
 <body>
-  <header><a href="/">&larr; OSNT</a> / IMAGE SOURCE FINDER</header>
-  <main>
-    <div class="notice">
-      <b>Privacy.</b> Running an investigation sends the image (or its URL) to third-party services: Google Cloud Vision and/or SerpAPI (Google Lens)
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Image source finder</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Find where an image first appeared</h2>
+      <p>Reverse search plus an AI-assisted report. Results are leads for a human to check.</p></div></div>
+    <div class="notice warn stack-sm" style="display:block">
+      <p style="margin:0 0 6px"><b>Privacy.</b> Running an investigation sends the image (or its URL) to third-party services: Google Cloud Vision and/or SerpAPI (Google Lens)
       for reverse image search, and the search results and page text (never the image itself) to your configured LLM provider for analysis. Nothing is sent until you press
-      <b>Run investigation</b>. The Pi never stores the image.<br>
-      <b>People.</b> This tool does not identify people from their faces or appearance and does not use face recognition. If a source names someone, the
-      report only repeats what that source says.
-      <b>Reliability.</b> "Earliest found" is not "original". Treat the result as leads for a human to check.
+      <b>Run investigation</b>. The hub never stores the image.</p>
+      <p style="margin:0 0 6px"><b>People.</b> This tool does not identify people from their faces or appearance and does not use face recognition. If a source names someone, the
+      report only repeats what that source says.</p>
+      <p style="margin:0"><b>Reliability.</b> &ldquo;Earliest found&rdquo; is not &ldquo;original&rdquo;. Treat the result as leads for a human to check.</p>
     </div>
 
-    <div id="drop">Choose or drop an image (it is only selected, not sent)<input id="file" type="file" accept="image/*" hidden></div>
-    <p class="muted" style="text-align:center;margin:8px 0">or</p>
-    <div><input id="url" type="text" placeholder="https://example.com/photo.jpg  (public image URL)"></div>
-    <p id="sel" class="muted"></p>
-    <button id="go">Run investigation</button> <span id="status" class="muted"></span>
-    <p class="muted">Takes up to about 90 seconds. Credentials are managed on the portal's <a href="/credentials">Credentials page</a>.</p>
-    <div id="out"></div>
+    <div style="margin-top:16px">
+    <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Choose an image (it is only selected, not sent)"><strong>Choose or drop an image</strong><span class="small">It is only selected here, not sent</span><input id="file" type="file" accept="image/*" hidden></div>
+    <div class="or" aria-hidden="true">or</div>
+    <div><label class="sr-only" for="url">Public image URL</label><input id="url" type="text" placeholder="https://example.com/photo.jpg  (public image URL)" autocomplete="off" spellcheck="false"></div>
+    <p id="sel" class="muted small" style="margin:10px 0 0"></p>
+    <div class="run"><button id="go" class="btn primary lg">Run investigation</button> <span id="status" class="muted small" role="status" aria-live="polite"></span></div>
+    <p class="faint small" style="margin:12px 0 0">Takes up to about 90 seconds. Credentials are managed in <a href="/settings#credentials" target="_top">Settings</a>.</p>
+    </div>
+    <div id="out" aria-live="polite"></div>
   </main>
   <script>
     const $ = id => document.getElementById(id), out = $('out');
@@ -63,7 +67,7 @@
       if (!/^https?:\/\//i.test(href || '')) return document.createTextNode(String(href ?? ''));
       return el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text || href);
     };
-    const section = (title, ...kids) => { const s = el('section', {}, el('h2', {}, title), ...kids); out.append(s); return s; };
+    const section = (title, ...kids) => { const s = el('section', { class: 'card' }, el('h2', { class: 'h3' }, title), ...kids); out.append(s); return s; };
     const list = items => el('ul', {}, ...(items || []).map(i => el('li', {}, String(i))));
 
     function pick(f) {
@@ -72,6 +76,7 @@
       $('sel').textContent = `Selected: ${f.name} (${f.type || 'image'}, ${(f.size / 1024).toFixed(0)} KB). Not sent yet.`;
     }
     $('drop').onclick = () => $('file').click();
+    $('drop').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } };
     $('file').onchange = e => pick(e.target.files[0]);
     $('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
     $('drop').ondragleave = () => $('drop').classList.remove('over');
@@ -82,17 +87,17 @@
       const u = $('url').value.trim();
       if (!file && !u) { $('status').textContent = 'Choose an image or enter a URL first.'; return; }
       if (file && file.size > 15 * 1024 * 1024) { $('status').textContent = 'Image is larger than 15 MB.'; return; }
-      $('go').disabled = true; $('status').textContent = 'Investigating… (up to ~90 s)'; out.replaceChildren();
+      $('go').disabled = true; $('go').setAttribute('aria-busy', 'true'); $('status').textContent = 'Investigating… (up to ~90 s)'; out.replaceChildren();
       try {
         const r = file
           ? await fetch('api/investigate', { method: 'POST', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file })
           : await fetch('api/investigate?url=' + encodeURIComponent(u));
         const d = await r.json();
-        if (!r.ok) { out.append(el('p', { class: 'err' }, d.error || ('HTTP ' + r.status))); }
+        if (!r.ok) { out.append(el('div', { class: 'state error', role: 'alert' }, el('div', { class: 'h3' }, 'Investigation failed'), el('p', {}, d.error || ('HTTP ' + r.status)))); }
         else render(d, file);
         $('status').textContent = r.ok ? `Done in ${(d.total_ms / 1000).toFixed(1)} s` : '';
-      } catch (e) { out.append(el('p', { class: 'err' }, 'Request failed: ' + e)); $('status').textContent = ''; }
-      $('go').disabled = false;
+      } catch (e) { out.append(el('div', { class: 'state error', role: 'alert' }, el('div', { class: 'h3' }, 'Request failed'), el('p', {}, String(e)))); $('status').textContent = ''; }
+      $('go').disabled = false; $('go').removeAttribute('aria-busy');
     };
 
     function render(d, f) {
@@ -116,7 +121,7 @@
       }
       (d.notes || []).forEach(n => status.append(el('p', { class: 'warn' }, n)));
       const bk = d.backends || {};
-      status.append(el('table', {}, ...Object.entries(bk).map(([k, v]) => el('tr', {}, el('th', {}, k), el('td', {}, String(v))))));
+      status.append(el('table', { class: 'kv' }, ...Object.entries(bk).map(([k, v]) => el('tr', {}, el('th', {}, k), el('td', {}, String(v))))));
 
       if (!rep && d.raw_candidates && d.raw_candidates.length) {
         const rc = section('Raw search results (unranked, not conclusions)');
@@ -127,13 +132,13 @@
       const rows = [['format', l.format], ['size', l.bytes + ' bytes'], ['dimensions', l.dimensions ? `${l.dimensions.width} x ${l.dimensions.height}` : null], ['SHA-256', l.sha256]];
       if (l.exif) rows.push(['camera', [l.exif.make, l.exif.model].filter(Boolean).join(' ')], ['software', l.exif.software], ['captured', l.exif.captured], ['modified', l.exif.modified],
         ['GPS', l.exif.gps ? `${l.exif.gps.lat.toFixed(5)}, ${l.exif.gps.lon.toFixed(5)}` : null]);
-      const ls = section('Local analysis', el('table', {}, ...rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => el('tr', {}, el('th', {}, k), el('td', {}, String(v))))));
+      const ls = section('Local analysis', el('table', { class: 'kv' }, ...rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => el('tr', {}, el('th', {}, k), el('td', {}, String(v))))));
       if ((l.flags || []).length) ls.append(list(l.flags));
 
       const rs = d.reverse_search;
       if (rs) section('Reverse image search by hand', el('p', { class: 'muted' }, rs.note), ...rs.links.map(x => el('div', {}, safeLink(x.href, x.name))));
-      section('What the agent did', el('table', {}, el('tr', {}, el('th', {}, '#'), el('th', {}, 'tool'), el('th', {}, 'summary'), el('th', {}, 'ms')),
-        ...(d.trace || []).map(t => el('tr', {}, el('td', {}, String(t.step)), el('td', {}, el('code', {}, t.tool)), el('td', {}, t.summary), el('td', {}, String(t.ms))))));
+      section('What the agent did', el('div', { class: 'table-wrap' }, el('table', { class: 'data' }, el('tr', {}, el('th', {}, '#'), el('th', {}, 'tool'), el('th', {}, 'summary'), el('th', { class: 'num' }, 'ms')),
+        ...(d.trace || []).map(t => el('tr', {}, el('td', {}, String(t.step)), el('td', {}, el('code', {}, t.tool)), el('td', {}, t.summary), el('td', { class: 'num' }, String(t.ms)))))));
     }
   </script>
 </body>

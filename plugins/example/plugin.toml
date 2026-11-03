@@ -3,7 +3,7 @@ name = "Example plugin"
 description = "Minimal starting point for writing a plugin."
 grid = "Tools"
 port = 8190
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

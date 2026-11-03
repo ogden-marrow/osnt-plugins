@@ -4,63 +4,63 @@
 id = "adsb"
 name = "Aircraft (ADS-B)"
 description = "Live aircraft, military traffic and emergency squawks, with a recorded position history."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/adsb"
 
 [[plugin]]
 id = "imagery"
 name = "Imagery timeline"
 description = "Compare NASA satellite imagery across dates, with fire and thermal detections."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/imagery"
 
 [[plugin]]
 id = "lookup"
 name = "Domain & IP lookup"
 description = "DNS, registration (RDAP), reverse DNS and certificate-transparency names."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/lookup"
 
 [[plugin]]
 id = "imgmeta"
 name = "Image forensics"
 description = "EXIF, hashes and editing/GPS flags for an image, plus reverse-image-search links."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/imgmeta"
 
 [[plugin]]
 id = "cameras"
 name = "Live cameras"
 description = "Grid of live still-image camera feeds with map placement."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/cameras"
 
 [[plugin]]
 id = "example"
 name = "Example plugin"
 description = "Minimal starting point for writing a plugin."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/example"
 
 [[plugin]]
 id = "map"
 name = "Map"
 description = "Base maps, satellite, terrain and elevation layers streamed on demand."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/map"
 
 [[plugin]]
 id = "credentials"
 name = "Credentials"
 description = "Store API keys on the Pi and hand each one only to the plugins that declare it."
-version = "0.2.0"
+version = "0.2.1"
 path = "plugins/credentials"
 
 [[plugin]]
 id = "provenance"
 name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback."
-version = "0.4.0"
+version = "0.4.1"
 path = "plugins/provenance"
 
 [[plugin]]

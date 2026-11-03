@@ -3,55 +3,68 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OSNT Aircraft</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Aircraft · OSNT</title>
   <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
   <style>
-    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
-    body { display: flex; flex-direction: column; background: #0f1419; color: #e6e6e6; }
-    header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid #243040; }
-    header h1 { margin: 0; font-size: 16px; letter-spacing: .08em; }
-    header a { color: inherit; text-decoration: none; }
-    #status { font-size: 12px; color: #8aa; }
-    #layout { flex: 1; display: flex; min-height: 0; }
-    #map { flex: 1; }
-    aside { width: 300px; overflow-y: auto; border-left: 1px solid #243040; padding: 12px; font-size: 13px; }
-    aside h2 { margin: 14px 0 6px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7f93a8; }
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 320px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 16px; font-size: 13px; }
+    aside h2 { margin: 20px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
     aside h2:first-child { margin-top: 0; }
-    input[type=search] { width: 100%; box-sizing: border-box; padding: 6px 8px; background: #151c24; color: inherit; border: 1px solid #2d3a4a; border-radius: 4px; }
-    button { background: #151c24; color: inherit; border: 1px solid #2d3a4a; border-radius: 4px; padding: 5px 9px; cursor: pointer; }
-    button.on { border-color: #3fae91; color: #3fae91; }
-    .row { display: flex; gap: 6px; margin: 6px 0; }
-    .item { padding: 6px 8px; margin: 4px 0; border: 1px solid #243040; border-radius: 6px; background: #151c24; cursor: pointer; }
-    .item.alert { border-color: #c0392b; }
-    .item small { color: #8aa; display: block; }
-    #readout { position: absolute; z-index: 1000; left: 10px; bottom: 28px; padding: 4px 8px; font: 12px ui-monospace, monospace;
-               background: rgba(15,20,25,.85); border-radius: 4px; pointer-events: none; }
-    .plane svg { filter: drop-shadow(0 0 1px #000); }
-    .muted { color: #8aa; }
-    @media (max-width: 700px) { aside { display: none; } }
+    aside input[type=search] { width: 100%; }
+    .item { padding: 10px 12px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; line-height: 1.4; }
+    .item:hover { border-color: var(--edge-strong); }
+    .item.alert { border-color: var(--err); background: var(--err-soft); }
+    aside small { color: var(--ink-2); display: block; font-size: 12px; margin-top: 2px; }
+    #sel b { font-size: 15px; }
+    #sel { line-height: 1.45; }
+    .plane svg { filter: drop-shadow(0 0 1px rgba(0,0,0,.7)); }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    #panelBtn { display: none; }
+    @media (max-width: 700px) {
+      #panelBtn { display: inline-flex; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 58dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); padding-bottom: 24px; }
+      aside#panel.open { display: block; }
+      .readout { bottom: 28px; }
+    }
   </style>
 </head>
-<body>
-  <header><h1><a href="/">&larr; OSNT</a> / AIRCRAFT</h1><span id="status">starting…</span></header>
-  <div id="layout">
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Aircraft</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Starting…</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Panel</button></div>
+  </header>
+  <div id="layout" class="fill map-box" style="position:relative">
     <div id="map"></div>
-    <aside>
+    <aside id="panel" aria-label="Aircraft controls">
       <h2>Find aircraft</h2>
-      <input id="q" type="search" placeholder="hex, registration or callsign">
+      <label class="sr-only" for="q">Hex, registration or callsign</label>
+      <input id="q" type="search" placeholder="Hex, registration or callsign">
       <h2>View</h2>
-      <div class="row">
+      <div class="seg" role="group" aria-label="View">
         <button id="modeView" class="on">In view</button>
         <button id="modeMil">Military (world)</button>
       </div>
-      <div class="muted" id="count"></div>
+      <div class="muted" id="count" style="margin-top:8px"></div>
+      <h2>Altitude</h2>
+      <div class="legend"><span><i style="background:#4fc3f7"></i>&lt; 5k ft</span><span><i style="background:#66bb6a"></i>5&ndash;15k</span><span><i style="background:#ffd54f"></i>15&ndash;30k</span><span><i style="background:#ef6c6c"></i>&gt; 30k</span><span><i style="background:#9aa5b1"></i>Ground</span></div>
       <h2>Emergencies</h2>
-      <div id="emerg" class="muted">none right now</div>
-      <div class="row"><button id="notify">Enable alerts</button></div>
+      <div id="emerg" class="muted">None right now</div>
+      <div class="row" style="margin-top:8px"><button id="notify" class="btn sm">Enable alerts</button></div>
       <h2>Selected</h2>
-      <div id="sel" class="muted">click an aircraft</div>
+      <div id="sel" class="muted">Click an aircraft</div>
     </aside>
+    <div id="readout" class="readout"></div>
   </div>
-  <div id="readout"></div>
   <script src="/static/leaflet/leaflet.js"></script>
   <script src="/static/osnt-map.js"></script>
   <script>
@@ -75,7 +88,7 @@
     }
     const label = a => a.flight || a.reg || a.hex.toUpperCase();
     const fmtAlt = a => a.on_ground ? 'ground' : a.alt == null ? '—' : `${a.alt.toLocaleString()} ft`;
-    const details = a => `<b>${label(a)}</b>${a.mil ? ' <span style="color:#ff5252">MIL</span>' : ''}
+    const details = a => `<b>${label(a)}</b>${a.mil ? ' <span class="badge err">MIL</span>' : ''}
       <small>${[a.type, a.reg, a.hex.toUpperCase()].filter(Boolean).join(' · ')}</small>
       <small>${fmtAlt(a)} · ${a.gs != null ? Math.round(a.gs) + ' kt' : '—'} · ${a.track != null ? Math.round(a.track) + '°' : '—'}${a.squawk ? ' · sqk ' + a.squawk : ''}</small>`;
 
@@ -127,7 +140,7 @@
     async function checkEmergencies() {
       try {
         const list = await api('api/emergencies');
-        $('emerg').innerHTML = list.length ? '' : 'none right now';
+        $('emerg').innerHTML = list.length ? '' : 'None right now';
         for (const a of list) {
           const d = document.createElement('div'); d.className = 'item alert';
           d.innerHTML = `${details(a)}<small>${a.squawk} — ${a.meaning}</small>`;
@@ -146,7 +159,7 @@
       if (e.key !== 'Enter' || !e.target.value.trim()) return;
       try {
         const res = await api('api/search?q=' + encodeURIComponent(e.target.value.trim()));
-        if (!res.length) { $('sel').textContent = 'not found (or not broadcasting right now)'; return; }
+        if (!res.length) { $('sel').textContent = 'Not found (or not broadcasting right now)'; return; }
         const a = res[0]; mode = 'view'; $('modeView').classList.add('on'); $('modeMil').classList.remove('on');
         map.setView([a.lat, a.lon], 9); render(res); select(a);
       } catch (err) { $('sel').textContent = 'search failed: ' + err.message; }
@@ -154,11 +167,13 @@
     $('modeView').onclick = () => { mode = 'view'; $('modeView').classList.add('on'); $('modeMil').classList.remove('on'); refresh(); };
     $('modeMil').onclick = () => { mode = 'mil'; $('modeMil').classList.add('on'); $('modeView').classList.remove('on'); refresh(); };
     $('notify').onclick = async () => {
-      if (!('Notification' in window)) { $('notify').textContent = 'not supported'; return; }
+      if (!('Notification' in window)) { $('notify').textContent = 'Not supported'; return; }
       const p = await Notification.requestPermission();
       $('notify').textContent = p === 'granted' ? 'Alerts on' : 'Alerts blocked';
     };
 
+    // Phone layout: the side panel is a bottom sheet behind a button.
+    $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
       map.setView([29.65, -82.34], 7);

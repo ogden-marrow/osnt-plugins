@@ -3,7 +3,7 @@ name = "Aircraft (ADS-B)"
 description = "Live aircraft, military traffic and emergency squawks, with a recorded position history."
 grid = "Air & Sea"
 port = 8101
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true
