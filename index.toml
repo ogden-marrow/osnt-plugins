@@ -53,14 +53,14 @@ path = "plugins/map"
 id = "credentials"
 name = "Credentials"
 description = "Store API keys on the Pi and hand each one only to the plugins that declare it."
-version = "0.1.0"
+version = "0.2.0"
 path = "plugins/credentials"
 
 [[plugin]]
 id = "provenance"
 name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback."
-version = "0.3.0"
+version = "0.4.0"
 path = "plugins/provenance"
 
 [[plugin]]

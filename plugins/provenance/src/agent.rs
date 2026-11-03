@@ -454,6 +454,7 @@ mod tests {
             llm_style: crate::llm::Style::OpenAi,
             llm_base: if keys.llm.is_some() { format!("http://127.0.0.1:{}", f.port) } else { String::new() },
             model: "test-model".into(),
+            google_token_url: String::new(),
             vision_base: format!("http://127.0.0.1:{}", f.port),
             serpapi_base: format!("http://127.0.0.1:{}", f.port),
             wayback_base: format!("http://127.0.0.1:{}", f.port),
@@ -607,7 +608,7 @@ mod tests {
         });
         let mut keys = keys_all();
         keys.google = Some("g-SECRET-vision".into());
-        let cfg_bad_vision = |f: &Fake| Config { llm_style: crate::llm::Style::OpenAi, vision_base: format!("http://127.0.0.1:{}/nope", f.port), llm_base: format!("http://127.0.0.1:{}", f.port), model: "m".into(), serpapi_base: String::new(), wayback_base: String::new() };
+        let cfg_bad_vision = |f: &Fake| Config { llm_style: crate::llm::Style::OpenAi, google_token_url: String::new(), vision_base: format!("http://127.0.0.1:{}/nope", f.port), llm_base: format!("http://127.0.0.1:{}", f.port), model: "m".into(), serpapi_base: String::new(), wayback_base: String::new() };
         let guard = Guard { exempt_loopback_port: Some(f.port) };
         let (api, fetch) = (osnt_common::http_agent("t"), guarded_agent(guard.clone(), "t"));
         let out = investigate(&cfg_bad_vision(&f), &keys, &guard, Agents { api: &api, fetch: &fetch }, Input { bytes: tiny_jpeg_with_exif(), url: None }, 8);

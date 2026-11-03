@@ -26,6 +26,8 @@ pub struct Config {
     pub llm_base: String,
     pub model: String,
     pub vision_base: String,
+    /// Google's OAuth token endpoint for service-account sign-in (only overridden in tests).
+    pub google_token_url: String,
     pub serpapi_base: String,
     pub wayback_base: String,
 }
@@ -38,6 +40,7 @@ impl Config {
             llm_base: e("OSNT_LLM_BASE", ""),
             model: e("OSNT_LLM_MODEL", ""),
             vision_base: e("OSNT_VISION_BASE", "https://vision.googleapis.com"),
+            google_token_url: e("OSNT_GOOGLE_TOKEN_URL", crate::gauth::TOKEN_URL),
             serpapi_base: e("OSNT_SERPAPI_BASE", "https://serpapi.com"),
             wayback_base: e("OSNT_WAYBACK_BASE", "https://web.archive.org"),
         }
@@ -268,7 +271,15 @@ pub fn vision(ctx: &Ctx) -> Result<Value, String> {
     let body = json!({ "requests": [{ "image": image, "features": [{ "type": "WEB_DETECTION", "maxResults": 12 }] }] });
     let url = format!("{}/v1/images:annotate", ctx.cfg.vision_base.trim_end_matches('/'));
     let r: Result<Value, String> = (|| {
-        let mut res = ctx.api.post(&url).header("x-goog-api-key", key).send_json(&body).map_err(|e| http_err(ctx, "Vision request", e))?;
+        // The credential is either an API key or the whole service-account key file (JSON).
+        let req = ctx.api.post(&url);
+        let req = if crate::gauth::is_service_account(key) {
+            let token = crate::gauth::access_token(ctx.api, &ctx.cfg.google_token_url, key).map_err(|e| ctx.keys.redact(&e))?;
+            req.header("Authorization", format!("Bearer {token}"))
+        } else {
+            req.header("x-goog-api-key", key)
+        };
+        let mut res = req.send_json(&body).map_err(|e| http_err(ctx, "Vision request", e))?;
         res.body_mut().read_json::<Value>().map_err(|e| ctx.keys.redact(&format!("Vision response unreadable: {e}")))
     })();
     match r {
@@ -505,7 +516,7 @@ mod tests {
 
     #[test]
     fn stored_provider_settings_override_defaults() {
-        let cfg = Config { llm_style: crate::llm::Style::OpenAi, llm_base: "http://default".into(), model: "m0".into(), vision_base: String::new(), serpapi_base: String::new(), wayback_base: String::new() };
+        let cfg = Config { llm_style: crate::llm::Style::OpenAi, llm_base: "http://default".into(), model: "m0".into(), vision_base: String::new(), google_token_url: String::new(), serpapi_base: String::new(), wayback_base: String::new() };
         let c = Keys { llm_base: Some("https://api.openai.com/v1".into()), llm_model: Some("gpt-x".into()), ..Default::default() }.apply_to(&cfg);
         assert_eq!((c.llm_base.as_str(), c.model.as_str()), ("https://api.openai.com/v1", "gpt-x"));
         let c = Keys::default().apply_to(&cfg);

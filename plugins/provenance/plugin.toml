@@ -3,7 +3,7 @@ name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback, with honest confidence and caveats."
 grid = "Media & Verification"
 port = 8106
-version = "0.3.0"
+version = "0.4.0"
 
 [service]
 state_dir = false
@@ -41,7 +41,7 @@ required = false
 
 [[secret]]
 name = "GOOGLE_VISION_API_KEY"
-label = "Google Cloud Vision API key (web detection)"
+label = "Google Cloud Vision: API key, or paste/load a service-account key file (JSON)"
 help_url = "https://console.cloud.google.com/apis/library/vision.googleapis.com"
 required = false
 
