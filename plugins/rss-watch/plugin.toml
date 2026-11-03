@@ -3,7 +3,7 @@ name = "Feed watcher"
 description = "Poll your own RSS/Atom feeds, Hacker News keyword alerts and opt-in public Telegram channel previews, with keyword and regex alerts and a new-since-last-visit inbox."
 grid = "Events & News"
 port = 8150
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

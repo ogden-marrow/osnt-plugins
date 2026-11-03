@@ -181,8 +181,13 @@
     }
     $('results').onclick = e => { const b = e.target.closest('[data-q]'); if (b) openEntity(b.dataset.q); };
 
+    { const d = new URLSearchParams(location.search).get('date'); if (/^\d{4}-\d{2}-\d{2}$/.test(d || '')) $('cdate').value = d; }
     loadToday();
     const h = location.hash.slice(1); if (tabs.includes(h)) show(h);
+    // Deep link: ?q=<name> opens the Wikidata tab and searches; ?q=Q42 opens that entity; ?date=YYYY-MM-DD sets the Today date.
+    { const u = new URLSearchParams(location.search), q = (u.get('q') || '').trim();
+      if (q) { show('entity'); if (/^Q\d+$/i.test(q)) openEntity(q.toUpperCase()); else { $('sq').value = q; $('sform').requestSubmit(); } }
+      $('sform').addEventListener('submit', () => { try { history.replaceState(null, '', '?' + new URLSearchParams({ q: $('sq').value.trim() }) + '#entity'); } catch { /* frame */ } }); }
   </script>
 </body>
 </html>

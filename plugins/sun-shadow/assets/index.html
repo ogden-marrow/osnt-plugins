@@ -23,6 +23,7 @@
     #out .state { padding: 12px; }
     .big { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
     .sunicon { background: none; border: 0; }
+    #xlinks a { margin-right: 10px; display: inline-block; padding: 6px 0; }
     .attrib { margin-top: 18px; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
     .table-wrap { max-height: 320px; overflow: auto; }
     canvas#chart { width: 100%; height: 120px; display: block; }
@@ -53,13 +54,13 @@
         <label class="field"><span class="label">Longitude</span><input id="lon" inputmode="decimal" value="2.2945"></label>
       </div>
       <div class="two" style="margin-top:8px">
-        <label class="field"><span class="label">Date and time</span><input id="dt" type="datetime-local" step="60"></label>
+        <label class="field"><span class="label">Date and time</span><input id="dt" class="input" type="datetime-local" step="60"></label>
         <label class="field"><span class="label">UTC offset (h)</span><input id="off" inputmode="decimal" value="0"></label>
       </div>
-      <p class="hint">Enter the time shown in the photo's place; the offset converts it to UTC (Paris in summer: 2). Click the map or drag the pin to move.</p>
+      <p class="hint">Enter the time shown in the photo's place; the offset converts it to UTC (Paris in summer: 2). <a href="#" id="guess-off">Guess from longitude</a>. Click the map or drag the pin to move.</p>
 
-      <div class="seg" role="tablist" aria-label="Mode" style="margin-top:10px">
-        <button id="m-sun" class="on" data-m="sun">Sun</button>
+      <div class="seg" role="group" aria-label="Mode" style="margin-top:10px">
+        <button id="m-sun" class="on" aria-pressed="true" data-m="sun">Sun</button>
         <button data-m="solve">Time from shadow</button>
         <button data-m="cand">Where on Earth</button>
         <button data-m="year">Year</button>
@@ -96,6 +97,11 @@
       </div>
 
       <div id="out" aria-live="polite"></div>
+      <div class="row" id="tools" style="margin-top:10px" hidden>
+        <button class="btn" id="copy-out" type="button">Copy result</button>
+        <button class="btn" id="csv-year" type="button" hidden>Download year CSV</button>
+      </div>
+      <p class="hint" id="xlinks" style="margin-top:12px"></p>
       <div class="attrib">
         Sun position: NOAA solar equations (J. Meeus, <i>Astronomical Algorithms</i>), computed locally, accurate to about 0.01&deg;.
         Weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0, non-commercial use).
@@ -112,6 +118,9 @@
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const toast = (m, k = 'err') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
     let map, pin, sunLine, shadowLine, bandLayer, mode = 'sun', lastSun = null, timer;
+    const KEY = 'osnt.sun-shadow';
+    const mem = { get() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }, set(o) { try { localStorage.setItem(KEY, JSON.stringify({ ...mem.get(), ...o })); } catch { /* storage blocked */ } } };
+    const MODES = ['sun', 'solve', 'cand', 'year', 'wx'];
 
     // Time handling: the date/time field is local to the place; the offset converts it to UTC.
     const pad = n => String(n).padStart(2, '0');
@@ -128,8 +137,9 @@
       if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
       return d;
     }
+    function showTools() { $('tools').hidden = !$('out').innerText.trim() || !!$('out').querySelector('.loading'); $('csv-year').hidden = !(mode === 'year' && window._days); }
     const busy = m => { $('out').innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
-    const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; };
+    const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; showTools(); };
     const kv = rows => `<table class="kv">${rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
     const where = () => `lat=${(+$('lat').value).toFixed(5)}&lon=${(+$('lon').value).toFixed(5)}`;
     function checkLatLon() {
@@ -168,7 +178,7 @@
                 ['UTC time', esc(s.time)], ['Declination', s.declination.toFixed(2) + '°'], ['Equation of time', s.equation_of_time_min.toFixed(1) + ' min']]);
       } catch (e) { if (mode === 'sun') fail(e.message); }
     }
-    const schedule = () => { clearTimeout(timer); timer = setTimeout(() => (mode === 'sun' ? updateSun() : updateSunQuiet()), 200); };
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(() => { (mode === 'sun' ? updateSun() : updateSunQuiet()); syncUrl(); }, 200); };
     const updateSunQuiet = () => updateSun();
 
     function placePin(lat, lon, pan) {
@@ -251,28 +261,66 @@
 
     function setMode(m) {
       mode = m;
-      document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+      document.querySelectorAll('.seg button').forEach(b => { b.classList.toggle('on', b.dataset.m === m); b.setAttribute('aria-pressed', b.dataset.m === m); });
       document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'p-' + m);
       $('out').innerHTML = '';
       if (bandLayer && m !== 'cand') { map.removeLayer(bandLayer); bandLayer = null; }
       if (m === 'sun') updateSun();
+      syncUrl();
     }
+    // Shareable URL: ?lat=&lon=&time=<UTC ISO>&off=<hours>&mode=sun|solve|cand|year|wx. Opening such a link runs the query.
+    function syncUrl() {
+      try {
+        const u = new URLSearchParams();
+        if (!isNaN(num('lat')) && !isNaN(num('lon'))) { u.set('lat', num('lat').toFixed(5)); u.set('lon', num('lon').toFixed(5)); }
+        if (!isNaN(utcMs())) u.set('time', utcIso());
+        if (offsetHours()) u.set('off', offsetHours());
+        if (mode !== 'sun') u.set('mode', mode);
+        history.replaceState(null, '', '?' + u);
+        mem.set({ off: $('off').value, h: $('h1').value });
+      } catch { /* sandboxed frame */ }
+      const la = num('lat').toFixed(5), lo = num('lon').toFixed(5), q = `?lat=${la}&lon=${lo}`;
+      if (isFinite(la) && isFinite(lo)) $('xlinks').innerHTML = 'Open this point in: ' + [['terrain-view', 'Terrain'], ['place-photos', 'Photos nearby'], ['satellite', 'Satellite'], ['wayback', 'Wayback imagery'], ['geo-toolkit', 'Coordinates']].map(([id, n]) => `<a href="/p/${id}/${q}">${n}</a>`).join('');
+    }
+    const go = fn => async () => { await fn(); $('out').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    $('guess-off').onclick = e => { e.preventDefault(); const lo = num('lon'); if (isFinite(lo)) { $('off').value = Math.round(lo / 15); schedule(); } };
+    new MutationObserver(showTools).observe($('out'), { childList: true, subtree: true });
+    $('copy-out').onclick = async () => { const t = $('out').innerText; try { await navigator.clipboard.writeText(t); toast('Copied', 'ok'); } catch { const r = document.createRange(); r.selectNodeContents($('out')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Press Ctrl+C to copy the selection', 'ok'); } };
+    $('csv-year').onclick = () => {
+      const d = window._days; if (!d) return;
+      const csv = 'date,sunrise_utc,sunset_utc,solar_noon_utc,day_hours,noon_altitude_deg,polar\n' + d.map(r => [r.date, r.sunrise || '', r.sunset || '', r.noon, r.day_hours, r.noon_altitude, r.polar].join(',')).join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `sun-year-${$('lat').value}-${$('lon').value}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    };
     document.querySelectorAll('.seg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
-    $('go-solve').onclick = solve; $('go-cand').onclick = candidates; $('go-year').onclick = year; $('go-wx').onclick = wx;
+    $('go-solve').onclick = go(solve); $('go-cand').onclick = go(candidates); $('go-year').onclick = go(year); $('go-wx').onclick = go(wx);
+    for (const id of ['h2', 'l2', 't2', 'h3', 'l3', 't3']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') $('go-' + (id.endsWith('2') ? 'solve' : 'cand')).click(); });
     for (const id of ['dt', 'off', 'h1']) $(id).addEventListener('input', schedule);
     for (const id of ['lat', 'lon']) $(id).addEventListener('change', () => { const la = num('lat'), lo = num('lon'); if (la >= -90 && la <= 90 && lo >= -180 && lo <= 180) { pin.setLatLng([la, lo]); map.panTo([la, lo]); } schedule(); });
     addEventListener('resize', () => window._days && $('chart') && chart(window._days));
     matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => window._days && $('chart') && chart(window._days));
 
     (async () => {
-      const now = new Date(); $('dt').value = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T12:00`;
+      const now = new Date(), q = new URLSearchParams(location.search), saved = mem.get();
+      $('dt').value = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T12:00`;
+      if (saved.off != null) $('off').value = saved.off;
+      if (saved.h) $('h1').value = saved.h;
+      let la = parseFloat(q.get('lat')), lo = parseFloat(q.get('lon'));
+      if (q.get('q')) { const m = q.get('q').match(/(-?\d+(?:\.\d+)?)\s*[, ;]\s*(-?\d+(?:\.\d+)?)/); if (m) { la = +m[1]; lo = +m[2]; } }
+      const deep = isFinite(la) && isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180;
+      if (deep) { $('lat').value = la; $('lon').value = lo; }
+      if (q.get('off') != null) $('off').value = q.get('off'); else if (q.get('time')) $('off').value = 0;
+      const t = (q.get('time') || '').trim().replace(/ (\d\d:?\d\d)$/, '+$1') || null; // an unencoded + in a link arrives as a space
+      if (t && !isNaN(Date.parse(t))) { const d = new Date(Date.parse(t) + offsetHours() * 3600000); $('dt').value = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; }
+      else if (/^\d{4}-\d{2}-\d{2}$/.test(q.get('date') || '')) $('dt').value = q.get('date') + 'T12:00';
+      const start = deep ? [la, lo] : [48.8584, 2.2945];
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
-      map.setView([48.8584, 2.2945], 5);
-      pin = L.marker([48.8584, 2.2945], { draggable: true }).addTo(map);
+      map.setView(start, deep ? 9 : 5);
+      pin = L.marker(start, { draggable: true }).addTo(map);
       pin.on('dragend', () => { const p = pin.getLatLng(); placePin(p.lat, p.lng, false); });
       map.on('click', e => placePin(e.latlng.lat, e.latlng.lng, false));
       map.on('zoomend moveend', drawLines);
-      updateSun();
+      const m = q.get('mode');
+      if (MODES.includes(m) && m !== 'sun') { setMode(m); if (deep || q.get('time')) $('go-' + m).click(); } else { updateSun(); syncUrl(); }
     })();
   </script>
 </body>

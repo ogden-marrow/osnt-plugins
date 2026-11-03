@@ -86,6 +86,10 @@ fn iso_days_ago(days: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", r / 3600, (r % 3600) / 60, r % 60)
 }
 
+fn retry_wait() -> Duration {
+    Duration::from_millis(if cfg!(test) { 50 } else { 2500 })
+}
+
 // ---- Overpass -------------------------------------------------------------------------------------------------------
 
 /// Plain text of an Overpass error page, trimmed.
@@ -117,43 +121,55 @@ fn overpass(app: &App, ql: &str) -> Result<(Value, String), ApiError> {
             tried.push(format!("{url} (skipped: recently unreachable)"));
             continue;
         }
-        let res = app
-            .agent
-            .post(url)
-            .config()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .http_status_as_error(false)
-            .build()
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .header("Accept", "application/json")
-            .send(body.as_bytes());
-        match res {
-            Err(e) => {
-                tried.push(format!("{url}: {e}"));
-                if let Ok(mut d) = app.down.lock() {
-                    d.insert(url.clone(), Instant::now());
-                }
-            }
-            Ok(mut r) => {
-                let status = r.status().as_u16();
-                let text = r.body_mut().read_to_string().unwrap_or_default();
-                if status == 200 {
-                    let v: Value = serde_json::from_str(&text).map_err(|_| ApiError(axum::http::StatusCode::BAD_GATEWAY, "Overpass returned something that is not JSON".into()))?;
-                    if let Some(remark) = v["remark"].as_str().filter(|r| r.contains("error") || r.contains("timed out") || r.contains("out of memory")) {
-                        return Err(ApiError(axum::http::StatusCode::BAD_GATEWAY, format!("Overpass: {remark}")));
+        let mut retried = false;
+        loop {
+            let res = app
+                .agent
+                .post(url)
+                .config()
+                .timeout_global(Some(Duration::from_secs(30)))
+                .http_status_as_error(false)
+                .build()
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("Accept", "application/json")
+                .send(body.as_bytes());
+            match res {
+                Err(e) => {
+                    tried.push(format!("{url}: {e}"));
+                    if let Ok(mut d) = app.down.lock() {
+                        d.insert(url.clone(), Instant::now());
                     }
-                    app.cache.put(key, json!({ "data": v, "instance": url }));
-                    return Ok((v, url.clone()));
+                    break;
                 }
-                match status {
-                    400 => return Err(bad(format!("Overpass rejected the query: {}", error_text(&text)))),
-                    429 | 502 | 503 | 504 => {
-                        tried.push(format!("{url}: HTTP {status} (busy)"));
-                        if let Ok(mut d) = app.down.lock() {
-                            d.insert(url.clone(), Instant::now() - DOWN_FOR + Duration::from_secs(60));
+                Ok(mut r) => {
+                    let status = r.status().as_u16();
+                    let text = r.body_mut().read_to_string().unwrap_or_default();
+                    if status == 200 {
+                        let v: Value = serde_json::from_str(&text).map_err(|_| ApiError(axum::http::StatusCode::BAD_GATEWAY, "Overpass returned something that is not JSON".into()))?;
+                        if let Some(remark) = v["remark"].as_str().filter(|r| r.contains("error") || r.contains("timed out") || r.contains("out of memory")) {
+                            return Err(ApiError(axum::http::StatusCode::BAD_GATEWAY, format!("Overpass: {remark}")));
                         }
+                        app.cache.put(key, json!({ "data": v, "instance": url }));
+                        return Ok((v, url.clone()));
                     }
-                    _ => tried.push(format!("{url}: HTTP {status}")),
+                    match status {
+                        400 => return Err(bad(format!("Overpass rejected the query: {}", error_text(&text)))),
+                        429 | 502 | 503 | 504 => {
+                            if !retried {
+                                // A busy public server often has room a moment later: one short retry before moving on.
+                                retried = true;
+                                std::thread::sleep(retry_wait());
+                                continue;
+                            }
+                            tried.push(format!("{url}: HTTP {status} (busy)"));
+                            if let Ok(mut d) = app.down.lock() {
+                                // Skip it for about a minute (checked_sub: an Instant can be younger than DOWN_FOR).
+                                d.insert(url.clone(), Instant::now().checked_sub(DOWN_FOR - Duration::from_secs(60)).unwrap_or_else(Instant::now));
+                            }
+                        }
+                        _ => tried.push(format!("{url}: HTTP {status}")),
+                    }
+                    break;
                 }
             }
         }
@@ -311,7 +327,7 @@ fn nominatim_item(r: &Value) -> Value {
     let (t, id) = (r["osm_type"].as_str().unwrap_or(""), r["osm_id"].as_i64().unwrap_or(0));
     let bb = r["boundingbox"].as_array().map(|b| b.iter().filter_map(|x| x.as_str().and_then(|s| s.parse::<f64>().ok())).collect::<Vec<_>>());
     json!({ "name": r["name"], "display_name": r["display_name"], "lat": f("lat"), "lon": f("lon"), "class": r["category"], "type": r["type"],
-            "bbox": bb.filter(|b| b.len() == 4), "osm_type": t, "osm_id": id, "address": r["address"],
+            "bbox": bb.filter(|b| b.len() == 4).map(|b| json!([b[2], b[0], b[3], b[1]])), "osm_type": t, "osm_id": id, "address": r["address"],
             "url": (!t.is_empty()).then(|| format!("https://www.openstreetmap.org/{t}/{id}")) })
 }
 
@@ -322,7 +338,7 @@ fn photon_item(f: &Value) -> Value {
     let t = match p["osm_type"].as_str() { Some("N") => "node", Some("W") => "way", Some("R") => "relation", _ => "" };
     let id = p["osm_id"].as_i64().unwrap_or(0);
     json!({ "name": p["name"], "display_name": parts.join(", "), "lat": c[1], "lon": c[0], "class": p["osm_key"], "type": p["osm_value"],
-            "bbox": p["extent"].as_array().filter(|e| e.len() == 4).map(|e| json!([e[3], e[1], e[0], e[2]])), "osm_type": t, "osm_id": id,
+            "bbox": p["extent"].as_array().filter(|e| e.len() == 4).map(|e| json!([e[0], e[3], e[2], e[1]])), "osm_type": t, "osm_id": id,
             "url": (!t.is_empty()).then(|| format!("https://www.openstreetmap.org/{t}/{id}")) })
 }
 
@@ -383,7 +399,13 @@ pub fn changeset_item(c: &Value) -> Value {
     let t = &c["tags"];
     json!({ "id": c["id"], "created_at": c["created_at"], "closed_at": c["closed_at"], "open": c["open"], "changes": c["changes_count"],
             "comment": t["comment"].as_str().map(|s| trim(s, 200)), "editor": t["created_by"], "source": t["source"].as_str().map(|s| trim(s, 80)),
-            "bbox": [c["min_lon"], c["min_lat"], c["max_lon"], c["max_lat"]], "url": format!("https://www.openstreetmap.org/changeset/{}", c["id"]) })
+            "bbox": [c["min_lon"], c["min_lat"], c["max_lon"], c["max_lat"]], "regional": is_regional(c), "url": format!("https://www.openstreetmap.org/changeset/{}", c["id"]) })
+}
+
+/// A changeset whose box is wider than about 0.1 degrees (roughly 10 km) is a regional or bulk edit, not a change at this spot.
+pub fn is_regional(c: &Value) -> bool {
+    let d = |a: &str, b: &str| c[a].as_f64().zip(c[b].as_f64()).map(|(x, y)| (x - y).abs());
+    d("max_lon", "min_lon").is_some_and(|w| w > 0.1) || d("max_lat", "min_lat").is_some_and(|h| h > 0.1)
 }
 
 pub fn note_item(f: &Value) -> Value {
@@ -416,6 +438,7 @@ async fn edits_handler(State(s): State<Shared>, Query(q): Q) -> Result<Json<Valu
         let open_notes = notes["items"].as_array().map(|a| a.iter().filter(|n| n["status"] == "open").count()).unwrap_or(0);
         Ok(json!({ "since": since, "bbox": bbox, "changesets": changesets, "notes": notes, "open_notes": open_notes,
                    "recently_edited": changesets["items"].as_array().map(|a| !a.is_empty()),
+                   "local_changesets": changesets["items"].as_array().map(|a| a.iter().filter(|c| c["regional"] == false).count()),
                    "privacy": "Mapper names are not shown. Changesets are public on openstreetmap.org; this view is about the place, not the editor.",
                    "licence": "© OpenStreetMap contributors, ODbL 1.0" }))
     }).await?))

@@ -45,8 +45,8 @@
     <div id="map" aria-label="Map: click to set the search centre"></div>
     <div id="readout" class="readout"></div>
     <aside id="panel" aria-label="Search controls">
-      <div class="seg" role="tablist" aria-label="Mode">
-        <button class="on" data-m="find">Find features</button>
+      <div class="seg" role="group" aria-label="Mode">
+        <button class="on" aria-pressed="true" data-m="find">Find features</button>
         <button data-m="place">Place search</button>
         <button data-m="edits">Recent edits</button>
         <button data-m="raw">Overpass QL</button>
@@ -65,6 +65,7 @@
           <div id="custom2" hidden class="two"><label class="field"><span class="label">Key</span><input id="key2"></label><label class="field"><span class="label">Value</span><input id="value2"></label></div>
         </div>
         <div class="row" style="margin-top:10px"><button class="btn primary grow" id="go-find">Search the map area</button><button class="btn" id="use-view" title="Use the visible map as the area">Use view</button></div>
+        <p class="hint" id="xl" hidden></p>
         <p class="hint">Click the map to move the centre. Searches the centre and radius, or the visible map if you press "Use view" (up to 0.6&deg; across).</p>
       </div>
 
@@ -106,6 +107,20 @@ out center tags 50;</textarea></label>
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const toast = (m, k = 'err') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
     let map, layer, centreMarker, circle, mode = 'find', provider = 'nominatim', lastGeo = null, useView = false;
+    const KEY = 'osnt.osm-query';
+    const mem = { get() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }, set(o) { try { localStorage.setItem(KEY, JSON.stringify({ ...mem.get(), ...o })); } catch { /* storage blocked */ } } };
+    // Shareable URL: ?lat=&lon=&radius=&preset=&zoom= opens the page and runs the search; ?q=place name runs a place search.
+    function syncUrl() {
+      try {
+        const [la, lo] = centre(), u = new URLSearchParams({ lat: la.toFixed(5), lon: lo.toFixed(5), radius: $('radius').value, preset: $('preset').value });
+        if (map) u.set('zoom', map.getZoom());
+        history.replaceState(null, '', '?' + u);
+        mem.set({ centre: `${la},${lo}`, radius: $('radius').value, preset: $('preset').value });
+        const x = $('xl'); x.hidden = false;
+        const q = `?lat=${la.toFixed(5)}&lon=${lo.toFixed(5)}`;
+        x.innerHTML = 'This point in: ' + [['sun-shadow', 'Sun & shadow'], ['terrain-view', 'Terrain'], ['place-photos', 'Photos'], ['satellite', 'Satellite'], ['wayback', 'Wayback'], ['geo-toolkit', 'Coordinates']].map(([id, n]) => `<a href="/p/${id}/${q}">${n}</a>`).join(' &middot; ');
+      } catch { /* invalid centre or sandboxed frame */ }
+    }
     const COLOURS = { a: '#0c7a62', b: '#d97706', '': '#2563eb' };
 
     async function api(path) {
@@ -114,7 +129,11 @@ out center tags 50;</textarea></label>
       return d;
     }
     const busy = m => { $('out').innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
-    const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; };
+    const fail = m => {
+      const busyHint = /Overpass|busy|No Overpass/i.test(m) ? '<p class="hint">Public Overpass servers are shared and are sometimes at capacity. Wait a minute and retry, or make the search smaller. <a href="#" id="chk-op">Check server status</a></p>' : '';
+      $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p>${busyHint}</div>`;
+      const c = $('chk-op'); if (c) c.onclick = async e => { e.preventDefault(); c.textContent = 'checking…'; try { const d = await api('api/status?probe=1'); c.parentNode.innerHTML = d.overpass.map(o => `${esc(o.url)}: ${o.reachable ? 'answers' : 'not answering'}`).join('<br>'); } catch (er) { c.textContent = er.message; } };
+    };
     function centre() {
       const v = $('centre').value.split(/[ ,;]+/).filter(Boolean).map(Number);
       if (v.length !== 2 || v.some(isNaN) || Math.abs(v[0]) > 90 || Math.abs(v[1]) > 180) throw new Error('Centre must be "lat, lon".');
@@ -134,7 +153,13 @@ out center tags 50;</textarea></label>
     function clearLayer() { if (layer) map.removeLayer(layer); layer = L.featureGroup().addTo(map); }
     function popup(f) {
       const p = f.properties, tags = Object.entries(p.tags || {}).slice(0, 12).map(([k, v]) => `${esc(k)}=${esc(String(v).slice(0, 80))}`).join('<br>');
-      return `<b>${esc(p.name || p.osm_type + ' ' + p.osm_id)}</b><br><small>${tags}</small><br><a href="${esc(p.url)}" target="_blank" rel="noopener">View on OSM</a>`;
+      return `<b>${esc(p.name || p.osm_type + ' ' + p.osm_id)}</b><br><small>${tags}</small><br><a href="${esc(p.url)}" target="_blank" rel="noopener">View on OSM</a>${popupLinks(f)}`;
+    }
+    function popupLinks(f) {
+      const g = f.geometry, c = g.type === 'Point' ? g.coordinates : g.coordinates.flat(g.type === 'Polygon' ? 1 : 0)[0];
+      if (!c) return '';
+      const q = `?lat=${(+c[1]).toFixed(6)}&lon=${(+c[0]).toFixed(6)}`;
+      return '<br><small>' + [['sun-shadow', 'Sun'], ['terrain-view', 'Terrain'], ['place-photos', 'Photos'], ['satellite', 'Satellite'], ['wayback', 'Wayback']].map(([id, n]) => `<a href="/p/${id}/${q}">${n}</a>`).join(' &middot; ') + '</small>';
     }
     function showGeoJSON(d) {
       clearLayer();
@@ -149,11 +174,16 @@ out center tags 50;</textarea></label>
       });
       if (feats.length) map.fitBounds(layer.getBounds().pad(.2), { maxZoom: 17 });
       const kind = p => p.properties.class === 'a' ? 'A' : p.properties.class === 'b' ? 'B' : '';
-      $('out').innerHTML = `<div class="row spread"><b>${m.count} result${m.count === 1 ? '' : 's'}</b>${m.truncated ? '<span class="badge warn">limit reached</span>' : ''}<button class="btn sm" id="dl">GeoJSON</button></div>`
+      $('out').innerHTML = `<div class="row spread"><b>${m.count} result${m.count === 1 ? '' : 's'}</b>${m.truncated ? '<span class="badge warn">limit reached</span>' : ''}<span class="row"><button class="btn sm" id="dl">GeoJSON</button><button class="btn sm" id="dl-csv">CSV</button></span></div>`
         + (feats.length ? '' : '<div class="state" style="margin-top:8px"><div class="h3">Nothing found</div><p>Try a larger radius, or a different feature type.</p></div>')
         + feats.map((f, i) => `<div class="item" data-i="${i}"><b>${esc(f.properties.name || f.properties.osm_type + ' ' + f.properties.osm_id)}</b>${kind(f) ? ` <span class="badge">${kind(f)}</span>` : ''}<small>${esc(Object.entries(f.properties.tags).slice(0, 3).map(([k, v]) => k + '=' + v).join(', '))}</small></div>`).join('')
         + `<h3>Overpass query</h3><pre class="ql">${esc(m.query)}</pre><p class="hint">Server: ${esc(m.instance)} &middot; data ${esc(m.data_timestamp || 'timestamp unknown')}</p>`;
       document.querySelectorAll('.item[data-i]').forEach(el => el.onclick = () => { const f = feats[+el.dataset.i]; map.setView([f._l.getLatLng ? f._l.getLatLng().lat : f._l.getBounds().getCenter().lat, f._l.getLatLng ? f._l.getLatLng().lng : f._l.getBounds().getCenter().lng], Math.max(map.getZoom(), 16)); f._l.openPopup(); });
+      $('dl-csv').onclick = () => {
+        const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+        const csv = 'osm_type,osm_id,name,lat,lon,class,tags,url\n' + feats.map(f => { const g = f._l.getLatLng ? f._l.getLatLng() : f._l.getBounds().getCenter(); return [f.properties.osm_type, f.properties.osm_id, q(f.properties.name), g.lat.toFixed(6), g.lng.toFixed(6), f.properties.class, q(Object.entries(f.properties.tags).map(([k, v]) => k + '=' + v).join('; ')), f.properties.url].join(','); }).join('\n');
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'osm-features.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      };
       $('dl').onclick = () => { const clean = { type: 'FeatureCollection', features: feats.map(f => ({ type: f.type, geometry: f.geometry, properties: f.properties })) }; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(clean)], { type: 'application/geo+json' })); a.download = 'osm-features.geojson'; a.click(); };
     }
 
@@ -164,7 +194,7 @@ out center tags 50;</textarea></label>
         if (useView) { const b = map.getBounds(); q.set('bbox', [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(x => x.toFixed(6)).join(',')); }
         else { const [la, lo] = centre(); q.set('lat', la); q.set('lon', lo); q.set('radius', $('radius').value); }
         if ($('near').value) { q.set('near', $('near').value); q.set('near_radius', $('nearr').value); if ($('near').value === 'custom') { q.set('key2', $('key2').value.trim()); if ($('value2').value.trim()) q.set('value2', $('value2').value.trim()); } }
-        busy('Asking Overpass…'); showGeoJSON(await api('api/find?' + q));
+        busy('Asking Overpass…'); showGeoJSON(await api('api/find?' + q)); syncUrl();
       } catch (e) { fail(e.message); }
     }
     async function raw() {
@@ -177,13 +207,11 @@ out center tags 50;</textarea></label>
     }
     function pick(r) {
       setCentre(r.lat, r.lon, false);
-      if (r.bbox) map.fitBounds([[r.bbox[0], r.bbox[2]], [r.bbox[1], r.bbox[3]]], { maxZoom: 17 }); else map.setView([r.lat, r.lon], 16);
+      if (r.bbox) map.fitBounds([[r.bbox[1], r.bbox[0]], [r.bbox[3], r.bbox[2]]], { maxZoom: 17 }); else map.setView([r.lat, r.lon], 16);
     }
     $('geo-form').onsubmit = async e => {
       e.preventDefault(); if (!$('gq').value.trim()) return;
       try { busy('Searching…'); const d = await api(`api/geocode?provider=${provider}&q=${encodeURIComponent($('gq').value)}`);
-        // Photon boxes are [minlon, minlat, maxlon, maxlat] -> normalise to [s, n, w, e] like Nominatim.
-        d.results.forEach(r => { if (r.bbox && d.provider === 'photon') r.bbox = [r.bbox[1], r.bbox[3], r.bbox[0], r.bbox[2]]; });
         geoList(d.results, pick); } catch (er) { fail(er.message); }
     };
     $('prov').querySelectorAll('button').forEach(b => b.onclick = () => { provider = b.dataset.p; $('prov').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
@@ -198,20 +226,24 @@ out center tags 50;</textarea></label>
         const d = await api(`api/edits?lat=${la}&lon=${lo}&radius=${$('eradius').value}&days=${$('edays').value}`);
         clearLayer();
         const cs = d.changesets.items, ns = d.notes.items;
-        cs.filter(c => c.bbox[2] - c.bbox[0] < 0.1 && c.bbox[3] - c.bbox[1] < 0.1).forEach(c => L.rectangle([[c.bbox[1], c.bbox[0]], [c.bbox[3], c.bbox[2]]], { color: '#2563eb', weight: 1, fillOpacity: .08 }).addTo(layer).bindPopup(`<b>Changeset ${c.id}</b><br>${esc(c.comment || '')}<br><a href="${esc(c.url)}" target="_blank" rel="noopener">View</a>`));
+        cs.filter(c => !c.regional).forEach(c => L.rectangle([[c.bbox[1], c.bbox[0]], [c.bbox[3], c.bbox[2]]], { color: '#2563eb', weight: 1, fillOpacity: .08 }).addTo(layer).bindPopup(`<b>Changeset ${c.id}</b><br>${esc(c.comment || '')}<br><a href="${esc(c.url)}" target="_blank" rel="noopener">View</a>`));
         ns.forEach(n => L.circleMarker([n.lat, n.lon], { radius: 6, color: '#fff', weight: 1.5, fillColor: n.status === 'open' ? '#dc2626' : '#6b7280', fillOpacity: 1 }).addTo(layer).bindPopup(`<b>Note ${n.id}</b> (${esc(n.status)})<br>${esc(n.text || '')}<br><a href="${esc(n.url)}" target="_blank" rel="noopener">View</a>`));
         const err = [d.changesets.error, d.notes.error].filter(Boolean).map(e => `<div class="notice warn" style="margin-top:8px">${esc(e)}</div>`).join('');
-        $('out').innerHTML = `<div class="notice ${cs.length ? 'info' : ''}"><div><b>${cs.length} changeset${cs.length === 1 ? '' : 's'}</b> since ${esc(d.since.slice(0, 10))}, <b>${d.open_notes} open note${d.open_notes === 1 ? '' : 's'}</b>.</div></div>` + err
-          + (cs.length ? '<h3>Changesets (newest first)</h3>' : '') + cs.map(c => `<div class="item"><b>${esc(c.created_at.slice(0, 16).replace('T', ' '))}</b> &middot; ${c.changes ?? '?'} changes<small>${esc(c.comment || '(no comment)')}</small><small>${esc(c.editor || '')} &middot; <a href="${esc(c.url)}" target="_blank" rel="noopener">changeset ${c.id}</a></small></div>`).join('')
+        $('out').innerHTML = `<div class="notice ${cs.length ? 'info' : ''}"><div><b>${cs.length} changeset${cs.length === 1 ? '' : 's'}</b> (${d.local_changesets} local, ${cs.length - d.local_changesets} regional or bulk) since ${esc(d.since.slice(0, 10))}, <b>${d.open_notes} open note${d.open_notes === 1 ? '' : 's'}</b>.</div></div>` + err
+          + (cs.length ? '<h3>Changesets (newest first)</h3>' : '') + cs.map(c => `<div class="item"><b>${esc(c.created_at.slice(0, 16).replace('T', ' '))}</b> &middot; ${c.changes ?? '?'} changes${c.regional ? ' <span class="badge">regional</span>' : ''}<small>${esc(c.comment || '(no comment)')}</small><small>${esc(c.editor || '')} &middot; <a href="${esc(c.url)}" target="_blank" rel="noopener">changeset ${c.id}</a></small></div>`).join('')
           + (ns.length ? '<h3>Map notes</h3>' : '') + ns.map(n => `<div class="item"><b>${esc(n.status)}</b> &middot; ${esc(String(n.created).slice(0, 10))}<small>${esc(n.text || '')}</small><small><a href="${esc(n.url)}" target="_blank" rel="noopener">note ${n.id}</a></small></div>`).join('')
           + `<p class="hint">${esc(d.privacy)}</p>`;
         map.setView([la, lo], Math.max(map.getZoom(), 15));
       } catch (e) { fail(e.message); }
     };
 
+    document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('item')) { e.preventDefault(); e.target.click(); } });
+    new MutationObserver(() => document.querySelectorAll('.item[data-i]:not([tabindex])').forEach(el => { el.tabIndex = 0; el.setAttribute('role', 'button'); })).observe($('out'), { childList: true, subtree: true });
+    for (const id of ['centre', 'radius', 'key', 'value', 'nearr']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $(id === 'centre' || id === 'radius' ? 'go-find' : 'go-find').click(); } });
     function setMode(m) {
       mode = m;
-      document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+      document.querySelectorAll('aside > .seg:first-child button').forEach(b => { b.classList.toggle('on', b.dataset.m === m); b.setAttribute('aria-pressed', b.dataset.m === m); });
+      syncUrl();
       document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'p-' + m);
       drawCircle();
     }
@@ -229,9 +261,23 @@ out center tags 50;</textarea></label>
         $('preset').innerHTML = opts; $('near').innerHTML = '<option value="">Anything</option>' + opts;
       } catch (e) { toast('Could not load presets: ' + e.message); }
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
-      map.setView([47.3769, 8.5417], 14);
-      setCentre(47.3769, 8.5417, false);
-      map.on('click', e => setCentre(e.latlng.lat, e.latlng.lng, false));
+      const q = new URLSearchParams(location.search), saved = mem.get();
+      let la = parseFloat(q.get('lat')), lo = parseFloat(q.get('lon')), place = q.get('q');
+      const m = (place || '').match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ;]\s*(-?\d+(?:\.\d+)?)\s*$/);
+      if (m) { la = +m[1]; lo = +m[2]; place = null; }
+      const deep = isFinite(la) && isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180;
+      if (!deep && saved.centre) { const v = saved.centre.split(',').map(Number); if (v.length === 2 && v.every(isFinite)) { la = v[0]; lo = v[1]; } }
+      if (!isFinite(la) || !isFinite(lo)) { la = 47.3769; lo = 8.5417; }
+      const pr = q.get('preset') || saved.preset; if (pr && [...$('preset').options].some(o => o.value === pr)) $('preset').value = pr;
+      const rad = q.get('radius') || saved.radius; if (rad && +rad > 0) $('radius').value = rad;
+      const zm = parseFloat(q.get('zoom'));
+      map.setView([la, lo], isFinite(zm) ? zm : 14);
+      setCentre(la, lo, false);
+      map.on('click', e => { setCentre(e.latlng.lat, e.latlng.lng, false); syncUrl(); });
+      $('preset').onchange(); 
+      if (place) { setMode('place'); $('gq').value = place; $('geo-form').requestSubmit(); }
+      else if (deep) $('go-find').click();
+      else syncUrl();
     })();
   </script>
 </body>

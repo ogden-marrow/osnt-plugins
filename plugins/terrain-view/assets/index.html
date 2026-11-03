@@ -45,8 +45,8 @@
     <div id="map" aria-label="Map: click to place points"></div>
     <div id="readout" class="readout"></div>
     <aside id="panel" aria-label="Terrain controls">
-      <div class="seg" role="tablist" aria-label="Mode">
-        <button class="on" data-m="horizon">Horizon</button>
+      <div class="seg" role="group" aria-label="Mode">
+        <button class="on" aria-pressed="true" data-m="horizon">Horizon</button>
         <button data-m="view">Visible from here</button>
         <button data-m="los">Line of sight</button>
         <button data-m="profile">Profile</button>
@@ -73,6 +73,7 @@
         <label class="check"><input type="checkbox" id="chk"> Cross-check with Open-Meteo and OpenTopoData</label></div>
 
       <div id="out" aria-live="polite"></div>
+      <p class="hint" id="xl" style="margin-top:10px"></p>
       <div class="attrib">
         Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen/AWS Terrain Tiles</a> (Terrarium; sources include SRTM, USGS NED, ETOPO1 and others, see their attribution list).
         Elevation cross-checks: Open-Meteo and OpenTopoData (SRTM 30 m). Curvature and refraction (k = 0.13) are applied. Heights are bare terrain: trees and buildings are not included.
@@ -97,6 +98,25 @@
     const busy = m => { $('out').innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
     const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; };
     const kv = rows => `<table class="kv">${rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
+    const KEY = 'osnt.terrain-view';
+    const mem = { get() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }, set(o) { try { localStorage.setItem(KEY, JSON.stringify({ ...mem.get(), ...o })); } catch { /* storage blocked */ } } };
+    // Shareable URL: ?lat=&lon=[&lat2=&lon2=]&mode=horizon|view|los|profile|elev opens the page and runs it.
+    function syncUrl() {
+      try {
+        const a = A(); if (a.some(isNaN)) return;
+        const u = new URLSearchParams({ mode, lat: a[0].toFixed(5), lon: a[1].toFixed(5) });
+        if (two()) { const b = B(); if (!b.some(isNaN)) { u.set('lat2', b[0].toFixed(5)); u.set('lon2', b[1].toFixed(5)); } }
+        history.replaceState(null, '', '?' + u);
+        mem.set({ lat: a[0], lon: a[1], mode });
+        const qs = `?lat=${a[0].toFixed(5)}&lon=${a[1].toFixed(5)}`;
+        $('xl').innerHTML = 'This point in: ' + [['sun-shadow', 'Sun & shadow'], ['place-photos', 'Photos'], ['satellite', 'Satellite'], ['wayback', 'Wayback'], ['geo-toolkit', 'Coordinates']].map(([id, n]) => `<a href="/p/${id}/${qs}">${n}</a>`).join(' &middot; ');
+      } catch { /* sandboxed frame */ }
+    }
+    function csvButton(name, columns, rows) {
+      const b = document.createElement('button'); b.className = 'btn sm'; b.style.marginTop = '8px'; b.textContent = 'Download CSV';
+      b.onclick = () => { const csv = columns.join(',') + '\n' + rows.map(r => r.map(v => v ?? '').join(',')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name + '.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+      $('out').append(b);
+    }
     const A = () => [num('la'), num('lo')], B = () => [num('lb'), num('ob')];
     function chk(p) { if (p.some(x => isNaN(x)) || Math.abs(p[0]) > 85 || Math.abs(p[1]) > 180) throw new Error('Coordinates must be numbers (latitude within 85 degrees).'); return p; }
     function clearLayer() { if (!map) return; if (layer) map.removeLayer(layer); layer = L.featureGroup().addTo(map); }
@@ -110,16 +130,16 @@
     function drawLine() { if (!map || !pa) return; if (line) { map.removeLayer(line); line = null; } if (two()) line = L.polyline([pa.getLatLng(), pb.getLatLng()], { color: '#0c7a62', weight: 2, dashArray: '5 5' }).addTo(map); }
     function place(lat, lon, second) {
       const f = second ? ['lb', 'ob'] : ['la', 'lo'];
-      $(f[0]).value = lat.toFixed(5); $(f[1]).value = lon.toFixed(5); syncPins();
+      $(f[0]).value = lat.toFixed(5); $(f[1]).value = lon.toFixed(5); syncPins(); syncUrl();
     }
     function setMode(m) {
       mode = m; activeB = false;
-      document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+      document.querySelectorAll('aside > .seg:first-child button').forEach(b => { b.classList.toggle('on', b.dataset.m === m); b.setAttribute('aria-pressed', b.dataset.m === m); });
       document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'p-' + m);
       $('bpoint').hidden = !two(); if (!two() && pb) pb.setOpacity(0); else if (pb) pb.setOpacity(1);
       $('la-label').textContent = two() ? 'Point A lat' : 'Observer lat'; $('lo-label').textContent = two() ? 'Point A lon' : 'Observer lon';
       $('clickhint').textContent = two() ? 'Clicks alternate between A and B. Drag either pin to adjust.' : 'Click the map to place the observer, or drag the pin.';
-      $('out').innerHTML = ''; clearLayer(); drawLine();
+      $('out').innerHTML = ''; clearLayer(); drawLine(); syncUrl();
     }
 
     // ---- canvas charts ----
@@ -164,7 +184,7 @@
           + kv([['Observer ground', d.observer.ground_m + ' m'], ['Eye elevation', d.observer.eye_elevation_m + ' m'], ['Highest', `${d.highest.elevation_deg.toFixed(2)}° at ${d.highest.azimuth}° (${d.highest.distance_km} km)`]])
           + (d.peaks.length ? `<h3>Prominent peaks</h3><div class="table-wrap"><table class="data"><thead><tr><th>#</th><th>Bearing</th><th class="num">Angle</th><th class="num">Dist</th><th class="num">Height</th></tr></thead><tbody>${d.peaks.map((p, i) => `<tr><td>${i + 1}</td><td>${p.azimuth}°</td><td class="num">${p.elevation_deg.toFixed(1)}°</td><td class="num">${p.distance_km} km</td><td class="num">${Math.round(p.height_m)} m</td></tr>`).join('')}</tbody></table></div>` : '')
           + `<p class="hint">${esc(d.note)}${d.tiles && d.tiles.missing ? ` ${d.tiles.missing} tiles had no data.` : ''}</p>`;
-        redraw = () => drawHorizon(d); redraw();
+        redraw = () => drawHorizon(d); redraw(); csvButton('horizon', d.columns, d.horizon); syncUrl();
       } catch (e) { redraw = null; fail(e.message); }
     }
     function dest(lat, lon, brg, dist) {
@@ -197,7 +217,7 @@
         $('out').innerHTML = `<div class="notice ${d.visible ? 'ok' : 'err'}"><div><b>${d.visible ? 'Line of sight is clear' : 'Blocked by terrain'}</b> over ${(d.distance_m / 1000).toFixed(2)} km. Minimum clearance ${d.min_clearance_m} m.</div></div><canvas id="pf" class="chart" style="margin-top:10px" role="img" aria-label="Terrain and sight line"></canvas>`
           + kv([['Ground at A / B', `${d.from.ground_m} m / ${d.to.ground_m} m`], ['Eye / target', `${d.from.eye_m} m / ${d.to.eye_m} m`], ['Obstruction', d.worst_obstruction ? `${(d.worst_obstruction.distance_m / 1000).toFixed(2)} km from A, ${d.worst_obstruction.above_line_m} m above the line` : null], ['Curvature drop mid-way', d.curvature_drop_mid_m + ' m']])
           + `<p class="hint">Dashed line: sight line. Filled: terrain raised by the Earth's curvature (k=${d.refraction_k}). ${esc(d.note)}</p>`;
-        redraw = () => drawLine2(d, true); redraw();
+        redraw = () => drawLine2(d, true); redraw(); csvButton('line-of-sight', d.columns, d.samples); syncUrl();
       } catch (e) { redraw = null; fail(e.message); }
     }
     async function profile() {
@@ -206,7 +226,7 @@
         const d = await api(`api/profile?lat1=${a[0]}&lon1=${a[1]}&lat2=${b[0]}&lon2=${b[1]}&n=200`);
         $('out').innerHTML = `<canvas id="pf" class="chart" role="img" aria-label="Elevation profile"></canvas>` + kv([['Length', (d.distance_m / 1000).toFixed(2) + ' km, bearing ' + d.bearing + '°'], ['Min / max', `${d.min_m} m / ${d.max_m} m`], ['Climb / descent', `+${d.gain_m} m / -${d.loss_m} m`], ['Start / end', `${d.start_m} m / ${d.end_m} m`]])
           + `<p class="hint">${d.samples.length} samples, about ${d.sample_spacing_m} m apart.</p>`;
-        redraw = () => drawLine2(d, false); redraw();
+        redraw = () => drawLine2(d, false); redraw(); csvButton('profile', d.columns, d.samples); syncUrl();
       } catch (e) { redraw = null; fail(e.message); }
     }
     async function elev() {
@@ -215,21 +235,34 @@
         const d = await api(`api/elevation?lat=${la}&lon=${lo}&check=${$('chk').checked ? 'all' : 'none'}`);
         const c = d.checks || {};
         $('out').innerHTML = `<div class="big" style="font-size:24px;font-weight:650">${d.elevation_m} m</div>` + kv([['Tiles', `zoom ${d.tile_zoom}, about ${d.resolution_m} m per pixel`], ['Open-Meteo', 'open_meteo_m' in c ? (c.open_meteo_m ?? 'unavailable') + (c.open_meteo_m != null ? ' m' : '') : null], ['OpenTopoData SRTM30', 'opentopodata_srtm30m_m' in c ? (c.opentopodata_srtm30m_m ?? 'unavailable') + (c.opentopodata_srtm30m_m != null ? ' m' : '') : null], ['Largest difference', d.max_difference_m != null ? d.max_difference_m + ' m' : null]])
-          + '<p class="hint">Services use different source grids, so differences of a few metres up to tens in steep terrain are normal.</p>';
+          + (d.note ? `<div class="notice warn" style="margin-top:8px">${esc(d.note)}</div>` : '') + '<p class="hint">Services use different source grids, so differences of a few metres up to tens in steep terrain are normal.</p>';
         redraw = null;
       } catch (e) { fail(e.message); }
     }
     document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.onclick = () => setMode(b.dataset.m));
-    $('go-horizon').onclick = horizon; $('go-view').onclick = view; $('go-los').onclick = los; $('go-profile').onclick = profile; $('go-elev').onclick = elev;
-    for (const id of ['la', 'lo', 'lb', 'ob']) $(id).addEventListener('change', () => { syncPins(); });
+    const go = fn => async () => { await fn(); $('out').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    $('go-horizon').onclick = go(horizon); $('go-view').onclick = go(view); $('go-los').onclick = go(los); $('go-profile').onclick = go(profile); $('go-elev').onclick = go(elev);
+    for (const id of ['la', 'lo', 'lb', 'ob']) $(id).addEventListener('change', () => { syncPins(); syncUrl(); });
+    for (const id of ['la', 'lo', 'lb', 'ob', 'hr', 'he', 'vr', 'vt', 'h1', 'h2']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('go-' + mode).click(); } });
 
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
       map.setView([46.56, 8.1], 10);
       pa = L.marker([46.56, 8.02], { draggable: true, title: 'A / observer' }).addTo(map).on('dragend', e => { const p = e.target.getLatLng(); place(p.lat, p.lng, false); });
       pb = L.marker([46.54, 8.25], { draggable: true, title: 'B', opacity: 0 }).addTo(map).on('dragend', e => { const p = e.target.getLatLng(); place(p.lat, p.lng, true); });
-      setMode(mode);
-      map.on('click', e => { if (two()) { place(e.latlng.lat, e.latlng.lng, activeB); activeB = !activeB; } else place(e.latlng.lat, e.latlng.lng, false); });
+      const q = new URLSearchParams(location.search), saved = mem.get(), n = k => parseFloat(q.get(k));
+      const deep = isFinite(n('lat')) && isFinite(n('lon'));
+      let m = q.get('mode');
+      if (!['horizon', 'view', 'los', 'profile', 'elev'].includes(m)) m = isFinite(n('lat2')) && isFinite(n('lon2')) ? 'los' : (deep ? 'horizon' : (saved.mode || 'horizon'));
+      const la0 = deep ? n('lat') : saved.lat, lo0 = deep ? n('lon') : saved.lon;
+      if (isFinite(la0) && isFinite(lo0)) { $('la').value = (+la0).toFixed(5); $('lo').value = (+lo0).toFixed(5); }
+      if (isFinite(n('lat2')) && isFinite(n('lon2'))) { $('lb').value = n('lat2').toFixed(5); $('ob').value = n('lon2').toFixed(5); }
+      if (isFinite(n('range'))) { $('hr').value = n('range'); $('vr').value = Math.min(40, n('range')); }
+      if (isFinite(n('eye'))) { $('he').value = n('eye'); $('h1').value = n('eye'); }
+      syncPins(); map.setView(pa.getLatLng(), isFinite(n('zoom')) ? n('zoom') : 10);
+      setMode(m);
+      if (deep) $('go-' + m).click();
+      map.on('click', e => { if (two()) { place(e.latlng.lat, e.latlng.lng, activeB); activeB = !activeB; } else place(e.latlng.lat, e.latlng.lng, false); syncUrl(); });
     })();
   </script>
 </body>

@@ -117,6 +117,7 @@
         $('slideRow').hidden = !days.length; $('slide').min = days[0] ?? 0; $('slide').max = days[1] ?? 0; $('slide').value = days[1] ?? 0;
         if (!d.total) $('msg').innerHTML = `<div class="notice">No events matched. ${d.source === 'ucdp' ? 'UCDP is released once a year, so the latest months of the current year are not in the dataset yet. Try an earlier period or another version.' : ''}</div>`;
         draw(true);
+        try { const q = new URLSearchParams({ source: d.source, start: d.start, end: d.end }); if ($('country').value.trim()) q.set('country', $('country').value.trim()); history.replaceState(null, '', '?' + q); } catch { /* frame */ }
       } catch (err) {
         data = []; draw(); summary(null);
         $('msg').innerHTML = `<div class="notice ${err.setup ? 'warn' : 'err'}" role="alert"><div>${esc(err.message)}${err.setup === 'UCDP_ACCESS_TOKEN' ? ' <a href="https://ucdp.uu.se/apidocs/" rel="noopener noreferrer" target="_blank">Request a UCDP token</a>.' : ''}</div></div>`;
@@ -186,6 +187,11 @@
       } catch { /* status is informational */ }
       // First load: the last quarter of the dataset's final year (UCDP lags real time).
       const y = new Date().getUTCFullYear() - 2; $('start').value = `${y}-10-01`; $('end').value = `${y}-12-31`;
+      // Deep link: ?country=&start=&end=&source=ucdp|acled&type= pre-fills the form and loads; the address follows each load.
+      const u = new URLSearchParams(location.search);
+      if (['ucdp', 'acled'].includes(u.get('source'))) $('source').value = u.get('source');
+      for (const k of ['start', 'end']) if (/^\d{4}-\d{2}-\d{2}$/.test(u.get(k) || '')) $(k).value = u.get(k);
+      if (u.get('country')) $('country').value = u.get('country');
       load();
     })();
     $('f').onsubmit = load;

@@ -36,24 +36,106 @@ pub fn path(points: &[LL]) -> Value {
         total += s;
         let mid = direct(w[0], a1, s / 2.0);
         legs.push(json!({ "from": [w[0].lat, w[0].lon], "to": [w[1].lat, w[1].lon], "meters": r(s, 3), "km": r(s / 1000.0, 6), "miles": r(s / 1609.344, 6), "nautical_miles": r(s / 1852.0, 6),
-            "initial_bearing": r(a1, 4), "initial_compass": compass(a1), "final_bearing": r(a2, 4), "midpoint": { "lat": r(mid.lat, 7), "lon": r(mid.lon, 7) } }));
+            "initial_bearing": (s > 1e-6).then(|| r(a1, 4)), "initial_compass": (s > 1e-6).then(|| compass(a1)), "final_bearing": (s > 1e-6).then(|| r(a2, 4)), "midpoint": { "lat": r(mid.lat, 7), "lon": r(mid.lon, 7) } }));
     }
     json!({ "legs": legs, "total_meters": r(total, 3), "total_km": r(total / 1000.0, 6), "total_miles": r(total / 1609.344, 6), "total_nautical_miles": r(total / 1852.0, 6),
             "method": "Karney geodesic on the WGS84 ellipsoid (sub-millimetre accuracy)" })
 }
 
-fn polygon_feature(ring: &[LL], props: Value) -> Value {
-    let mut coords: Vec<Value> = ring.iter().map(|p| json!([r(p.lon, 7), r(p.lat, 7)])).collect();
-    if let Some(f) = coords.first().cloned() {
-        coords.push(f);
+/// Walks a ring so that consecutive longitudes never jump by more than 180 degrees (the ring may then leave -180..180).
+fn unwrap_ring(ring: &[LL]) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(ring.len());
+    for p in ring {
+        let mut lon = p.lon;
+        if let Some(prev) = out.last() {
+            while lon - prev.0 > 180.0 {
+                lon -= 360.0;
+            }
+            while lon - prev.0 < -180.0 {
+                lon += 360.0;
+            }
+        }
+        out.push((lon, p.lat));
     }
-    json!({ "type": "Feature", "properties": props, "geometry": { "type": "Polygon", "coordinates": [coords] } })
+    out
+}
+
+/// Sutherland-Hodgman clip of a closed (lon, lat) ring to a longitude window.
+fn clip_lon(ring: &[(f64, f64)], lo: f64, hi: f64) -> Vec<(f64, f64)> {
+    let mut cur = ring.to_vec();
+    for (edge, keep_greater) in [(lo, true), (hi, false)] {
+        let inside = |p: &(f64, f64)| if keep_greater { p.0 >= edge } else { p.0 <= edge };
+        let mut next = vec![];
+        for i in 0..cur.len() {
+            let (a, b) = (cur[i], cur[(i + 1) % cur.len()]);
+            let cut = || {
+                let t = (edge - a.0) / (b.0 - a.0);
+                (edge, a.1 + t * (b.1 - a.1))
+            };
+            match (inside(&a), inside(&b)) {
+                (true, true) => next.push(b),
+                (true, false) => next.push(cut()),
+                (false, true) => {
+                    next.push(cut());
+                    next.push(b);
+                }
+                _ => {}
+            }
+        }
+        cur = next;
+        if cur.is_empty() {
+            break;
+        }
+    }
+    cur
+}
+
+/// A polygon feature for a ring. A ring that crosses the antimeridian is cut there into a MultiPolygon (RFC 7946 section 3.1.9),
+/// so no edge runs the long way round the world.
+fn polygon_feature(ring: &[LL], props: Value) -> Value {
+    let pts = unwrap_ring(ring);
+    let (min, max) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
+    let close = |v: &[(f64, f64)]| -> Vec<Value> {
+        let mut c: Vec<Value> = v.iter().map(|p| json!([r(p.0, 7), r(p.1, 7)])).collect();
+        if let Some(f) = c.first().cloned() {
+            c.push(f);
+        }
+        c
+    };
+    if min >= -180.0 && max <= 180.0 {
+        return json!({ "type": "Feature", "properties": props, "geometry": { "type": "Polygon", "coordinates": [close(&pts)] } });
+    }
+    let mut parts = vec![];
+    for k in -1..=1 {
+        let off = 360.0 * k as f64;
+        let clipped = clip_lon(&pts, -180.0 + off, 180.0 + off);
+        if clipped.len() >= 3 {
+            let shifted: Vec<(f64, f64)> = clipped.iter().map(|p| (p.0 - off, p.1)).collect();
+            parts.push(json!([close(&shifted)]));
+        }
+    }
+    let mut props = props;
+    props["crosses_antimeridian"] = json!(true);
+    json!({ "type": "Feature", "properties": props, "geometry": { "type": "MultiPolygon", "coordinates": parts } })
+}
+
+/// A box (south, west, north, east) as a polygon feature; west greater than east means the box crosses the antimeridian.
+pub fn box_feature(b: [f64; 4], props: Value) -> Value {
+    let e = if b[3] < b[1] { b[3] + 360.0 } else { b[3] };
+    let ring = [LL { lat: b[0], lon: b[1] }, LL { lat: b[0], lon: e }, LL { lat: b[2], lon: e }, LL { lat: b[2], lon: b[1] }];
+    polygon_feature(&ring, props)
 }
 
 /// Circle of `radius` metres around `c` as a polygon with `n` vertices (counter-clockwise).
 pub fn circle(c: LL, radius: f64, n: usize) -> Value {
     let ring: Vec<LL> = (0..n).map(|i| direct(c, 360.0 * i as f64 / n as f64, radius)).collect();
-    polygon_feature(&ring, json!({ "kind": "circle", "radius_m": radius, "centre": [c.lat, c.lon] }))
+    let pole = inverse(c, LL { lat: if c.lat >= 0.0 { 90.0 } else { -90.0 }, lon: 0.0 }).0 < radius;
+    let mut f = polygon_feature(&ring, json!({ "kind": "circle", "radius_m": radius, "centre": [c.lat, c.lon] }));
+    if pole {
+        f["properties"]["encloses_pole"] = json!(true);
+        f["properties"]["warning"] = json!("This circle contains a pole, so it cannot be drawn as an ordinary longitude/latitude polygon.");
+    }
+    f
 }
 
 /// Bounding box (south, west, north, east) of a circle of `radius` around `c`.
@@ -67,13 +149,14 @@ pub fn bbox_around(c: LL, radius: f64) -> [f64; 4] {
 
 /// Grid of square-ish cells of about `cell` metres over a box. Cell edges are parallels and meridians.
 pub fn grid(b: [f64; 4], cell: f64, max_cells: usize) -> Result<Value, String> {
-    let [s, w, n, e] = b;
+    let [s, w, n, e0] = b;
+    let e = if e0 < w { e0 + 360.0 } else { e0 }; // west greater than east: the box crosses the antimeridian
     if !(s < n && w < e) {
         return Err("box must have south < north and west < east".into());
     }
-    let mid = LL { lat: (s + n) / 2.0, lon: (w + e) / 2.0 };
+    let mid = LL { lat: (s + n) / 2.0, lon: ((w + e) / 2.0 + 540.0).rem_euclid(360.0) - 180.0 };
     let dlat = (direct(mid, 0.0, cell).lat - mid.lat).abs();
-    let dlon = (direct(mid, 90.0, cell).lon - mid.lon).abs();
+    let dlon = ((direct(mid, 90.0, cell).lon - mid.lon + 540.0).rem_euclid(360.0) - 180.0).abs(); // wrapped: the box may straddle the date line
     let (rows, cols) = (((n - s) / dlat).ceil() as usize, ((e - w) / dlon).ceil() as usize);
     if rows * cols > max_cells {
         return Err(format!("that is {} cells; the limit is {max_cells}. Use a larger cell size or a smaller box", rows * cols));
@@ -83,8 +166,7 @@ pub fn grid(b: [f64; 4], cell: f64, max_cells: usize) -> Result<Value, String> {
         for j in 0..cols {
             let (s0, w0) = (s + i as f64 * dlat, w + j as f64 * dlon);
             let (n0, e0) = ((s0 + dlat).min(n), (w0 + dlon).min(e));
-            let ring = [LL { lat: s0, lon: w0 }, LL { lat: s0, lon: e0 }, LL { lat: n0, lon: e0 }, LL { lat: n0, lon: w0 }];
-            feats.push(polygon_feature(&ring, json!({ "row": i, "col": j, "id": format!("R{}C{}", i + 1, j + 1) })));
+            feats.push(box_feature([s0, w0, n0, e0], json!({ "row": i, "col": j, "id": format!("R{}C{}", i + 1, j + 1) })));
         }
     }
     Ok(json!({ "type": "FeatureCollection", "features": feats, "properties": { "rows": rows, "cols": cols, "cell_m": cell } }))
@@ -107,6 +189,60 @@ pub fn line_length(pts: &[(f64, f64)]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identical_points_have_no_bearing() {
+        let p = LL { lat: 10.0, lon: 20.0 };
+        let v = path(&[p, p]);
+        assert_eq!(v["legs"][0]["meters"], 0.0);
+        assert!(v["legs"][0]["initial_bearing"].is_null());
+    }
+
+    fn lons(v: &Value) -> Vec<f64> {
+        fn walk(x: &Value, out: &mut Vec<f64>) {
+            match x.as_array() {
+                Some(a) if a.len() == 2 && a[0].is_f64() => out.push(a[0].as_f64().unwrap()),
+                Some(a) => a.iter().for_each(|y| walk(y, out)),
+                None => {}
+            }
+        }
+        let mut out = vec![];
+        walk(&v["geometry"]["coordinates"], &mut out);
+        out
+    }
+
+    #[test]
+    fn circle_across_the_date_line_is_cut_into_two_polygons() {
+        let f = circle(LL { lat: 0.0, lon: 179.9 }, 30_000.0, 72);
+        assert_eq!(f["geometry"]["type"], "MultiPolygon", "{f}");
+        assert_eq!(f["properties"]["crosses_antimeridian"], true);
+        assert_eq!(f["geometry"]["coordinates"].as_array().unwrap().len(), 2);
+        assert!(lons(&f).iter().all(|l| (-180.0..=180.0).contains(l)));
+        // both halves touch the line, and no edge spans more than a degree
+        for poly in f["geometry"]["coordinates"].as_array().unwrap() {
+            let l: Vec<f64> = poly[0].as_array().unwrap().iter().map(|p| p[0].as_f64().unwrap()).collect();
+            assert!(l.iter().cloned().fold(f64::MIN, f64::max) - l.iter().cloned().fold(f64::MAX, f64::min) < 1.0, "{l:?}");
+        }
+        let plain = circle(LL { lat: 0.0, lon: 10.0 }, 30_000.0, 72);
+        assert_eq!(plain["geometry"]["type"], "Polygon");
+    }
+
+    #[test]
+    fn grid_and_box_across_the_date_line() {
+        let g = grid([0.0, 179.9, 0.2, -179.9], 10_000.0, 1000).unwrap();
+        let feats = g["features"].as_array().unwrap();
+        assert!(feats.len() >= 4, "{}", feats.len());
+        assert!(feats.iter().all(|f| lons(f).iter().all(|l| (-180.0..=180.0).contains(l))));
+        assert!(feats.iter().any(|f| f["geometry"]["type"] == "MultiPolygon"));
+        let b = box_feature([0.0, 179.0, 1.0, -179.0], json!({}));
+        assert_eq!(b["geometry"]["type"], "MultiPolygon");
+    }
+
+    #[test]
+    fn circle_around_a_pole_is_flagged() {
+        let f = circle(LL { lat: 89.99, lon: 0.0 }, 30_000.0, 16);
+        assert_eq!(f["properties"]["encloses_pole"], true);
+    }
 
     #[test]
     fn karney_reference_distance() {

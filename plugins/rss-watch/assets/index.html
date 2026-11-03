@@ -218,6 +218,9 @@
       $('refresh').disabled = false; $('refresh').textContent = 'Refresh all'; reload();
     };
     $('markRead').onclick = async () => { try { await post('api/seen'); toast('Marked as read.'); } catch (err) { toast(err.message, 'err'); } loadInbox(); };
+    // Deep link: ?q=<words> filters the stored items straight away (the address follows the search box so it can be shared).
+    { const q0 = new URLSearchParams(location.search).get('q'); if (q0) { $('search').value = q0; state.q = q0; } }
+    $('search').addEventListener('input', () => { try { const u = new URLSearchParams(); if ($('search').value.trim()) u.set('q', $('search').value.trim()); history.replaceState(null, '', u.toString() ? '?' + u : location.pathname); } catch { /* frame */ } });
     reload(); loadRules();
   </script>
 </body>

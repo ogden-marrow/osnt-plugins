@@ -230,6 +230,17 @@
     $('f').onsubmit = search;
     api('api/info').then(i => { $('qstat').textContent = 'One GDELT request per ' + i.spacing_secs + ' s'; }).catch(() => {});
     loadStories(); loadFiles();
+    // Deep link: ?q=<words>[&timespan=&lang=&country=] fills the form and searches; the address follows each search so it can be shared.
+    {
+      const u = new URLSearchParams(location.search), mem = (() => { try { return JSON.parse(localStorage.getItem('osnt.gdelt-news')) || {}; } catch { return {}; } })();
+      const set = (id, v) => { const el = $(id); if (v && (el.tagName !== 'SELECT' || [...el.options].some(o => o.value === v))) el.value = v; };
+      set('timespan', u.get('timespan') || mem.timespan); set('lang', u.get('lang') || mem.lang); set('country', u.get('country') || mem.country);
+      if (u.get('q')) { $('q').value = u.get('q'); $('f').requestSubmit(); } else if (mem.q) $('q').value = mem.q;
+      $('f').addEventListener('submit', () => {
+        const p = params(); p.delete('sort');
+        try { history.replaceState(null, '', '?' + p); localStorage.setItem('osnt.gdelt-news', JSON.stringify({ q: $('q').value, timespan: $('timespan').value, lang: $('lang').value, country: $('country').value })); } catch { /* storage or frame blocked */ }
+      });
+    }
   </script>
 </body>
 </html>

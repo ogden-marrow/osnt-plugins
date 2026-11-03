@@ -92,7 +92,13 @@ fn formats(ll: LL) -> Vec<Value> {
 async fn convert_handler(Query(q): Q) -> Result<Json<Value>, ApiError> {
     let p = Params(q);
     let s = p.req_str("q")?;
-    let parsed = coords::parse(s, reference(&p)?, p.str("order") == Some("lonlat")).map_err(bad)?;
+    let parsed = match coords::parse(s, reference(&p)?, p.str("order") == Some("lonlat")) {
+        Ok(x) => x,
+        Err(e) => match scan::fallback(s) {
+            Some((ll, kind)) => coords::Parsed { ll, kind, bbox: None },
+            None => return Err(bad(e)),
+        },
+    };
     let ll = parsed.ll;
     let mut neighbours = vec![];
     if parsed.kind == "geohash" {
@@ -151,9 +157,8 @@ async fn generate_handler(Query(q): Q) -> Result<Json<Value>, ApiError> {
             let c = point(&p, "center")?;
             let radius = p.req_num("radius", 1.0, 5_000_000.0)?;
             let b = geodesy::bbox_around(c, radius);
-            let ring = [LL { lat: b[0], lon: b[1] }, LL { lat: b[0], lon: b[3] }, LL { lat: b[2], lon: b[3] }, LL { lat: b[2], lon: b[1] }];
-            let coords: Vec<Value> = ring.iter().chain(std::iter::once(&ring[0])).map(|x| json!([r(x.lon, 7), r(x.lat, 7)])).collect();
-            Ok(Json(json!({ "bbox": b.map(|v| r(v, 7)), "bbox_text": format!("{:.6},{:.6},{:.6},{:.6}", b[1], b[0], b[3], b[2]), "geojson": { "type": "FeatureCollection", "features": [{ "type": "Feature", "properties": { "kind": "bbox" }, "geometry": { "type": "Polygon", "coordinates": [coords] } }] } })))
+            let feat = geodesy::box_feature(b, json!({ "kind": "bbox" }));
+            Ok(Json(json!({ "bbox": b.map(|v| r(v, 7)), "bbox_text": format!("{:.6},{:.6},{:.6},{:.6}", b[1], b[0], b[3], b[2]), "geojson": { "type": "FeatureCollection", "features": [feat] } })))
         }
         "grid" => {
             let cell = p.req_num("cell", 1.0, 1_000_000.0)?;

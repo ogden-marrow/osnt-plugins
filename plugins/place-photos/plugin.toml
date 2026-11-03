@@ -3,7 +3,7 @@ name = "Place photos"
 description = "Geotagged photos and articles near a coordinate (Wikimedia Commons, Wikipedia) and optional street-level coverage (Mapillary), to compare a claimed location with what is there."
 grid = "Geospatial"
 port = 8147
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

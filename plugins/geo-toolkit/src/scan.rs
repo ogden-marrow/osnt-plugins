@@ -38,6 +38,27 @@ fn decimals_ok(text: &str) -> bool {
     Regex::new(r"\d+\.(\d+)").unwrap().captures_iter(text).all(|c| c[1].len() >= 3)
 }
 
+/// Last resort for the converter: forms people paste that the strict parser rejects. Handles labelled values ("lat 48.8 lon 2.3"),
+/// a comma decimal separator with a semicolon between the numbers ("48,8584; 2,2945"), WKT "POINT(lon lat)" and any single
+/// coordinate buried in a map URL or sentence (the first match wins).
+pub fn fallback(text: &str) -> Option<(LL, &'static str)> {
+    let t = text.trim();
+    let num = r"[-+]?\d{1,3}(?:[.,]\d+)?";
+    if let Some(c) = Regex::new(&format!(r"(?i)^POINT\s*\(\s*({num})\s+({num})\s*\)$")).unwrap().captures(t) {
+        let (lon, lat) = (c[1].replace(',', ".").parse().ok()?, c[2].replace(',', ".").parse().ok()?);
+        return coords::check(lat, lon).ok().map(|ll| (ll, "wkt-point"));
+    }
+    if let Some(c) = Regex::new(&format!(r"^({num})\s*;\s*({num})$")).unwrap().captures(t) {
+        let (lat, lon) = (c[1].replace(',', ".").parse().ok()?, c[2].replace(',', ".").parse().ok()?);
+        return coords::check(lat, lon).ok().map(|ll| (ll, "decimal"));
+    }
+    let labelled = Regex::new(r"(?i)\b(?:latitude|longitude|lat|lon|lng|long)\b\s*[:=]?\s*").unwrap().replace_all(t, "").into_owned();
+    let found = scan(&labelled).ok()?;
+    let m = found["matches"].as_array()?.first()?;
+    let ll = coords::check(m["lat"].as_f64()?, m["lon"].as_f64()?).ok()?;
+    Some((ll, "extracted"))
+}
+
 pub fn scan(text: &str) -> Result<Value, String> {
     if text.len() > MAX_TEXT {
         return Err(format!("text is limited to {} characters", MAX_TEXT));
@@ -122,6 +143,17 @@ mod tests {
         let r = scan(&many).unwrap();
         assert_eq!(r["count"], 500);
         assert_eq!(r["truncated"], true);
+    }
+
+    #[test]
+    fn fallback_reads_labels_urls_wkt_and_comma_decimals() {
+        for (t, la, lo) in [("lat 48.8584 lon 2.2945", 48.8584, 2.2945), ("latitude: 48.8584, longitude: 2.2945", 48.8584, 2.2945), ("48,8584; 2,2945", 48.8584, 2.2945),
+            ("POINT(2.2945 48.8584)", 48.8584, 2.2945), ("https://www.google.com/maps/@48.8584,2.2945,15z", 48.8584, 2.2945)] {
+            let (ll, _) = fallback(t).unwrap_or_else(|| panic!("{t}"));
+            assert!((ll.lat - la).abs() < 1e-9 && (ll.lon - lo).abs() < 1e-9, "{t}: {ll:?}");
+        }
+        assert!(fallback("POINT(2 99)").is_none());
+        assert!(fallback("hello world").is_none());
     }
 
     #[test]

@@ -110,6 +110,12 @@ impl Field {
         }
         (wsum > 1e-9).then(|| sum / wsum)
     }
+    /// Height of the optical surface for line of sight, horizon and viewshed. The tiles hold sea-floor depth under the ocean, so
+    /// anything below zero is raised to sea level: a ship or a beach must not "stand" kilometres underwater. (Land below sea
+    /// level such as the Dead Sea shore is raised to zero too; the responses say so.)
+    pub fn surface(&self, lat: f64, lon: f64, z: u8) -> Option<f64> {
+        self.elev(lat, lon, z).map(|e| e.max(0.0))
+    }
     pub fn tile_count(&self) -> usize {
         self.tiles.len()
     }
@@ -243,5 +249,19 @@ impl Tiles {
             }
         }
         (Field { tiles }, failed)
+    }
+}
+
+#[cfg(test)]
+mod surface_tests {
+    use super::*;
+
+    #[test]
+    fn sea_floor_is_raised_to_sea_level_for_sight_lines_only() {
+        let mut tiles = HashMap::new();
+        tiles.insert((0u8, 0u32, 0u32), Some(Arc::new(vec![-4000.0f32; TILE * TILE])));
+        let f = Field { tiles };
+        assert!(f.elev(0.0, 0.0, 0).unwrap() < -3999.0);
+        assert_eq!(f.surface(0.0, 0.0, 0), Some(0.0));
     }
 }

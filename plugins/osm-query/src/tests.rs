@@ -42,7 +42,7 @@ async fn upstreams() -> Config {
         NOM_TIMES.lock().unwrap().push(Instant::now());
         Json(json!([{ "osm_type": "way", "osm_id": 5, "lat": "48.85", "lon": "2.29", "name": "Tour", "display_name": "Tour, Paris", "category": "man_made", "type": "tower", "boundingbox": ["48.8", "48.9", "2.2", "2.3"] }]))
     })).route("/reverse", aget(|| async { NOM_TIMES.lock().unwrap().push(Instant::now()); Json(json!({ "osm_type": "node", "osm_id": 9, "lat": "1", "lon": "2", "display_name": "Somewhere", "address": { "country": "X" } })) }))).await;
-    let photon = serve(Router::new().route("/api/", aget(|| async { Json(json!({ "features": [{ "geometry": { "coordinates": [2.29, 48.85] }, "properties": { "name": "Eiffel Tower", "city": "Paris", "country": "France", "osm_type": "W", "osm_id": 7, "osm_key": "man_made", "osm_value": "tower" } }] })) }))).await;
+    let photon = serve(Router::new().route("/api/", aget(|| async { Json(json!({ "features": [{ "geometry": { "coordinates": [2.29, 48.85] }, "properties": { "extent": [2.2, 48.9, 2.3, 48.8], "name": "Eiffel Tower", "city": "Paris", "country": "France", "osm_type": "W", "osm_id": 7, "osm_key": "man_made", "osm_value": "tower" } }] })) }))).await;
     let api = serve(Router::new()
         .route("/changesets.json", aget(|| async { Json(json!({ "changesets": [{ "id": 11, "created_at": "2026-11-01T00:00:00Z", "closed_at": "2026-11-01T01:00:00Z", "open": false, "changes_count": 3, "uid": 99, "user": "someone", "min_lat": 1.0, "min_lon": 2.0, "max_lat": 1.1, "max_lon": 2.1, "tags": { "comment": "fix", "created_by": "iD 2.30" } }] })) }))
         .route("/notes.json", aget(|| async { Json(json!({ "features": [{ "geometry": { "coordinates": [2.05, 1.05] }, "properties": { "id": 21, "status": "open", "date_created": "2026-10-30 00:00:00 UTC", "comments": [{ "user": "someone", "uid": 99, "text": "gate is gone" }] } }] })) }))).await;
@@ -139,8 +139,11 @@ async fn geocode_providers_reverse_and_nominatim_spacing() {
     assert_eq!(c, 200);
     assert_eq!(v["results"][0]["lat"], 48.85);
     assert_eq!(v["results"][0]["url"], "https://www.openstreetmap.org/way/5");
+    // bbox is west, south, east, north for both providers (Nominatim sends south, north, west, east)
+    assert_eq!(v["results"][0]["bbox"], json!([2.2, 48.8, 2.3, 48.9]));
     let (_, v) = get_json(format!("{base}/api/geocode?q=Eiffel%20Tower&provider=photon")).await;
     assert_eq!(v["results"][0]["display_name"], "Eiffel Tower, Paris, France");
+    assert_eq!(v["results"][0]["bbox"], json!([2.2, 48.8, 2.3, 48.9]));
     let (_, v) = get_json(format!("{base}/api/reverse?lat=1&lon=2")).await;
     assert_eq!(v["result"]["display_name"], "Somewhere");
     let t = NOM_TIMES.lock().unwrap().clone();
@@ -197,4 +200,31 @@ fn helpers() {
     assert_eq!(trim("abcdef", 3), "abc…");
     assert!(error_text("<p>Error: line 1: parse error</p>").contains("parse error"));
     let _ = Request::new(axum::body::Body::empty());
+}
+
+#[test]
+fn regional_changesets_are_flagged() {
+    let local = json!({ "min_lat": 1.0, "max_lat": 1.01, "min_lon": 2.0, "max_lon": 2.01, "id": 1 });
+    let bulk = json!({ "min_lat": 42.0, "max_lat": 49.0, "min_lon": -1.0, "max_lon": 6.0, "id": 2 });
+    assert!(!is_regional(&local));
+    assert!(is_regional(&bulk));
+    assert_eq!(changeset_item(&bulk)["regional"], true);
+}
+
+#[tokio::test]
+async fn busy_server_is_retried_once() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let h = hits.clone();
+    let srv = serve(Router::new().route("/i", post(move || {
+        let h = h.clone();
+        async move {
+            if h.fetch_add(1, Ordering::SeqCst) == 0 { StatusCode::BAD_GATEWAY.into_response() } else { Json(json!({ "elements": [] })).into_response() }
+        }
+    }))).await;
+    let mut cfg = upstreams().await;
+    cfg.overpass = vec![format!("{srv}/i")];
+    let base = plugin(cfg).await;
+    let (c, v) = get_json(format!("{base}/api/find?preset=fuel&lat=3&lon=4&radius=300")).await;
+    assert_eq!(c, 200, "{v}");
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
 }

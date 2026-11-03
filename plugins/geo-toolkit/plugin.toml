@@ -3,7 +3,7 @@ name = "Coordinates & geodesy"
 description = "Convert coordinates between decimal, DMS, UTM, MGRS, geohash, Plus Codes and Maidenhead; geodesic distance, bearing and destination; circle, box and grid generators; GeoJSON clean-up with KML/GPX export; find coordinates in pasted text."
 grid = "Geospatial"
 port = 8148
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

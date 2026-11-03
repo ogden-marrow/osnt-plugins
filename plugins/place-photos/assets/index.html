@@ -51,8 +51,8 @@
     <div id="map" aria-label="Map: click to move the search centre"></div>
     <div id="readout" class="readout"></div>
     <aside id="panel" aria-label="Place photo controls">
-      <div class="seg" role="tablist" aria-label="Source">
-        <button class="on" data-m="photos">Photos</button>
+      <div class="seg" role="group" aria-label="Source">
+        <button class="on" aria-pressed="true" data-m="photos">Photos</button>
         <button data-m="articles">Articles</button>
         <button data-m="street">Street level</button>
       </div>
@@ -63,6 +63,7 @@
       <button class="btn primary block" id="go" style="margin-top:10px">Show what is here</button>
       <p class="hint" id="hint">Click the map or drag the pin, then search. Compare the photos with the claimed scene: skyline, signs, road layout, vegetation.</p>
       <div id="out" aria-live="polite"></div>
+      <p class="hint" id="xl" style="margin-top:10px"></p>
       <div class="attrib">
         Photos: <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>, each under its own licence (credit shown with the image). Articles: Wikipedia, CC BY-SA.
         Street level: <a href="https://www.mapillary.com/" target="_blank" rel="noopener">Mapillary</a> (CC BY-SA), needs an access token on the Credentials page.
@@ -78,6 +79,24 @@
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const safeUrl = u => /^https:\/\//.test(u || '') ? u : '#';
     let map, pin, ring, layer, mode = 'photos';
+    const KEY = 'osnt.place-photos';
+    const mem = { get() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }, set(o) { try { localStorage.setItem(KEY, JSON.stringify({ ...mem.get(), ...o })); } catch { /* storage blocked */ } } };
+    // Shareable URL: ?lat=&lon=&radius=&mode=photos|articles|street opens the page and runs the search.
+    function syncUrl() {
+      try {
+        const [la, lo] = centre(), u = new URLSearchParams({ lat: la.toFixed(5), lon: lo.toFixed(5), radius: $('radius').value, mode });
+        history.replaceState(null, '', '?' + u);
+        mem.set({ centre: `${la},${lo}`, radius: $('radius').value, mode });
+        const qs = `?lat=${la.toFixed(5)}&lon=${lo.toFixed(5)}`;
+        $('xl').innerHTML = 'This point in: ' + [['sun-shadow', 'Sun & shadow'], ['terrain-view', 'Terrain'], ['satellite', 'Satellite'], ['wayback', 'Wayback'], ['osm-query', 'OSM features'], ['geo-toolkit', 'Coordinates']].map(([id, n]) => `<a href="/p/${id}/${qs}">${n}</a>`).join(' &middot; ');
+      } catch { /* invalid centre or sandboxed frame */ }
+    }
+    function csvButton(name, columns, rows) {
+      const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+      const b = document.createElement('button'); b.className = 'btn sm'; b.style.marginTop = '8px'; b.textContent = 'Download CSV';
+      b.onclick = () => { const csv = columns.join(',') + '\n' + rows.map(r => r.map(q).join(',')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name + '.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+      $('out').append(b);
+    }
     async function api(path) {
       const r = await fetch(path), d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
@@ -118,6 +137,7 @@
           const d = await api(`api/photos?lat=${la}&lon=${lo}&radius=${r}&limit=60`);
           $('out').innerHTML = `<b>${d.count} geotagged photo${d.count === 1 ? '' : 's'}</b> within ${dist(d.radius_m)}` + (d.count ? `<div class="grid-photos">${d.items.map(photoCard).join('')}</div>` : '<div class="state" style="margin-top:8px"><div class="h3">No photos here</div><p>Try a larger radius. Rural or private places often have none.</p></div>') + `<p class="hint">${esc(d.note)}</p>`;
           show(d.items, '#2563eb', photoCard);
+          if (d.count) csvButton('place-photos', ['title', 'lat', 'lon', 'distance_m', 'author', 'licence', 'date', 'page'], d.items.map(p => [p.title, p.lat, p.lon, p.distance_m, p.author, p.licence, p.date, p.page]));
         } else if (mode === 'articles') {
           const d = await api(`api/articles?lat=${la}&lon=${lo}&radius=${r}&limit=30`);
           $('out').innerHTML = `<b>${d.count} article${d.count === 1 ? '' : 's'}</b>` + (d.count ? d.items.map(a => `<div class="item"><b><a href="${esc(safeUrl(a.url))}" target="_blank" rel="noopener">${esc(a.title)}</a></b> <small>${esc(dist(a.distance_m))}</small><small>${esc(a.extract || '')}</small></div>`).join('') : '<div class="state" style="margin-top:8px"><div class="h3">Nothing nearby</div><p>No Wikipedia article is tagged within this radius.</p></div>');
@@ -129,18 +149,36 @@
           $('out').innerHTML = `<b>${d.count} street-level image${d.count === 1 ? '' : 's'}</b> within ${dist(d.radius_m)}` + (d.count ? `<div class="grid-photos">${d.items.map(s => `<div class="ph"><img loading="lazy" src="${esc(safeUrl(s.thumb))}" alt="Street-level view"><div class="cap"><b>${esc(s.captured || 'date unknown')}</b>${s.compass != null ? 'facing ' + Math.round(s.compass) + '°' : ''}${s.pano ? ' · 360' : ''}<br><a href="${esc(safeUrl(s.url))}" target="_blank" rel="noopener">Open in Mapillary</a></div></div>`).join('')}</div>` : '<div class="state" style="margin-top:8px"><div class="h3">No coverage</div><p>No images in this area.</p></div>') + `<p class="hint">${esc(d.note)}</p>`;
           show(d.items, '#16a34a');
         }
+        syncUrl(); $('out').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       } catch (e) { fail(e.message); }
     }
-    document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.onclick = () => {
-      mode = b.dataset.m; document.querySelectorAll('aside > .seg:first-child button').forEach(x => x.classList.toggle('on', x === b)); $('out').innerHTML = ''; if (layer) clearLayer(); if (pin) drawRing();
-    });
+    function setMode(m) {
+      mode = m; document.querySelectorAll('aside > .seg:first-child button').forEach(x => { x.classList.toggle('on', x.dataset.m === m); x.setAttribute('aria-pressed', x.dataset.m === m); }); $('out').innerHTML = ''; if (layer) clearLayer(); if (pin) drawRing(); syncUrl();
+    }
+    document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+    document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('ph')) { e.preventDefault(); e.target.click(); } });
+    new MutationObserver(() => document.querySelectorAll('.ph:not([tabindex])').forEach(el => { el.tabIndex = 0; el.setAttribute('role', 'button'); })).observe($('out'), { childList: true, subtree: true });
+    $('centre').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('go').click(); } });
     $('go').onclick = go; $('radius').onchange = () => drawRing();
     $('centre').addEventListener('change', () => { try { const [la, lo] = centre(); setCentre(la, lo, true); } catch { /* shown on search */ } });
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
-      map.setView([48.8584, 2.2945], 16);
-      pin = L.marker([48.8584, 2.2945], { draggable: true }).addTo(map).on('dragend', e => { const p = e.target.getLatLng(); setCentre(p.lat, p.lng, false); });
-      map.on('click', e => setCentre(e.latlng.lat, e.latlng.lng, false)); drawRing();
+      const q = new URLSearchParams(location.search), saved = mem.get(), n = k => parseFloat(q.get(k));
+      let la = n('lat'), lo = n('lon');
+      const m0 = (q.get('q') || '').match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ;]\s*(-?\d+(?:\.\d+)?)\s*$/);
+      if (m0) { la = +m0[1]; lo = +m0[2]; }
+      const deep = isFinite(la) && isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180;
+      if (!deep && saved.centre) { const v = saved.centre.split(',').map(Number); if (v.length === 2 && v.every(isFinite)) { la = v[0]; lo = v[1]; } }
+      if (!isFinite(la) || !isFinite(lo)) { la = 48.8584; lo = 2.2945; }
+      const rad = q.get('radius') || saved.radius;
+      if (rad && +rad > 0) { if (![...$('radius').options].some(o => o.value === String(+rad))) { const o = new Option(+rad, +rad); $('radius').add(o); } $('radius').value = String(+rad); }
+      map.setView([la, lo], 16);
+      pin = L.marker([la, lo], { draggable: true }).addTo(map).on('dragend', e => { const p = e.target.getLatLng(); setCentre(p.lat, p.lng, false); syncUrl(); });
+      map.on('click', e => { setCentre(e.latlng.lat, e.latlng.lng, false); syncUrl(); });
+      setCentre(la, lo, false);
+      const m = q.get('mode') || (deep ? 'photos' : saved.mode);
+      setMode(['photos', 'articles', 'street'].includes(m) ? m : 'photos');
+      if (deep) $('go').click();
     })();
   </script>
 </body>

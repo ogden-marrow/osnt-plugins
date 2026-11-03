@@ -49,8 +49,8 @@
     <div id="map" aria-label="Map preview"></div>
     <div id="readout" class="readout"></div>
     <aside id="panel" aria-label="Coordinate tools">
-      <div class="seg" role="tablist" aria-label="Tool">
-        <button class="on" data-m="convert">Convert</button>
+      <div class="seg" role="group" aria-label="Tool">
+        <button class="on" aria-pressed="true" data-m="convert">Convert</button>
         <button data-m="distance">Distance</button>
         <button data-m="gen">Generate</button>
         <button data-m="gj">GeoJSON</button>
@@ -98,6 +98,8 @@
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const toast = (m, k = 'err') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 3500); };
     let map, layer, mode = 'convert', lastGJ = null;
+    const KEY = 'osnt.geo-toolkit';
+    const mem = { get() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }, set(o) { try { localStorage.setItem(KEY, JSON.stringify({ ...mem.get(), ...o })); } catch { /* storage blocked */ } } };
     async function api(path, body) {
       const r = await fetch(path, body === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) });
       if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || ('HTTP ' + r.status)); }
@@ -120,12 +122,18 @@
         clearLayer(); pin(d.lat, d.lon); if (d.bbox) L.rectangle([[d.bbox[0], d.bbox[1]], [d.bbox[2], d.bbox[3]]], { color: '#0c7a62', weight: 1 }).addTo(layer); map.setView([d.lat, d.lon], Math.max(map.getZoom(), 14));
         $('out').innerHTML = `<div class="row spread" style="margin-top:12px"><b>Recognised as ${esc(d.kind)}</b><a class="btn sm" href="${esc(d.links.openstreetmap)}" target="_blank" rel="noopener">OpenStreetMap</a></div>`
           + d.formats.map(f => `<div class="fmt"><span class="k">${esc(f.label)}</span><code>${esc(f.value)}</code>${copyBtn(f.value)}</div>`).join('')
+          + (d.kind === 'geohash' ? '<p class="hint">Read as a geohash. Short words made of the letters 0-9 and b-z (without a, i, l, o) are valid geohashes too; check the spelling if you meant something else.</p>' : '')
           + (d.geohash_neighbours.length ? `<h3>Neighbouring geohash cells</h3><code>${d.geohash_neighbours.map(esc).join(' ')}</code>` : '')
+          + `<div class="row" style="margin-top:10px"><button class="btn sm" id="copyall">Copy all formats</button></div>`
+          + `<p class="hint" style="margin-top:10px">Open this point in: ${[['sun-shadow', 'Sun & shadow'], ['terrain-view', 'Terrain'], ['place-photos', 'Photos nearby'], ['satellite', 'Satellite'], ['wayback', 'Wayback imagery'], ['osm-query', 'OSM features']].map(([id, n]) => `<a href="/p/${id}/?lat=${d.lat.toFixed(6)}&lon=${d.lon.toFixed(6)}">${n}</a>`).join(' &middot; ')}</p>`
           + `<div class="row" style="margin-top:10px"><button class="btn sm" id="tz">Timezone here</button><span id="tzout" class="muted small">Nominal solar offset UTC${d.nominal_utc_offset_hours >= 0 ? '+' : ''}${d.nominal_utc_offset_hours}</span></div>`;
         wireCopy();
+        $('copyall').onclick = async () => { try { await navigator.clipboard.writeText(d.formats.map(f => `${f.label}: ${f.value}`).join('\n')); toast('Copied', 'ok'); } catch { toast('Select the text and copy it manually'); } };
+        try { history.replaceState(null, '', '?' + new URLSearchParams({ q: text })); mem.set({ q: text }); } catch { /* sandboxed frame */ }
         $('tz').onclick = async () => { $('tzout').textContent = 'Looking up…'; try { const t = await json(`api/timezone?lat=${d.lat}&lon=${d.lon}`); $('tzout').textContent = t.timezone ? `${t.timezone} (${t.abbreviation || ''}), UTC${t.utc_offset_hours >= 0 ? '+' : ''}${t.utc_offset_hours} now` : (t.warning || 'unavailable'); } catch (e) { $('tzout').textContent = e.message; } };
       } catch (e) { fail(e.message); }
     }
+    $('q').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); if ($('q').value.trim()) convert($('q').value.trim()); } });
     $('f-convert').onsubmit = e => { e.preventDefault(); if ($('q').value.trim()) convert($('q').value.trim()); };
 
     async function distance() {
@@ -138,7 +146,7 @@
         // Draw geodesics as dense polylines from the midpoints so long legs curve correctly.
         L.polyline(ll, { color: '#0c7a62', weight: 2, dashArray: '4 4' }).addTo(layer); map.fitBounds(layer.getBounds().pad(.2));
         $('out').innerHTML = `<div class="big" style="font-size:22px;font-weight:650;margin-top:12px">${(d.total_km).toLocaleString(undefined, { maximumFractionDigits: 3 })} km</div>` + kv([['Metres', d.total_meters.toLocaleString()], ['Miles', d.total_miles], ['Nautical miles', d.total_nautical_miles]])
-          + d.legs.map((l, i) => `<h3>Leg ${i + 1}</h3>` + kv([['Distance', `${l.km} km`], ['Initial bearing', `${l.initial_bearing}° ${l.initial_compass}`], ['Final bearing', l.final_bearing + '°'], ['Midpoint', `${l.midpoint.lat}, ${l.midpoint.lon}`]])).join('')
+          + d.legs.map((l, i) => `<h3>Leg ${i + 1}</h3>` + kv([['Distance', `${l.km} km`], ['Initial bearing', l.initial_bearing == null ? 'none (same point)' : `${l.initial_bearing}° ${l.initial_compass}`], ['Final bearing', l.final_bearing == null ? null : l.final_bearing + '°'], ['Midpoint', `${l.midpoint.lat}, ${l.midpoint.lon}`]])).join('')
           + `<p class="hint">${esc(d.method)}. Lines on the map are straight on screen; the geodesic is the shortest path on the globe.</p>`;
       } catch (e) { fail(e.message); }
     }
@@ -199,14 +207,14 @@
         $('out').innerHTML = `<b>${d.count} coordinate${d.count === 1 ? '' : 's'} found</b>${d.truncated ? ' (first 500 shown)' : ''}`
           + (d.count ? `<div class="table-wrap"><table class="data"><thead><tr><th>#</th><th>Text</th><th>Type</th><th class="num">Lat, lon</th></tr></thead><tbody>${d.matches.map((m, i) => `<tr class="hit" data-i="${i}" style="cursor:pointer"><td>${i + 1}</td><td><code>${esc(m.text)}</code><div class="tiny muted">line ${m.line}</div></td><td>${esc(m.kind)}</td><td class="num">${m.lat.toFixed(5)}, ${m.lon.toFixed(5)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="state" style="margin-top:8px"><div class="h3">None found</div><p>Looks for decimal pairs (3+ decimals), DMS with N/S/E/W, UTM, MGRS and full Plus Codes.</p></div>')
           + `<p class="hint">${esc(d.note)}</p>`;
-        document.querySelectorAll('tr.hit').forEach(tr => tr.onclick = () => { const m = d.matches[+tr.dataset.i]; map.setView([m.lat, m.lon], 16); });
+        document.querySelectorAll('tr.hit').forEach(tr => { tr.tabIndex = 0; tr.onkeydown = e => { if (e.key === 'Enter') tr.click(); }; tr.onclick = () => { const m = d.matches[+tr.dataset.i]; map.setView([m.lat, m.lon], 16); }; });
       } catch (e) { fail(e.message); }
     }
     $('go-scan').onclick = scan;
 
     function setMode(m) {
       mode = m;
-      document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+      document.querySelectorAll('aside > .seg:first-child button').forEach(b => { b.classList.toggle('on', b.dataset.m === m); b.setAttribute('aria-pressed', b.dataset.m === m); });
       document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'p-' + m);
       $('out').innerHTML = '';
     }
@@ -214,6 +222,10 @@
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
       map.setView([48.8584, 2.2945], 5); clearLayer();
+      // Deep links: ?q=<any coordinate text> or ?lat=&lon= converts straight away.
+      const u = new URLSearchParams(location.search);
+      let first = u.get('q') || (u.get('lat') && u.get('lon') ? `${u.get('lat')}, ${u.get('lon')}` : '');
+      if (first) { $('q').value = first; convert(first); } else { const last = mem.get().q; if (last) $('q').value = last; }
       map.on('click', e => { if (mode === 'convert') { $('q').value = `${e.latlng.lat.toFixed(6)}, ${(((e.latlng.lng + 540) % 360) - 180).toFixed(6)}`; convert($('q').value); } });
     })();
   </script>

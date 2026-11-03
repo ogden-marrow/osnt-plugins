@@ -3,7 +3,7 @@ name = "Sun & shadow check"
 description = "Sun azimuth and altitude, shadow length and direction, time of day from a shadow, candidate locations from a shadow (ShadowFinder-style) and a weather cross-check."
 grid = "Geospatial"
 port = 8144
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

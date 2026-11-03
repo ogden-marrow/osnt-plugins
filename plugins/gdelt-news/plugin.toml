@@ -3,7 +3,7 @@ name = "Global news monitor (GDELT)"
 description = "Search worldwide news coverage with volume and tone timelines, the latest GDELT export files, and saved stories that flag volume spikes."
 grid = "Events & News"
 port = 8149
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

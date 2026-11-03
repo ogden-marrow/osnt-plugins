@@ -3,7 +3,7 @@ name = "OSM feature finder"
 description = "Find OpenStreetMap features (towers, bridges, rail crossings, fuel stations, military sites) by radius or box, with raw Overpass QL, geocoding, reverse geocoding and recent edits and notes for an area."
 grid = "Geospatial"
 port = 8145
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

@@ -68,7 +68,18 @@ pub fn plain(html: &str, max: usize) -> String {
     if t.chars().count() > max { format!("{}…", t.chars().take(max).collect::<String>()) } else { t }
 }
 
+/// `fetch`, retried once after a pause when the service says it is busy (Commons search does this often under load).
 fn fetch(app: &App, url: &str, auth: Option<&str>) -> Result<Value> {
+    match fetch_once(app, url, auth) {
+        Err(e) if format!("{e:#}").contains("busy") => {
+            std::thread::sleep(Duration::from_millis(if cfg!(test) { 20 } else { 1500 }));
+            fetch_once(app, url, auth)
+        }
+        other => other,
+    }
+}
+
+fn fetch_once(app: &App, url: &str, auth: Option<&str>) -> Result<Value> {
     let key = format!("{}|{url}", auth.is_some());
     if let Some(v) = app.cache.get(&key) {
         return Ok(v);
@@ -82,6 +93,11 @@ fn fetch(app: &App, url: &str, auth: Option<&str>) -> Result<Value> {
         other => anyhow!("upstream request failed: {other}"),
     })?;
     let v: Value = res.body_mut().read_json().context("decode upstream response")?;
+    // MediaWiki reports failures such as "search is too busy" as HTTP 200 with an `error` object: never show that as "0 results".
+    if let Some(code) = v["error"]["code"].as_str().or_else(|| v["errors"][0]["code"].as_str()) {
+        let info = v["error"]["info"].as_str().or_else(|| v["errors"][0]["text"].as_str()).unwrap_or("");
+        return Err(anyhow!("the service reported an error ({code}): {}", plain(info, 160)));
+    }
     // An answer without results (or an error object) is not worth remembering.
     if v["query"]["pages"].as_array().is_some_and(|a| !a.is_empty()) || v["data"].as_array().is_some_and(|a| !a.is_empty()) {
         app.cache.put(key, v.clone());

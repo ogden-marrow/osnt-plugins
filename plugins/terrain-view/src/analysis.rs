@@ -154,7 +154,7 @@ pub fn line_of_sight(field: &Field, line: &Line, h1: f64, h2: f64, k: f64) -> Re
     if len < 1.0 {
         return Err("the two points are the same place".into());
     }
-    let elev: Vec<Option<f64>> = pts.iter().map(|(_, s)| field.elev(s.lat, s.lon, s.z)).collect();
+    let elev: Vec<Option<f64>> = pts.iter().map(|(_, s)| field.surface(s.lat, s.lon, s.z)).collect();
     let (Some(e1), Some(e2)) = (elev[0], elev[elev.len() - 1]) else { return Err("no terrain data at one of the end points".into()) };
     let (a, b) = (e1 + h1, e2 + h2);
     let mut rows = vec![];
@@ -192,7 +192,7 @@ pub fn line_of_sight(field: &Field, line: &Line, h1: f64, h2: f64, k: f64) -> Re
         "min_clearance_m": r1(worst), "first_obstruction": first_block.map(|i| json!({ "distance_m": r1(pts[i].0), "lat": r5(pts[i].1.lat), "lon": r5(pts[i].1.lon) })),
         "worst_obstruction": blocker, "refraction_k": k, "columns": ["distance_m", "ground_m", "ground_with_curvature_m", "line_of_sight_m", "lat", "lon"], "samples": rows,
         "curvature_drop_mid_m": r1(len * len / 4.0 * (1.0 - k) / (2.0 * R)), "tile_zoom": pts[0].1.z,
-        "note": "Straight-line optical sight over terrain heights from the tiles (about 30 m resolution; buildings and trees are not included).",
+        "note": "Straight-line optical sight over terrain heights from the tiles (about 30 m resolution; buildings and trees are not included). Heights below sea level are treated as sea level.",
     }))
 }
 
@@ -229,7 +229,7 @@ impl Horizon {
 }
 
 pub fn horizon(field: &Field, h: &Horizon) -> Result<Value, String> {
-    let ground = field.elev(h.lat, h.lon, 12).ok_or("no terrain data at the observer position")?;
+    let ground = field.surface(h.lat, h.lon, 12).ok_or("no terrain data at the observer position")?;
     let h0 = ground + h.eye;
     let dists = h.dists();
     let mut rows = vec![];
@@ -238,7 +238,7 @@ pub fn horizon(field: &Field, h: &Horizon) -> Result<Value, String> {
         let (mut best, mut bd, mut bpos, mut be) = (f64::MIN, 0.0, (h.lat, h.lon), ground);
         for &d in &dists {
             let (lat, lon) = destination(h.lat, h.lon, az, d);
-            let Some(e) = field.elev(lat, lon, zoom_for_distance(d)) else { continue };
+            let Some(e) = field.surface(lat, lon, zoom_for_distance(d)) else { continue };
             let angle = ((e - h0) / d).atan() - d * (1.0 - h.k) / (2.0 * R);
             if angle > best {
                 (best, bd, bpos, be) = (angle, d, (lat, lon), e);
@@ -289,7 +289,7 @@ pub fn horizon(field: &Field, h: &Horizon) -> Result<Value, String> {
         "highest": { "azimuth": max.0, "elevation_deg": r4(max.1), "distance_km": r1(max.2 / 1000.0) },
         "peaks": chosen.iter().map(|p| json!({ "azimuth": p.0, "elevation_deg": r4(p.1), "distance_km": r1(p.2 / 1000.0), "lat": r5(p.3), "lon": r5(p.4), "height_m": r1(p.5) })).collect::<Vec<_>>(),
         "refraction_k": h.k,
-        "note": "Angles are above the observer's true horizontal. Terrain only: trees, buildings and sub-30 m features are missing, so compare the large shapes.",
+        "note": "Angles are above the observer's true horizontal. Terrain only: trees, buildings and sub-30 m features are missing, so compare the large shapes. Heights below sea level are treated as sea level.",
     }))
 }
 
@@ -329,7 +329,7 @@ impl Viewshed {
 }
 
 pub fn viewshed(field: &Field, v: &Viewshed) -> Result<Value, String> {
-    let ground = field.elev(v.lat, v.lon, 12).ok_or("no terrain data at the observer position")?;
+    let ground = field.surface(v.lat, v.lon, 12).ok_or("no terrain data at the observer position")?;
     let h0 = ground + v.eye;
     let dists = v.dists();
     let (mut seen, mut total) = (0usize, 0usize);
@@ -340,7 +340,7 @@ pub fn viewshed(field: &Field, v: &Viewshed) -> Result<Value, String> {
         let mut prev = 0.0;
         for &d in &dists {
             let (lat, lon) = destination(v.lat, v.lon, az, d);
-            let Some(e) = field.elev(lat, lon, zoom_for_distance(d)) else { prev = d; continue };
+            let Some(e) = field.surface(lat, lon, zoom_for_distance(d)) else { prev = d; continue };
             let drop = d * (1.0 - v.k) / (2.0 * R);
             let ground_ang = ((e - h0) / d).atan() - drop;
             let target_ang = ((e + v.target - h0) / d).atan() - drop;
@@ -362,7 +362,7 @@ pub fn viewshed(field: &Field, v: &Viewshed) -> Result<Value, String> {
     Ok(json!({
         "observer": { "lat": v.lat, "lon": v.lon, "ground_m": r1(ground), "eye_m": v.eye }, "target_height_m": v.target, "radius_km": v.radius / 1000.0,
         "visible_fraction": if total == 0 { 0.0 } else { (seen as f64 / total as f64 * 1000.0).round() / 1000.0 }, "rays": rays, "refraction_k": v.k,
-        "note": "Segments are distance ranges (metres) along each azimuth where a target of the given height would be in sight. Terrain only.",
+        "note": "Segments are distance ranges (metres) along each azimuth where a target of the given height would be in sight. Terrain only. Heights below sea level are treated as sea level.",
     }))
 }
 

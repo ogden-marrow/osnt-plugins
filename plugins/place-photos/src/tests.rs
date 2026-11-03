@@ -122,3 +122,28 @@ fn dates() {
     assert_eq!(crate_time(1714651200), "2024-05-02");
 }
 
+
+#[tokio::test]
+async fn busy_search_is_retried_then_reported_not_shown_as_zero_results() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let h = hits.clone();
+    let commons = serve(Router::new().route("/w/api.php", aget(move || {
+        let h = h.clone();
+        async move {
+            let n = h.fetch_add(1, Ordering::SeqCst);
+            if n < 3 { Json(json!({ "error": { "code": "cirrussearch-too-busy-error", "info": "Search is currently too busy." } })) }
+            else { Json(json!({ "query": { "pages": [{ "title": "File:A.jpg", "coordinates": [{ "lat": 1.0, "lon": 2.0, "dist": 5.0 }], "imageinfo": [{ "thumburl": "t", "extmetadata": {} }] }] } })) }
+        }
+    }))).await;
+    let mut cfg = fakes(None).await;
+    cfg.commons = format!("{commons}/w/api.php");
+    let base = plugin(cfg, false).await;
+    // two busy answers (first call + its retry) -> 502 with the reason
+    let (c, v) = get_json(format!("{base}/api/photos?lat=1&lon=2")).await;
+    assert_eq!(c, 502, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("busy"), "{v}");
+    // one more busy answer, then success on the retry
+    let (c, v) = get_json(format!("{base}/api/photos?lat=1&lon=2&radius=600")).await;
+    assert_eq!(c, 200, "{v}");
+    assert_eq!(v["count"], 1);
+}

@@ -114,6 +114,9 @@ async fn elevation_handler(State(s): State<Shared>, Query(q): Q) -> Result<Json<
         let e = field.elev(lat, lon, z).ok_or_else(|| tile_error(&failed, "no elevation data at this point (open ocean tiles may be absent)".into()))?;
         let mut out = json!({ "lat": lat, "lon": lon, "elevation_m": r1(e), "source": "Terrarium tiles", "tile_zoom": z,
             "resolution_m": r1(156_543.03 * lat.to_radians().cos().max(0.05) / (1u64 << z) as f64), "checks": {} });
+        if e < 0.0 {
+            out["note"] = json!("Below sea level: over the ocean this is sea-floor depth (the sea surface itself is 0 m, which is what Open-Meteo reports); on land it is a true depression such as a dry lake or the Dead Sea shore.");
+        }
         if check != "none" {
             let om = external(&s, &format!("{}/v1/elevation?latitude={lat:.5}&longitude={lon:.5}", s.cfg.open_meteo)).ok().and_then(|v| v["elevation"][0].as_f64());
             out["checks"]["open_meteo_m"] = json!(om);

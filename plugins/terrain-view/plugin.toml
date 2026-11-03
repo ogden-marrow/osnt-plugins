@@ -3,7 +3,7 @@ name = "Terrain & horizon"
 description = "Elevation at a point, elevation profile, line of sight with Earth curvature, horizon silhouette and a visible-from-here map, from decoded Terrarium elevation tiles."
 grid = "Geospatial"
 port = 8146
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true
