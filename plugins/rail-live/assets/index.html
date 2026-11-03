@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Trains · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 360px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px; font-size: 13px; display: grid; gap: 12px; align-content: start; }
+    aside h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    #sres { display: grid; gap: 4px; margin-top: 6px; }
+    #sres button { all: unset; cursor: pointer; padding: 7px 10px; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); }
+    #sres button:focus-visible { outline: 2px solid var(--focus); }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
+    .legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+    table.data td, table.data th { padding: 6px 8px 6px 0; }
+    .late { color: var(--warn); font-weight: 600; } .canc { color: var(--err); text-decoration: line-through; }
+    #panelBtn { display: none; }
+    @media (max-width: 520px) { .bar-end .status { display: none; } }
+    @media (max-width: 700px) {
+      #panelBtn { display: inline-flex; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 62dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); padding-bottom: 24px; }
+      aside#panel.open { display: grid; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Trains</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Starting…</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Panel</button></div>
+  </header>
+  <div id="layout" class="fill map-box" style="position:relative">
+    <div id="map"></div>
+    <aside id="panel" aria-label="Train controls">
+      <div>
+        <h2>Station board (Finland)</h2>
+        <label class="sr-only" for="sq">Station name or code</label>
+        <input id="sq" type="search" placeholder="Station, e.g. Helsinki or TPE" autocomplete="off">
+        <div id="sres"></div>
+      </div>
+      <div>
+        <h2>Map</h2>
+        <div class="row"><label class="row"><input type="checkbox" id="orm"> Railway tracks (OpenRailwayMap)</label></div>
+        <div class="row"><label class="row"><input type="checkbox" id="stn" checked> Stations</label></div>
+        <div class="legend" style="margin-top:8px"><span><i style="background:#2e9d6f"></i>moving</span><span><i style="background:#8a97a0"></i>stopped</span><span><i style="background:#e8a317"></i>late 5+ min</span><span><i style="background:#d9473f"></i>late 15+ min</span></div>
+        <div id="count" class="muted" style="margin-top:6px"></div>
+      </div>
+      <div id="detail"><div class="state"><div class="h3">Pick a train or station</div><p>Click a dot for the train, or a station square for its departures and arrivals.</p></div></div>
+      <div class="notice small"><div>Finland: <a href="https://www.digitraffic.fi/en/railway-traffic/" target="_blank" rel="noopener">Fintraffic / digitraffic.fi</a>, CC BY 4.0 (train GPS has no heading, so Finnish trains are plain dots). Norway: <a href="https://developer.entur.org" target="_blank" rel="noopener">Entur</a> real-time vehicles, NLOD licence (arrows show heading). Tracks: &copy; <a href="https://www.openrailwaymap.org" target="_blank" rel="noopener">OpenRailwayMap</a> and OpenStreetMap contributors (ODbL / CC BY-SA). Trains only, never passengers.</div></div>
+    </aside>
+    <div id="readout" class="readout"></div>
+  </div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    let map, trainLayer, stnLayer, orm, canvas, timer, selected = null, stationsLoaded = false;
+    const markers = new Map();
+    const hhmm = t => t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    async function api(p) {
+      const r = await fetch(p), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || r.status);
+      return d;
+    }
+    function colour(t) {
+      if ((t.delay_min ?? 0) >= 15) return '#d9473f';
+      if ((t.delay_min ?? 0) >= 5) return '#e8a317';
+      return (t.speed_kmh ?? 0) > 1 ? '#2e9d6f' : '#8a97a0';
+    }
+    function icon(t) {
+      const c = colour(t);
+      if (t.bearing == null) return null;
+      return L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: `<svg width="18" height="18" viewBox="0 0 24 24" style="transform:rotate(${t.bearing}deg)"><path d="M12 2l7 18-7-4-7 4z" fill="${c}" stroke="#0b0f14" stroke-width="1.2"/></svg>` });
+    }
+    const info = t => `<b>${esc(t.name)}</b> ${t.country}<br>${t.speed_kmh != null ? Math.round(t.speed_kmh) + ' km/h' : 'speed n/a'}${t.delay_min != null ? ' · ' + (t.delay_min > 0 ? t.delay_min + ' min late' : 'on time') : ''}`;
+    function drawTrains(list) {
+      const keep = new Set();
+      for (const t of list) {
+        keep.add(t.id);
+        let m = markers.get(t.id);
+        const ic = icon(t);
+        if (!m) {
+          m = ic ? L.marker([t.lat, t.lon], { icon: ic }) : L.circleMarker([t.lat, t.lon], { renderer: canvas, radius: 6, weight: 1.5, color: '#0b0f14', fillOpacity: .95, fillColor: colour(t) });
+          m.addTo(trainLayer).on('click', () => pick(m._t)); markers.set(t.id, m);
+        } else {
+          m.setLatLng([t.lat, t.lon]);
+          if (ic) m.setIcon(ic); else m.setStyle({ fillColor: colour(t) });
+        }
+        m._t = t; m.bindTooltip(info(t));
+      }
+      for (const [id, m] of markers) if (!keep.has(id)) { trainLayer.removeLayer(m); markers.delete(id); }
+    }
+    async function refresh() {
+      try {
+        const b = map.getBounds().pad(.2);
+        const d = await api(`api/trains?bbox=${[b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(v => v.toFixed(3))}`);
+        drawTrains(d.trains);
+        const bad = Object.entries(d.sources).filter(([, s]) => !s.ok).map(([k]) => k);
+        $('count').textContent = `${d.count} trains in view${d.truncated ? ' (first 1500)' : ''}${bad.length ? ' · ' + bad.join(', ') + ' feed unavailable' : ''}`;
+        $('status').textContent = 'live · ' + new Date().toLocaleTimeString();
+      } catch (e) { $('status').textContent = 'error'; $('count').textContent = e.message; }
+    }
+    async function pick(t) {
+      selected = t.id; const el = $('detail');
+      if (t.country !== 'FI') {
+        el.innerHTML = `<section class="card"><h3 class="h3">${esc(t.name)}</h3><table class="kv"><tr><th>Line</th><td>${esc(t.line)}</td></tr><tr><th>Operator</th><td>${esc(t.operator)}</td></tr><tr><th>Delay</th><td>${t.delay_min != null ? t.delay_min + ' min' : '—'}</td></tr><tr><th>Updated</th><td>${hhmm(t.updated)}</td></tr></table></section>`;
+        return;
+      }
+      el.innerHTML = '<div class="loading"><span class="spin"></span>Loading train…</div>';
+      try {
+        const d = await api('api/train/' + t.number);
+        const stops = d.stops.map(s => `<tr class="${s.cancelled ? 'canc' : ''}"><td>${esc(s.station)}</td><td>${s.type === 'ARRIVAL' ? 'arr' : 'dep'}</td><td>${hhmm(s.actual || s.estimate || s.scheduled)}</td><td class="${s.delay_min > 4 ? 'late' : ''}">${s.delay_min ? '+' + s.delay_min : ''}</td></tr>`).join('');
+        el.innerHTML = `<section class="card"><h3 class="h3">${esc(d.line ? d.line + ' line' : d.type + ' ' + d.number)} · ${d.number}</h3>
+          <div>${esc(d.from)} → ${esc(d.to)}</div><div class="muted">${d.cancelled ? '<span class="badge err">cancelled</span>' : d.running ? '<span class="badge ok live">running</span>' : 'not running'} ${d.delay_min != null ? '· ' + (d.delay_min > 0 ? d.delay_min + ' min late' : 'on time') : ''}${d.next_stop ? ' · next: ' + esc(d.next_stop) : ''}</div>
+          <div class="table-wrap" style="max-height:260px;margin-top:8px"><table class="data"><tbody>${stops}</tbody></table></div></section>`;
+      } catch (e) { el.innerHTML = `<div class="state error"><div class="h3">Train details unavailable</div><p>${esc(e.message)}</p></div>`; }
+    }
+    async function board(code) {
+      const el = $('detail'); el.innerHTML = '<div class="loading"><span class="spin"></span>Loading board…</div>';
+      try {
+        const d = await api('api/station/' + encodeURIComponent(code) + '?n=12');
+        const rows = (list, who) => list.length ? list.map(r => `<tr class="${r.cancelled ? 'canc' : ''}"><td>${hhmm(r.scheduled)}</td><td>${esc(r.label)}</td><td>${esc(r[who])}</td><td>${esc(r.track)}</td><td class="${r.delay_min > 4 ? 'late' : ''}">${r.delay_min ? '+' + r.delay_min : ''}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">None listed</td></tr>';
+        const head = w => `<thead><tr><th>Time</th><th>Train</th><th>${w}</th><th>Trk</th><th></th></tr></thead>`;
+        el.innerHTML = `<section class="card"><h3 class="h3">${esc(d.station.name)}</h3><h2 style="margin-top:8px">Departures</h2><div class="table-wrap"><table class="data">${head('To')}<tbody>${rows(d.departures, 'to')}</tbody></table></div><h2 style="margin-top:10px">Arrivals</h2><div class="table-wrap"><table class="data">${head('From')}<tbody>${rows(d.arrivals, 'from')}</tbody></table></div></section>`;
+        if ($('panel') && matchMedia('(max-width:700px)').matches) $('panel').classList.add('open');
+      } catch (e) { el.innerHTML = `<div class="state error" role="alert"><div class="h3">Board unavailable</div><p>${esc(e.message)}</p></div>`; }
+    }
+    async function loadStations() {
+      try {
+        const d = await api('api/stations');
+        for (const s of d.stations) L.circleMarker([s.lat, s.lon], { renderer: canvas, radius: 4, weight: 1.5, color: '#0b6a8f', fillColor: '#fff', fillOpacity: 1 }).bindTooltip(s.name).on('click', () => board(s.code)).addTo(stnLayer);
+        stationsLoaded = true;
+      } catch { /* map still works without station markers */ }
+    }
+    $('sq').oninput = async e => {
+      const v = e.target.value.trim(), el = $('sres');
+      if (v.length < 2) { el.innerHTML = ''; return; }
+      try {
+        const d = await api('api/stations?q=' + encodeURIComponent(v));
+        el.innerHTML = d.stations.length ? d.stations.slice(0, 8).map(s => `<button data-c="${esc(s.code)}" data-lat="${s.lat}" data-lon="${s.lon}">${esc(s.name)} <span class="muted">${esc(s.code)}</span></button>`).join('') : '<div class="muted small">No passenger station by that name.</div>';
+        el.querySelectorAll('button').forEach(b => b.onclick = () => { map.setView([+b.dataset.lat, +b.dataset.lon], 12); board(b.dataset.c); });
+      } catch (err) { el.innerHTML = `<div class="muted small">${esc(err.message)}</div>`; }
+    };
+    $('orm').onchange = e => e.target.checked ? orm.addTo(map) : map.removeLayer(orm);
+    $('stn').onchange = e => e.target.checked ? stnLayer.addTo(map) : map.removeLayer(stnLayer);
+    $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
+    (async () => {
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      canvas = L.canvas({ padding: .3 });
+      trainLayer = L.layerGroup().addTo(map); stnLayer = L.layerGroup().addTo(map);
+      orm = L.tileLayer('https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', { maxZoom: 19, subdomains: 'abc', opacity: .85, attribution: '&copy; <a href="https://www.openrailwaymap.org">OpenRailwayMap</a>, OpenStreetMap contributors' });
+      map.setView([62.5, 18], 5);
+      map.on('moveend', refresh);
+      refresh(); loadStations();
+      setInterval(refresh, 10000);
+    })();
+  </script>
+</body>
+</html>

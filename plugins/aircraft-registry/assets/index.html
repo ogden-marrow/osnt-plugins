@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Aircraft registry · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 400px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px; font-size: 13px; display: grid; gap: 12px; align-content: start; }
+    #f { display: flex; gap: 8px; flex-wrap: wrap; }
+    #q { flex: 1 1 160px; min-height: 40px; }
+    .card { padding: 12px 14px; }
+    .card h3 { margin: 0 0 8px; }
+    .photo { width: 100%; max-height: 180px; object-fit: cover; border-radius: var(--radius-sm); margin-bottom: 8px; background: var(--surface-2); }
+    .big { font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+    .route { display: flex; align-items: center; gap: 10px; margin: 6px 0 10px; }
+    .route .ap { flex: 1; min-width: 0; }
+    .route .ap b { font-size: 18px; display: block; }
+    .links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .src { font-size: 12px; color: var(--ink-2); }
+    #panelBtn { display: none; }
+    @media (max-width: 520px) { .bar-end .status { display: none; } }
+    @media (max-width: 700px) {
+      #panelBtn { display: inline-flex; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 68dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); padding-bottom: 24px; }
+      aside#panel.open { display: grid; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Aircraft registry</h1>
+    <div class="bar-end"><span id="status" class="status" role="status"></span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Details</button></div>
+  </header>
+  <div id="layout" class="fill map-box" style="position:relative">
+    <div id="map"></div>
+    <aside id="panel" aria-label="Lookup">
+      <form id="f" role="search">
+        <label class="sr-only" for="q">ICAO hex, tail number or callsign</label>
+        <input id="q" type="search" placeholder="Hex a808c5, tail N617AF, callsign UAL1" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <button class="btn primary">Look up</button>
+      </form>
+      <div class="row small muted">Try: <a href="#" data-ex="a808c5">a808c5</a> <a href="#" data-ex="UAL1">UAL1</a> <a href="#" data-ex="KSFO">KSFO</a> <a href="#" data-ex="B738">B738</a></div>
+      <div id="out" aria-live="polite" style="display:grid;gap:12px">
+        <div class="state"><div class="h3">Static facts, not live tracking</div><p>Look up who the registry says an airframe is, or what a callsign usually flies. For live positions use the <a href="/p/adsb/">Aircraft (ADS-B)</a> page.</p></div>
+      </div>
+      <div class="notice small"><div>Data: <a href="https://github.com/mrjackwills/adsbdb" target="_blank" rel="noopener">adsbdb</a> and <a href="https://hexdb.io" target="_blank" rel="noopener">hexdb.io</a> (community databases), positions from <a href="https://adsb.lol" target="_blank" rel="noopener">adsb.lol</a> (ODbL) and <a href="https://opensky-network.org" target="_blank" rel="noopener">OpenSky</a>, photos from airport-data.com. Registered owners are shown only when they look like organisations; anything else appears as "private owner". Registry and route data can be out of date or wrong.</div></div>
+    </aside>
+    <div id="readout" class="readout"></div>
+  </div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    let map, layer;
+    async function api(p) {
+      const r = await fetch(p), d = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(d.error || r.status); e.status = r.status; throw e; }
+      return d;
+    }
+    const kv = rows => `<table class="kv">${rows.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
+    const card = (title, html) => `<section class="card"><h3 class="h3">${esc(title)}</h3>${html}</section>`;
+    const busy = m => out.innerHTML = `<div class="loading"><span class="spin"></span>${esc(m)}</div>`;
+    const fail = (e, what) => out.innerHTML = e.status === 404
+      ? `<div class="state"><div class="h3">Nothing found</div><p>${esc(what)}: ${esc(e.message)}. The community databases do not know every airframe.</p></div>`
+      : `<div class="state error" role="alert"><div class="h3">Lookup failed</div><p>${esc(e.message)}</p></div>`;
+
+    function ownerHtml(o) {
+      if (o.kind === 'organisation') return esc(o.name);
+      if (o.kind === 'private') return '<span class="badge">private owner</span>';
+      return '<span class="muted">unknown</span>';
+    }
+    function aircraftCard(a) {
+      const photo = a.photo?.thumb || a.photo?.url;
+      return card(a.registration || a.hex?.toUpperCase() || 'Aircraft',
+        (photo ? `<a href="${esc(a.photo.url)}" target="_blank" rel="noopener"><img class="photo" src="${esc(photo)}" alt="Photo of ${esc(a.registration)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></a>` : '') +
+        `<div class="big">${esc(a.type || a.type_code || 'Unknown type')}</div>` +
+        kv([['Registration', esc(a.registration)], ['ICAO hex', a.hex ? `<code>${esc(a.hex.toUpperCase())}</code>` : ''], ['Type code', a.type_code ? `<code>${esc(a.type_code)}</code>${a.type_info ? ' · ' + esc(a.type_info.class) : ''}` : ''],
+          ['Manufacturer', esc(a.manufacturer)], ['Registered in', esc(a.country?.name)], ['Owner / operator', ownerHtml(a.owner)], ['Operator code', esc(a.operator_flag)]]) +
+        (a.notes?.length ? `<div class="notice warn small" style="margin-top:8px">${a.notes.map(esc).join(' ')}</div>` : '') +
+        `<div class="links">${a.hex ? `<button class="btn sm" id="pos" data-hex="${esc(a.hex)}">Check position now</button>` : ''}<a class="btn sm" href="/p/adsb/">Live map (ADS-B)</a></div>` +
+        `<div class="src" style="margin-top:6px">Sources: ${esc((a.sources || []).join(', '))}${a.photo ? ' · photo: ' + esc(a.photo.credit) : ''}</div><div id="posout"></div>`);
+    }
+    function apHtml(a) {
+      return `<div class="ap"><b>${esc(a.iata || a.icao || '?')}</b><span class="muted">${esc(a.name || '')}</span><br><span class="muted small">${esc([a.city || a.region, a.country].filter(Boolean).join(', '))}</span></div>`;
+    }
+    function routeCard(r) {
+      return card(`${r.callsign} route`, `${r.airline ? `<div class="big">${esc(r.airline.name || r.airline.icao)}</div><div class="muted small">${esc([r.airline.country, r.airline.radio && `radio "${r.airline.radio}"`].filter(Boolean).join(' · '))}</div>` : ''}
+        <div class="route">${apHtml(r.origin)}<span aria-hidden="true">→</span>${apHtml(r.destination)}</div>
+        ${r.distance_km ? `<div class="small">Great-circle distance about ${Math.round(r.distance_km).toLocaleString()} km</div>` : ''}
+        <div class="notice small" style="margin-top:8px"><div>${esc(r.caveat)}</div></div><div class="src" style="margin-top:6px">Source: ${esc(r.source)}</div>`);
+    }
+    function drawRoute(r) {
+      layer.clearLayers();
+      const pts = [r.origin, r.destination].filter(a => a.lat != null && a.lon != null);
+      pts.forEach(a => L.circleMarker([a.lat, a.lon], { radius: 6, color: '#0c7a62', fillOpacity: .9 }).bindTooltip(a.iata || a.icao || '', { permanent: true, direction: 'top' }).addTo(layer));
+      if (pts.length === 2) {   // great circle by interpolation
+        const rad = Math.PI / 180, [a, b] = pts.map(p => [p.lat * rad, p.lon * rad]), line = [];
+        const d = 2 * Math.asin(Math.sqrt(Math.sin((b[0] - a[0]) / 2) ** 2 + Math.cos(a[0]) * Math.cos(b[0]) * Math.sin((b[1] - a[1]) / 2) ** 2));
+        for (let i = 0; i <= 64; i++) {
+          const f = i / 64, A = Math.sin((1 - f) * d) / Math.sin(d || 1), B = Math.sin(f * d) / Math.sin(d || 1);
+          const x = A * Math.cos(a[0]) * Math.cos(a[1]) + B * Math.cos(b[0]) * Math.cos(b[1]), y = A * Math.cos(a[0]) * Math.sin(a[1]) + B * Math.cos(b[0]) * Math.sin(b[1]), z = A * Math.sin(a[0]) + B * Math.sin(b[0]);
+          line.push([Math.atan2(z, Math.hypot(x, y)) / rad, Math.atan2(y, x) / rad]);
+        }
+        for (let i = 1; i < line.length; i++) while (line[i][1] - line[i - 1][1] > 180) line[i][1] -= 360; // keep the line continuous across the date line
+        for (let i = 1; i < line.length; i++) while (line[i][1] - line[i - 1][1] < -180) line[i][1] += 360;
+        L.polyline(line, { color: '#0c7a62', weight: 2, dashArray: '6 6' }).addTo(layer);
+      }
+      if (pts.length) map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])).pad(.3), { maxZoom: 6 });
+    }
+    async function checkPosition(hex) {
+      const el = $('posout'); el.innerHTML = '<div class="loading" style="margin-top:8px"><span class="spin"></span>Asking both feeds…</div>';
+      try {
+        const d = await api('api/position/' + hex);
+        layer.clearLayers(); const ll = [];
+        const rows = d.sources.map(s => {
+          const p = s.position;
+          if (p) { ll.push([p.lat, p.lon]); L.circleMarker([p.lat, p.lon], { radius: 7, color: s.source.startsWith('adsb') ? '#0b6a8f' : '#e8710a', fillOpacity: .8 }).bindTooltip(s.source).addTo(layer); }
+          return [s.source, p ? `${p.lat.toFixed(3)}, ${p.lon.toFixed(3)} · ${p.on_ground ? 'ground' : (p.alt_ft != null ? Math.round(p.alt_ft).toLocaleString() + ' ft' : '—')} · ${p.gs_kt != null ? Math.round(p.gs_kt) + ' kt' : '—'}` : s.error ? `<span class="muted">${esc(s.error)}</span>` : '<span class="muted">not seen</span>'];
+        });
+        el.innerHTML = '<div style="margin-top:8px">' + kv(rows.concat(d.distance_km != null ? [['Apart', d.distance_km + ' km']] : [])) + `<div class="small muted">${esc(d.note)}</div></div>`;
+        if (ll.length) map.fitBounds(L.latLngBounds(ll).pad(.5), { maxZoom: 9 });
+      } catch (e) { el.innerHTML = `<div class="notice err small" style="margin-top:8px"><div>${esc(e.message)}</div></div>`; }
+    }
+    function airportCard(a) {
+      layer.clearLayers();
+      if (a.lat != null) { L.circleMarker([a.lat, a.lon], { radius: 7, color: '#0c7a62', fillOpacity: .9 }).addTo(layer); map.setView([a.lat, a.lon], 10); }
+      return card(a.name || a.icao, kv([['ICAO', esc(a.icao)], ['IATA', esc(a.iata)], ['Place', esc([a.city || a.region, a.country].filter(Boolean).join(', '))], ['Elevation', a.elevation_ft != null ? a.elevation_ft + ' ft' : ''], ['Position', a.lat != null ? `${a.lat.toFixed(4)}, ${a.lon.toFixed(4)}` : '']]));
+    }
+    function typeCard(t) {
+      return card(t.info?.name || t.type, kv([['Designator', `<code>${esc(t.type)}</code>`], ['Class', esc(t.info?.class)], ['Airborne now (adsb.lol)', t.airborne_now ?? '—']]) +
+        (t.sample.length ? `<div class="small muted" style="margin-top:6px">Examples: ${t.sample.map(s => `<a href="#" data-ex="${esc(s.hex)}">${esc(s.registration || s.hex)}</a>`).join(' ')}</div>` : '') + `<div class="small muted" style="margin-top:6px">${esc(t.note)}</div>`);
+    }
+    async function run(text) {
+      text = text.trim(); if (!text) return;
+      $('q').value = text; busy('Looking up…'); $('status').textContent = '';
+      const up = text.toUpperCase();
+      try {
+        if (/^[A-Z]{4}$/.test(up) || /^[A-Z]{3}$/.test(up) && !/\d/.test(up)) {   // airport (ICAO/IATA) first, then aircraft type
+          try { out.innerHTML = airportCard(await api('api/airport/' + up)); return; } catch (e) { if (e.status !== 404) throw e; }
+          try { out.innerHTML = typeCard(await api('api/type/' + up)); return; } catch (e) { if (e.status !== 404) throw e; }
+        }
+        if (!/^[A-Z]{3}\d/.test(up) && (/^[A-Z]\d{1,3}[A-Z]?$/.test(up) || /^[A-Z0-9]{4}$/.test(up) && /\d/.test(up))) {
+          try { out.innerHTML = typeCard(await api('api/type/' + up)); return; } catch (e) { if (e.status !== 404 && e.status !== 400) throw e; }
+        }
+        const d = await api('api/lookup?q=' + encodeURIComponent(text));
+        if (d.kind === 'callsign') {
+          if (!d.route) throw Object.assign(new Error('no route known for ' + d.query), { status: 404 });
+          out.innerHTML = routeCard(d.route); drawRoute(d.route);
+        } else {
+          if (!d.aircraft) throw Object.assign(new Error('no registry entry for ' + d.query), { status: 404 });
+          out.innerHTML = aircraftCard(d.aircraft);
+          if (d.aircraft.hex) $('pos').onclick = () => checkPosition(d.aircraft.hex);
+        }
+      } catch (e) { fail(e, text); }
+    }
+    $('f').onsubmit = e => { e.preventDefault(); run($('q').value); };
+    document.addEventListener('click', e => { const a = e.target.closest('[data-ex]'); if (a) { e.preventDefault(); run(a.dataset.ex); } });
+    $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
+    (async () => {
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      layer = L.featureGroup().addTo(map); map.setView([30, -30], 3);
+      const q = new URLSearchParams(location.search).get('q'); if (q) run(q);
+    })();
+  </script>
+</body>
+</html>

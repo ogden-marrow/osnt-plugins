@@ -1,0 +1,24 @@
+id = "ais-vessels"
+name = "Vessels (AIS)"
+description = "Live ship positions and particulars by MMSI, IMO or name: Finland's Digitraffic AIS (Baltic) with no key, optional AISStream.io worldwide feed and Global Fishing Watch events. Vessels as objects only."
+grid = "Air & Sea"
+port = 8157
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_AIS_BIND = "127.0.0.1:{port}"
+
+[[secret]]
+name = "AISSTREAM_API_KEY"
+label = "AISStream.io API key (worldwide live AIS)"
+help_url = "https://aisstream.io/apikeys"
+required = false
+
+[[secret]]
+name = "GFW_API_TOKEN"
+label = "Global Fishing Watch API token (fishing, port and AIS-gap events)"
+help_url = "https://globalfishingwatch.org/our-apis/tokens"
+required = false

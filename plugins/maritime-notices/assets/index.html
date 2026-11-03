@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Maritime warnings · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 400px; flex: none; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--edge); font-size: 13px; min-height: 0; }
+    .ph { padding: 12px 14px; border-bottom: 1px solid var(--edge); display: grid; gap: 8px; }
+    .ph .row select { flex: 1 1 140px; }
+    #list { overflow-y: auto; flex: 1; padding: 8px 10px 16px; }
+    .w { border: 1px solid var(--edge); border-radius: var(--radius-sm); margin: 6px 0; background: var(--surface-2); }
+    .w.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .w > button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 9px 11px; cursor: pointer; line-height: 1.4; }
+    .w > button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+    .w .t { color: var(--ink-2); font-size: 12px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .w .s { margin-top: 3px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .w.sel .s { display: block; }
+    .w pre { margin: 0; padding: 10px 11px; border-top: 1px solid var(--edge); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+    .attr { padding: 10px 14px; border-top: 1px solid var(--edge); font-size: 12px; color: var(--ink-2); }
+    #panelBtn { display: none; }
+    @media (max-width: 520px) { .bar-end .status { display: none; } }
+    @media (max-width: 700px) {
+      #panelBtn { display: inline-flex; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; height: 62dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); }
+      aside#panel.open { display: flex; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Maritime warnings</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Loading…</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">List</button></div>
+  </header>
+  <div id="layout" class="fill map-box" style="position:relative">
+    <div id="map"></div>
+    <aside id="panel" aria-label="Warnings">
+      <div class="ph">
+        <div class="seg" role="group" aria-label="Source"><button id="tabW" class="on">Warnings</button><button id="tabA">Piracy (ASAM)</button></div>
+        <div class="row" id="filters">
+          <label class="sr-only" for="area">NAVAREA</label><select id="area"><option value="">All areas</option></select>
+          <label class="sr-only" for="q">Search text</label><input id="q" type="search" placeholder="Search, e.g. rocket, exercise" style="flex:1 1 140px">
+        </div>
+        <label class="row small muted"><input type="checkbox" id="mapped"> Only warnings with a position on the map</label>
+        <div id="count" class="small muted" role="status"></div>
+      </div>
+      <div id="list" aria-live="polite"></div>
+      <div class="attr">Source: NGA Maritime Safety Information (msi.nga.mil), U.S. Government work. Shapes are read automatically from the warning text and can be wrong; the text is authoritative. Advisory only, not for navigation.</div>
+    </aside>
+    <div id="readout" class="readout"></div>
+  </div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    let map, layer, mode = 'w', items = [], selId = null, timer;
+    const shapeLayers = new Map();
+
+    async function api(p) {
+      const r = await fetch(p), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || r.status);
+      return d;
+    }
+    const style = { color: '#e8710a', weight: 2, fillOpacity: .18 };
+    function draw(w, bold) {
+      const g = L.featureGroup();
+      const st = bold ? { ...style, weight: 3, fillOpacity: .3, color: '#d93025' } : style;
+      for (const s of w.shapes) {
+        if (s.kind === 'point') L.circleMarker([s.lat, s.lon], { ...st, radius: 5, fillOpacity: .7 }).addTo(g);
+        else if (s.kind === 'circle') L.circle([s.lat, s.lon], { ...st, radius: s.radius_m }).addTo(g);
+        else if (s.kind === 'line') L.polyline(s.pts, st).addTo(g);
+        else L.polygon(s.pts, st).addTo(g);
+      }
+      g.bindPopup(() => `<b>${esc(w.area_label)} ${w.number}/${String(w.year).slice(-2)}</b><br>${esc(w.text.slice(0, 160))}…`);
+      g.on('click', () => select(w.id, true));
+      return g;
+    }
+    function redraw() {
+      layer.clearLayers(); shapeLayers.clear();
+      if (mode === 'a') {
+        for (const r of items.filter(r => r.lat != null && r.lon != null)) {
+          const m = L.circleMarker([r.lat, r.lon], { color: '#d93025', radius: 6, fillOpacity: .7 }).addTo(layer);
+          m.bindPopup(`<b>${esc(r.reference)}</b> ${esc(r.date)}<br>${esc(r.hostility)} · ${esc(r.victim)}<br>${esc(r.description).slice(0, 240)}`);
+        }
+        return;
+      }
+      for (const w of items.filter(w => w.shapes.length)) { const g = draw(w, w.id === selId); shapeLayers.set(w.id, g); g.addTo(layer); }
+    }
+    function select(id, scroll) {
+      selId = id; render(); redraw();
+      const w = items.find(x => x.id === id), g = shapeLayers.get(id);
+      if (g && g.getLayers().length) { const b = g.getBounds(); map.fitBounds(b.pad(.4), { maxZoom: 8 }); }
+      if (scroll) document.querySelector('.w.sel')?.scrollIntoView({ block: 'nearest' });
+    }
+    function render() {
+      const el = $('list');
+      if (!items.length) { el.innerHTML = '<div class="state"><div class="h3">Nothing matches</div><p>Try another area or clear the search.</p></div>'; return; }
+      if (mode === 'a') {
+        el.innerHTML = items.map(r => `<div class="w"><div style="padding:9px 11px"><div class="t"><b>${esc(r.reference)}</b><span>${esc(r.date)}</span><span class="badge err">${esc(r.hostility || 'incident')}</span></div><div class="s" style="display:block">${esc(r.victim)}: ${esc(r.description)}</div></div></div>`).join('');
+        return;
+      }
+      el.innerHTML = items.map(w => `<div class="w${w.id === selId ? ' sel' : ''}" data-id="${esc(w.id)}"><button aria-expanded="${w.id === selId}">
+        <div class="t"><b>${esc(w.area_label)} ${w.number}/${String(w.year).slice(-2)}</b>${w.subregion && w.subregion !== 'GEN' ? `<span>sub ${esc(w.subregion)}</span>` : ''}<span>${esc(w.issued)}</span>${w.shapes.length ? `<span class="badge ok">${w.shapes.length} on map</span>` : ''}</div>
+        <div class="s">${esc(w.text.replace(/\s+/g, ' '))}</div></button>${w.id === selId ? `<pre>${esc(w.text)}\n\n${esc(w.authority)}</pre>` : ''}</div>`).join('');
+      el.querySelectorAll('.w').forEach(d => d.querySelector('button').onclick = () => select(d.dataset.id === selId ? null : d.dataset.id));
+    }
+    async function load() {
+      $('list').innerHTML = '<div class="loading" style="padding:12px"><span class="spin"></span>Loading…</div>';
+      try {
+        if (mode === 'a') {
+          const d = await api('api/asam?q=' + encodeURIComponent($('q').value));
+          items = d.reports; $('count').textContent = `${d.count} reports`;
+        } else {
+          const p = new URLSearchParams({ area: $('area').value, q: $('q').value, mapped: $('mapped').checked });
+          const d = await api('api/warnings?' + p);
+          items = d.warnings; $('count').textContent = `${d.count} of ${d.total} active warnings${d.stale ? ' (cached copy: NGA did not answer)' : ''}`;
+          if (!items.some(w => w.id === selId)) selId = null;
+        }
+        $('status').textContent = 'NGA MSI';
+        render(); redraw();
+        if (!selId && layer.getLayers().length) { try { map.fitBounds(layer.getBounds().pad(.1), { maxZoom: 6 }); } catch {} }
+      } catch (e) {
+        items = []; $('count').textContent = ''; $('status').textContent = 'error'; redraw();
+        $('list').innerHTML = `<div class="state error" role="alert"><div class="h3">${mode === 'a' ? 'Piracy reports unavailable' : 'Could not load warnings'}</div><p>${esc(e.message)}</p><button class="btn sm" id="retry">Retry</button></div>`;
+        $('retry').onclick = load;
+      }
+    }
+    function setMode(m) {
+      mode = m; selId = null;
+      $('tabW').classList.toggle('on', m === 'w'); $('tabA').classList.toggle('on', m === 'a');
+      $('area').hidden = m === 'a'; $('mapped').parentElement.hidden = m === 'a'; load();
+    }
+    $('tabW').onclick = () => setMode('w'); $('tabA').onclick = () => setMode('a');
+    $('area').onchange = $('mapped').onchange = load;
+    $('q').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 350); };
+    $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
+    (async () => {
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      layer = L.featureGroup().addTo(map); map.setView([25, -40], 3);
+      try { const d = await api('api/areas'); $('area').insertAdjacentHTML('beforeend', d.areas.map(a => `<option value="${esc(a.code)}">${esc(a.label)} (${a.count})</option>`).join('')); } catch {}
+      load();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+id = "aircraft-registry"
+name = "Aircraft registry & routes"
+description = "ICAO hex or tail number to type, manufacturer and organisation owner (private owners are never named), callsign to airline and route, airports, type designators, and a position cross-check across adsb.lol and OpenSky. Also an API for other plugins."
+grid = "Air & Sea"
+port = 8159
+version = "0.1.0"
+provides = ["aircraft-registry"]
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_ACREG_BIND = "127.0.0.1:{port}"

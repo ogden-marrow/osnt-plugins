@@ -1,0 +1,32 @@
+[package]
+name = "osnt-ais-vessels"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["gzip", "json"] }
+osnt-common = { path = "../../sdk" }
+# AISStream is a WebSocket feed: tungstenite's handshake only, with TLS done by hand using the same
+# pure-Rust RustCrypto rustls provider as the SDK's HTTPS client (no ring, no aws-lc, no C).
+tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+rustls-rustcrypto = "0.0.2-alpha"
+webpki-roots = "0.26"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+# Keeps the plugin standalone (not part of any parent workspace) so it builds from its own folder.
+[workspace]
