@@ -135,6 +135,18 @@ fn greynoise(s: &AppState, ind: &Ind) -> Value {
     }
 }
 
+/// OTX marks well-known benign indicators (popular domains, public resolvers) as whitelisted or false positives even when
+/// community pulses mention them. Such an indicator is context, not a red "reported" verdict.
+pub fn otx_verdict(pulses: u64, validation: &str) -> (&'static str, String) {
+    let v = validation.to_ascii_lowercase();
+    let benign = v.contains("whitelist") || v.contains("false positive") || v.contains("popular");
+    match (pulses, benign) {
+        (0, _) => ("clear", "Not in any OTX pulse.".into()),
+        (n, true) => ("info", format!("Appears in {n} community pulse(s), but OTX also marks it as benign ({validation}). Pulses are user-submitted and vary in quality.")),
+        (n, false) => ("hit", format!("Appears in {n} community pulse(s). Pulses are user-submitted and vary in quality.")),
+    }
+}
+
 fn otx(s: &AppState, ind: &Ind) -> Value {
     let (kind, val) = match ind {
         Ind::Ip(ip) => (if ip.is_ipv6() { "IPv6" } else { "IPv4" }, ip.to_string()),
@@ -160,8 +172,7 @@ fn otx(s: &AppState, ind: &Ind) -> Value {
             let n = v["pulse_info"]["count"].as_u64().unwrap_or(0);
             let names: Vec<String> = v["pulse_info"]["pulses"].as_array().map(|a| a.iter().filter_map(|p| p["name"].as_str().map(|x| short(x, 80))).take(5).collect()).unwrap_or_default();
             let valid = v["validation"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default();
-            let status = if n > 0 { "hit" } else { "clear" };
-            let summary = if n > 0 { format!("Appears in {n} community pulse(s). Pulses are user-submitted and vary in quality.") } else { "Not in any OTX pulse.".into() };
+            let (status, summary) = otx_verdict(n, &valid);
             row("otx", status, summary, vec![("pulses", names.join(" · ")), ("validation notes", valid), ("reputation", v["reputation"].as_i64().map(|r| r.to_string()).unwrap_or_default()), ("country", v["country_name"].as_str().unwrap_or("").into()), ("ASN", v["asn"].as_str().unwrap_or("").into())], Some(page))
         }
     }

@@ -162,3 +162,11 @@ async fn requires_signature_and_has_tools() {
     let (st, v) = call(&a, Request::get("/tools").body(Body::empty()).unwrap()).await;
     assert_eq!((st, v[0]["name"].as_str()), (StatusCode::OK, Some("site_fingerprint")));
 }
+
+#[test]
+fn certificate_errors_are_recognised_for_the_partial_tls_report() {
+    assert!(is_certificate_error("request failed: io: invalid peer certificate: certificate expired: verification time 1"));
+    assert!(is_certificate_error("invalid peer certificate: UnknownIssuer"));
+    assert!(!is_certificate_error("host could not be resolved"));
+    assert!(!is_certificate_error("connection timed out"));
+}

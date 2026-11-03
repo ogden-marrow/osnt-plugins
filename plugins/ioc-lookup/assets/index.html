@@ -47,6 +47,7 @@
       <div class="state"><div class="h3">Enter an indicator</div><p>Sources without an API key are greyed out; add keys on the Credentials page. Only public data is queried and nothing is submitted for scanning.</p></div>
     </div>
 
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
     <div class="card hidden warnbox" id="scanbox" style="margin-top:16px">
       <div class="card-head"><h3 class="h3">Submit a URL to urlscan.io (optional)</h3></div>
       <div class="notice warn"><div><b>This sends the URL to a third party,</b> which will visit it with its own browser and may keep the result. Pick "private" unless you want it public. Nothing is sent unless you press the button.</div></div>
@@ -72,6 +73,20 @@
       if (!r.ok) throw new Error(r.status === 401 ? 'Sign in through the OSNT hub to use this page.' : (d.error || 'HTTP ' + r.status));
       return d;
     }
+    const store = { get(k) { try { return localStorage.getItem('osnt-ioc-lookup:' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-ioc-lookup:' + k, v); } catch {} } };
+    const toast = (m, k = '') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 3500); };
+    async function copy(text, what) {
+      try { await navigator.clipboard.writeText(text); toast(what + ' copied'); return; } catch {}
+      try { const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;opacity:0'; document.body.append(t); t.select(); const ok = document.execCommand('copy'); t.remove(); toast(ok ? what + ' copied' : 'Copy failed', ok ? '' : 'err'); } catch { toast('Copy failed', 'err'); }
+    }
+    // Plain links to sibling plugins (they may not be installed).
+    function related(d) {
+      const q = encodeURIComponent(d.query), L = (p, t) => `<a class="btn sm" href="/p/${p}/?q=${q}" target="_top">${t}</a>`;
+      if (d.kind === 'ip') return L('ip-intel', 'IP intel') + L('asn-bgp', 'ASN and routing') + L('threat-feeds', 'Blocklists') + L('cidr-exposure', 'Exposure');
+      if (d.kind === 'domain' || d.kind === 'url') return L('threat-feeds', 'Blocklists') + L('site-fingerprint', 'Site fingerprint');
+      return L('threat-feeds', 'Blocklists');
+    }
+    let last = null;
     const BADGE = { hit: ['err', 'Reported'], clear: ['ok', 'Nothing found'], info: ['', 'Context'], error: ['warn', 'Unavailable'], 'n/a': ['', 'Not applicable'], needs_key: ['', 'No key'] };
     function render(d) {
       const rows = d.rows.map(r => {
@@ -81,14 +96,19 @@
         return `<tr class="${off ? 'off' : ''}"><td class="nowrap src-name">${esc(r.name)}</td><td><span class="badge ${cls}">${label}</span></td>
           <td class="det">${esc(r.summary)}${det}</td><td class="nowrap">${safe(r.link) ? `<a href="${esc(r.link)}" target="_blank" rel="noopener noreferrer">Open at source</a>` : ''}</td></tr>`;
       }).join('');
-      return `<div class="card"><div class="head"><span class="badge">${esc(d.kind)}</span><span class="mono wrap-anywhere">${esc(d.query)}</span></div>
+      const hits = d.rows.filter(r => r.status === 'hit').length, ans = d.rows.filter(r => ['hit', 'clear', 'info'].includes(r.status)).length;
+      return `<div class="card"><div class="head"><span class="big" style="font-weight:650;font-size:18px">${hits ? `${hits} of ${ans} sources reported it` : `No source reported it (${ans} answered)`}</span><span class="badge">${esc(d.kind)}</span><span class="mono wrap-anywhere">${esc(d.query)}</span></div>
         <div class="table-wrap" style="margin-top:10px"><table class="data resp"><thead><tr><th>Source</th><th>Answer</th><th>What it says</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="hint">${esc(d.note)}</p></div>`;
+        <p class="hint">${esc(d.note)}</p>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="cp-link">Copy link</button><button class="btn sm" type="button" id="cp-json">Copy JSON</button>${related(d)}</div></div>`;
     }
     $('f').onsubmit = async e => {
       e.preventDefault(); const q = $('q').value.trim(); if (!q) return;
       busy($('out'), 'Asking each source…'); $('go').setAttribute('aria-busy', 'true');
-      try { const d = await api('api/lookup?q=' + encodeURIComponent(q)); $('out').innerHTML = render(d); if (d.kind === 'url') $('su').value = d.query; }
+      try { const d = await api('api/lookup?q=' + encodeURIComponent(q)); last = d; $('out').innerHTML = render(d); if (d.kind === 'url') $('su').value = d.query;
+        store.set('q', q); history.replaceState(null, '', '?q=' + encodeURIComponent(q));
+        $('cp-link').onclick = () => copy(new URL('?q=' + encodeURIComponent(q), location.href.split(/[?#]/)[0]).href, 'Link');
+        $('cp-json').onclick = () => copy(JSON.stringify(last, null, 2), 'JSON'); }
       catch (err) { fail($('out'), err.message, 'Lookup failed'); }
       $('go').removeAttribute('aria-busy');
     };
@@ -102,6 +122,7 @@
         $('sc').checked = false;
       } catch (err) { fail(el, err.message, 'Submission failed'); }
     };
+    { const q = (new URLSearchParams(location.search).get('q') || '').trim(); if (q) { $('q').value = q; $('f').requestSubmit(); } else { const l = store.get('q'); if (l) $('q').placeholder = 'Last: ' + l; } }
     api('api/sources').then(d => { if (d.urlscan_submit_available) $('scanbox').classList.remove('hidden'); }).catch(() => {});
   </script>
 </body>

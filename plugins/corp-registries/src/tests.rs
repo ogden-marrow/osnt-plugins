@@ -224,3 +224,13 @@ async fn gateway_and_tools() {
     assert_eq!(v.as_array().unwrap().len(), 3);
     assert!(!v.to_string().contains("API_KEY"));
 }
+
+#[test]
+fn gleif_ranking_puts_the_plain_company_before_funds() {
+    let mk = |n: &str| Card { source: "gleif", id: n.into(), name: n.into(), status: None, form: None, address: None, founded: None, industry: None, country: None, url: String::new(), parent: None };
+    let mut v = vec![mk("VERDIPAPIRFONDET EQUINOR AKSJER USA INDEKS"), mk("ADURA ENERGY LIMITED"), mk("Equinor Fond"), mk("EQUINOR ASA")];
+    rank_gleif(&mut v, "equinor");
+    let names: Vec<&str> = v.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names[0], "EQUINOR ASA");
+    assert_eq!(names[3], "ADURA ENERGY LIMITED");
+}

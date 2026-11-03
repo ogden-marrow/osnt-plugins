@@ -85,7 +85,7 @@ fn scan_aggregates() {
     assert_eq!(sm["cves"][0], json!({ "name": "CVE-2021-1", "hosts": 1 }), "duplicates within a host count once");
     assert_eq!(sm["ports"][0], json!({ "name": "80", "hosts": 2 }));
     let names: Vec<&str> = sm["products"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
-    assert!(names.contains(&"nginx nginx 1.18.0") && names.contains(&"openbsd openssh 7.4"));
+    assert!(names.contains(&"nginx 1.18.0") && names.contains(&"openbsd openssh 7.4"));
     assert_eq!(sm["products"][0]["hosts"], 2);
     let cells = v["cells"].as_array().unwrap();
     assert_eq!(cells[0]["risk"], "open");
@@ -145,7 +145,7 @@ fn csv_is_safe_and_complete() {
     let out = jobs::csv(&s, &id).unwrap();
     assert!(out.starts_with("ip,ports,hostnames,tags,cves,products\n"));
     assert_eq!(out.lines().count(), 4);
-    assert!(out.contains("198.51.106.1,80 443,a.example,cloud,,nginx nginx 1.18.0"));
+    assert!(out.contains("198.51.106.1,80 443,a.example,cloud,,nginx 1.18.0"));
     assert!(out.contains("'=cmd|"), "formula-looking hostnames are neutralised: {out}");
     assert_eq!(jobs::csv_cell_for_test("a,b"), "\"a,b\"");
     assert_eq!(jobs::csv_cell_for_test("x\"y"), "\"x\"\"y\"");
@@ -204,4 +204,10 @@ async fn requires_signature() {
     let a = app(Arc::new(st));
     assert_eq!(call(&a, Request::post("/api/scan").header("content-type", "application/json").body(Body::from("{\"cidr\":\"8.8.8.0/24\"}")).unwrap()).await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(call(&a, Request::get("/api/config").body(Body::empty()).unwrap()).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[test]
+fn product_name_is_not_doubled() {
+    assert_eq!(jobs::product_for_test("cpe:/a:cloudflare:cloudflare"), "cloudflare");
+    assert_eq!(jobs::product_for_test("cpe:/a:apache:http_server:2.4.1"), "apache http server 2.4.1");
 }

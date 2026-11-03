@@ -63,6 +63,12 @@ impl Bases {
     }
 }
 
+/// GLEIF's full-text order is loose (funds and sub-entities before the parent company). Rank names that contain the whole
+/// query first, then names that start with it, then the shortest (the plain "Acme ASA" before "Acme Pension Fund 3").
+pub fn rank_gleif(cards: &mut [Card], ql: &str) {
+    cards.sort_by_key(|c| { let n = c.name.to_lowercase(); (!n.contains(ql), !n.starts_with(ql), n.chars().count()) });
+}
+
 pub struct AppState {
     b: Bases,
     open: bool,
@@ -137,21 +143,38 @@ impl AppState {
         let v = if valid_lei(&up) {
             self.jget(&format!("gleif|lei|{up}"), &format!("{}/lei-records/{up}", self.b.gleif), &[], "GLEIF")?.map(|d| json!({ "data": [d["data"].clone()] }))
         } else {
-            self.jget(&format!("gleif|ft|{}", q.to_lowercase()), &format!("{}/lei-records?filter%5Bfulltext%5D={}&page%5Bsize%5D=15", self.b.gleif, enc(q)), &[], "GLEIF")?
+            self.jget(&format!("gleif|ft50|{}", q.to_lowercase()), &format!("{}/lei-records?filter%5Bfulltext%5D={}&page%5Bsize%5D=50", self.b.gleif, enc(q)), &[], "GLEIF")?
         };
         let rows = v.as_ref().and_then(|v| v["data"].as_array()).cloned().unwrap_or_default();
         let total = rows.len();
         let mut cards: Vec<Card> = rows.iter().filter_map(gleif_card).collect();
         // GLEIF's full-text order is loose: put names that contain the whole query first.
+        let visible = cards.len();
         let ql = q.trim().to_lowercase();
-        cards.sort_by_key(|c| !c.name.to_lowercase().contains(&ql));
-        let hidden = total - cards.len();
+        if !valid_lei(&up) {
+            rank_gleif(&mut cards, &ql);
+            cards.truncate(15);
+        }
+        let hidden = total - visible;
         Ok((cards, hidden))
     }
 
     fn wd_sparql(&self, query: &str) -> Result<Vec<Value>, ApiError> {
         let url = format!("{}?format=json&query={}", self.b.wd_sparql, enc(query));
-        let v = self.jget(&format!("wdq|{query}"), &url, &[("Accept", "application/sparql-results+json")], "Wikidata")?;
+        // The organisation filter walks the class hierarchy and can take several seconds (and Wikidata answers 429 when
+        // busy), so allow a longer timeout and one polite retry instead of failing the whole Wikidata column.
+        let v = self.cached(&format!("wdq|{query}"), Duration::from_secs(6 * 3600), || {
+            for attempt in 0..2 {
+                let r = self.agent.get(&url).header("Accept", "application/sparql-results+json").config().timeout_global(Some(Duration::from_secs(40))).build().call();
+                match r {
+                    Ok(res) => return util::read_value("Wikidata", res).map(Some),
+                    Err(ureq::Error::StatusCode(429)) if attempt == 0 => std::thread::sleep(Duration::from_secs(3)),
+                    Err(ureq::Error::StatusCode(404)) => return Ok(None),
+                    Err(e) => return Err(util::map_ureq("Wikidata", e)),
+                }
+            }
+            Err(util::upstream("Wikidata is rate limiting requests (HTTP 429); wait a little and try again"))
+        })?;
         Ok(v.and_then(|v| v["results"]["bindings"].as_array().cloned()).unwrap_or_default())
     }
 

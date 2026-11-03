@@ -3,7 +3,7 @@ name = "Offshore Leaks"
 description = "Search ICIJ's Offshore Leaks database for companies, trusts and foundations: jurisdiction, status, source leak and a map. No individuals."
 grid = "Organisations"
 port = 8141
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

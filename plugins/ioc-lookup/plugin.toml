@@ -3,7 +3,7 @@ name = "IOC reputation lookup"
 description = "One IP, domain, URL or hash fanned out to urlscan, OTX, GreyNoise, mnemonic passive DNS, InternetDB and (with keys) VirusTotal and AbuseIPDB, one verdict per source."
 grid = "Threat Intel"
 port = 8136
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

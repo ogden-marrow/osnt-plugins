@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use cache::Cache;
-use util::{ApiError, Spacer, bad, blocking, enc, get_json, not_found, now_epoch, post_json};
+use util::{ApiError, Spacer, bad, blocking, enc, get_json, not_found, now_epoch, post_json, post_json_slow, upstream};
 
 const PAGE: &str = include_str!("../assets/index.html");
 const TTL: Duration = Duration::from_secs(6 * 3600);
@@ -126,19 +126,28 @@ impl AppState {
         let filters = Self::usa_filters(org, kind, &start, &end);
         let ck = format!("usa|{kind}|{years}|{}", org.to_lowercase());
         self.cached(&ck, TTL, || {
-            let over = post_json(&self.agent, &format!("{}/search/spending_over_time/", self.b.usa), &json!({ "group": "fiscal_year", "filters": filters }), &[], "USAspending")?;
+            // Four independent USAspending queries: run them side by side (each can take several seconds for a large recipient).
+            let (over, ag, top, names) = std::thread::scope(|sc| {
+                let u: &str = &self.b.usa;
+                let a = &self.agent;
+                let (filters, org) = (&filters, org);
+                let h_over = sc.spawn(move || post_json_slow(a, &format!("{u}/search/spending_over_time/"), &json!({ "group": "fiscal_year", "filters": filters }), "USAspending"));
+                let h_ag = sc.spawn(move || post_json_slow(a, &format!("{u}/search/spending_by_category/awarding_agency/"), &json!({ "filters": filters, "limit": 8, "page": 1 }), "USAspending"));
+                let h_top = sc.spawn(move || post_json_slow(a, &format!("{u}/search/spending_by_award/"), &json!({
+                    "filters": filters, "fields": ["Award ID", "Recipient Name", "Award Amount", "Awarding Agency", "Start Date", "Description"], "limit": 8, "page": 1, "sort": "Award Amount", "order": "desc" }), "USAspending"));
+                let h_names = sc.spawn(move || post_json_slow(a, &format!("{u}/autocomplete/recipient/"), &json!({ "search_text": org, "limit": 5 }), "USAspending").ok());
+                let bad = || upstream("USAspending query failed");
+                (h_over.join().unwrap_or_else(|_| Err(bad())), h_ag.join().unwrap_or_else(|_| Err(bad())), h_top.join().unwrap_or_else(|_| Err(bad())), h_names.join().ok().flatten())
+            });
+            let (over, ag, top) = (over?, ag?, top?);
             let by_year: Vec<Value> = over["results"].as_array().map(|a| a.iter().map(|r| json!({ "fiscal_year": r["time_period"]["fiscal_year"], "amount": r["aggregated_amount"] })).collect()).unwrap_or_default();
             let total: f64 = by_year.iter().filter_map(|r| r["amount"].as_f64()).sum();
-            let ag = post_json(&self.agent, &format!("{}/search/spending_by_category/awarding_agency/", self.b.usa), &json!({ "filters": filters, "limit": 8, "page": 1 }), &[], "USAspending")?;
             let agencies: Vec<Value> = ag["results"].as_array().map(|a| a.iter().map(|r| json!({ "name": r["name"], "amount": r["amount"] })).collect()).unwrap_or_default();
-            let top = post_json(&self.agent, &format!("{}/search/spending_by_award/", self.b.usa), &json!({
-                "filters": filters, "fields": ["Award ID", "Recipient Name", "Award Amount", "Awarding Agency", "Start Date", "Description"], "limit": 8, "page": 1, "sort": "Award Amount", "order": "desc" }), &[], "USAspending")?;
             let awards: Vec<Value> = top["results"].as_array().map(|a| a.iter().map(|r| json!({
                 "award_id": r["Award ID"], "recipient": r["Recipient Name"], "amount": r["Award Amount"], "agency": r["Awarding Agency"], "start": r["Start Date"],
                 "description": r["Description"].as_str().map(|d| clip(d, 160)),
                 "url": r["generated_internal_id"].as_str().map(|g| format!("https://www.usaspending.gov/award/{}", enc(g))),
             })).collect()).unwrap_or_default();
-            let names = post_json(&self.agent, &format!("{}/autocomplete/recipient/", self.b.usa), &json!({ "search_text": org, "limit": 5 }), &[], "USAspending").ok();
             let recipients: Vec<String> = names.and_then(|n| n["results"].as_array().map(|a| a.iter().filter_map(|r| r["recipient_name"].as_str().map(str::to_string)).collect())).unwrap_or_default();
             Ok(json!({ "org": org, "kind": kind, "period": { "start": start, "end": end }, "total": total, "by_fiscal_year": by_year, "agencies": agencies, "top_awards": awards, "matched_recipients": recipients,
                 "note": "Prime awards by recipients whose name contains the text; related companies and subsidiaries have their own names. Individuals are excluded by recipient category." }))
@@ -149,7 +158,8 @@ impl AppState {
 
     fn nonprofit_search(&self, q: &str) -> Result<Value, ApiError> {
         self.cached(&format!("pp|s|{}", q.to_lowercase()), TTL, || {
-            let v = get_json(&self.agent, &format!("{}/search.json?q={}", self.b.propublica, enc(q)), &[], "ProPublica Nonprofit Explorer")?.ok_or_else(|| not_found("not found"))?;
+            // ProPublica answers 404 when nothing matches: that is an empty result, not an error.
+            let v = get_json(&self.agent, &format!("{}/search.json?q={}", self.b.propublica, enc(q)), &[], "ProPublica Nonprofit Explorer")?.unwrap_or_else(|| json!({ "organizations": [], "total_results": 0 }));
             let orgs: Vec<Value> = v["organizations"].as_array().map(|a| a.iter().take(15).map(|o| json!({
                 "ein": o["ein"].as_u64().map(|e| format!("{e:09}")), "name": o["name"], "city": o["city"], "state": o["state"], "ntee": o["ntee_code"],
             })).collect()).unwrap_or_default();
@@ -220,8 +230,8 @@ impl AppState {
 
     fn tenders(&self, org: &str, role: &str, page: u32) -> Result<Value, ApiError> {
         let field = if role == "winner" { "winner-name" } else { "buyer-name" };
-        self.cached(&format!("ted|{role}|{page}|{}", org.to_lowercase()), TTL, || {
-            let v = self.ted_post(json!({ "query": format!("{field}=\"{org}\""), "fields": ["publication-number", "notice-title", "buyer-name", "winner-name", "publication-date", "notice-type"], "limit": 20, "page": page, "sortField": "publication-date", "sortOrder": "desc" }))?;
+        self.cached(&format!("ted2|{role}|{page}|{}", org.to_lowercase()), TTL, || {
+            let v = self.ted_post(json!({ "query": format!("{field}=\"{org}\" SORT BY publication-date DESC"), "fields": ["publication-number", "notice-title", "buyer-name", "winner-name", "publication-date", "notice-type"], "limit": 20, "page": page }))?;
             let pick = |x: &Value| -> Option<String> {
                 let o = x.as_object()?;
                 let arr = o.get("eng").or_else(|| o.values().next())?;
@@ -283,16 +293,26 @@ struct LobbyQ {
     org: String,
     year: Option<i32>,
 }
+/// Default year for a lobbying search: the newest year that has any filing naming the client (the current year is
+/// partial but more useful than last year's), else last year.
+pub fn pick_lobby_year(counts: &Value, now: i32) -> i32 {
+    counts.as_array().and_then(|a| a.iter().rev().find(|r| r["filings"].as_u64().unwrap_or(0) > 0)).and_then(|r| r["year"].as_i64()).map(|y| y as i32).unwrap_or(now - 1)
+}
+
 async fn lobbying(State(st): State<Shared>, Query(q): Query<LobbyQ>) -> Result<Json<Value>, ApiError> {
     let org = valid_org(&q.org)?;
     let now = current_year();
-    let year = q.year.unwrap_or(now - 1);
-    if !(1999..=now).contains(&year) {
-        return Err(bad(format!("year must be between 1999 and {now}")));
+    if let Some(year) = q.year {
+        if !(1999..=now).contains(&year) {
+            return Err(bad(format!("year must be between 1999 and {now}")));
+        }
     }
+    let wanted = q.year;
     Ok(Json(blocking(move || {
+        let counts = st.lobbying_counts(&org, now)?;
+        let year = wanted.unwrap_or_else(|| pick_lobby_year(&counts, now));
         let mut v = st.lobbying(&org, year)?;
-        v["by_year"] = st.lobbying_counts(&org, now)?;
+        v["by_year"] = counts;
         Ok(v)
     }).await?))
 }

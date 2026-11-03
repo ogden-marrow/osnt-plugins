@@ -3,7 +3,7 @@ name = "Netblock exposure"
 description = "Passive exposure summary for a small IPv4 block (up to /22): open ports, products, CVEs and hostnames per address from Shodan InternetDB, as a heatmap. Sends nothing to the targets."
 grid = "Threat Intel"
 port = 8137
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

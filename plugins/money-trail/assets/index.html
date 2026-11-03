@@ -57,6 +57,14 @@
     const spark = (vals, label) => { if (vals.length < 2) return ''; const lo = Math.min(...vals), hi = Math.max(...vals), sp = hi - lo || 1; const pts = vals.map((x, i) => [4 + i * (192 / (vals.length - 1)), 36 - ((x - lo) / sp) * 30]); return `<svg viewBox="0 0 200 40" preserveAspectRatio="none" role="img" aria-label="${esc(label)}"><polyline fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" points="${pts.map(p => p.join(',')).join(' ')}"/></svg>`; };
     const bars = (rows, fmt) => { const m = Math.max(...rows.map(r => r.v), 1); return `<div class="bars">${rows.map(r => `<div class="bar"><span class="t">${esc(r.t)}</span><span class="b"><i style="width:${Math.max(2, r.v / m * 100)}%"></i></span><span class="mono">${fmt(r.v)}</span></div>`).join('')}</div>`; };
     const csv = (name, head, rows) => { const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`; const t = [head, ...rows].map(r => r.map(q).join(',')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/csv' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
+    const store = { get(k) { try { return localStorage.getItem('osnt-money-trail:' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-money-trail:' + k, v); } catch {} } };
+    async function copyText(text, what) {
+      try { await navigator.clipboard.writeText(text); toast(what + ' copied'); return; } catch {}
+      try { const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;opacity:0'; document.body.append(t); t.select(); const ok = document.execCommand('copy'); t.remove(); toast(ok ? what + ' copied' : 'Copy failed', ok ? '' : 'err'); } catch { toast('Copy failed', 'err'); }
+    }
+    function syncUrl() { history.replaceState(null, '', '?q=' + encodeURIComponent(org) + '&tab=' + tab); }
+    // Plain links to sibling plugins (they may not be installed); organisation names only.
+    const sibs = () => `<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn sm" type="button" id="cp-link">Copy link</button>${['sec-edgar|SEC filings', 'corp-registries|Company registries', 'sanctions-screen|Sanctions screen', 'offshore-leaks|Offshore Leaks'].map(v => { const [p, t] = v.split('|'); return `<a class="btn sm" href="/p/${p}/?q=${encodeURIComponent(org)}" target="_top">${t}</a>`; }).join('')}</div>`;
     let tab = 'awards', org = '', kind = 'contracts', role = 'buyer', year = null, lastRows = null;
     const busy = m => { panel.setAttribute('aria-busy', 'true'); panel.innerHTML = `<div class="loading"><span class="spin"></span>${esc(m)}</div>`; };
     const fail = e => { panel.setAttribute('aria-busy', 'false'); panel.innerHTML = `<div class="state error" role="alert"><div class="h3">Could not load</div><p>${esc(e.message)}</p></div>`; };
@@ -112,7 +120,7 @@
       const by = d.by_year || [];
       if (!d.notices.length) { panel.innerHTML = h + empty('No notices', `No TED notices with a ${role} matching "${org}".`); bind(); return; }
       h += `<div class="tiles"><div class="tile"><div class="lbl">Notices as ${role}</div><div class="val">${(d.total ?? d.notices.length).toLocaleString()}</div>${spark(by.map(y => y.notices), 'notices by year')}<div class="sub">${by.length ? by[0].year + ' to ' + by.at(-1).year + ': ' + by.map(y => y.notices).join(', ') : ''}</div></div></div>`;
-      h += `<div class="table-wrap"><table class="data"><thead><tr><th>Published</th><th>Notice</th><th>Buyer</th><th>Winner</th></tr></thead><tbody>${d.notices.map(n => `<tr><td class="mono">${esc(n.published || '')}</td><td>${n.url ? `<a href="${esc(safe(n.url))}" target="_blank" rel="noopener">${esc(n.title || n.id)}</a>` : esc(n.title || n.id)}<div class="small faint mono">${esc(n.id)} ${esc(n.type || '')}</div></td><td>${esc(n.buyer || '')}</td><td>${esc(n.winner || '')}</td></tr>`).join('')}</tbody></table></div><p class="small faint">Showing ${d.notices.length} notices in the order TED returns them.</p>`;
+      h += `<div class="table-wrap"><table class="data"><thead><tr><th>Published</th><th>Notice</th><th>Buyer</th><th>Winner</th></tr></thead><tbody>${d.notices.map(n => `<tr><td class="mono">${esc(n.published || '')}</td><td>${n.url ? `<a href="${esc(safe(n.url))}" target="_blank" rel="noopener">${esc(n.title || n.id)}</a>` : esc(n.title || n.id)}<div class="small faint mono">${esc(n.id)} ${esc(n.type || '')}</div></td><td>${esc(n.buyer || '')}</td><td>${esc(n.winner || '')}</td></tr>`).join('')}</tbody></table></div><p class="small faint">Showing ${d.notices.length} notices newest first.</p>`;
       panel.innerHTML = h; bind();
       lastRows = () => csv(`tenders-${org}.csv`, ['Published', 'Notice', 'Title', 'Buyer', 'Winner'], d.notices.map(n => [n.published, n.id, n.title, n.buyer, n.winner]));
     }
@@ -121,10 +129,15 @@
       panel.querySelectorAll('[data-y]').forEach(b => b.onclick = () => { year = +b.dataset.y; run(); });
       panel.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { role = b.dataset.r; run(); });
       const c = $('csv'); if (c) c.onclick = () => lastRows ? lastRows() : toast('Nothing to export', 'warn');
+      if (!$('cp-link') && org) { panel.insertAdjacentHTML('beforeend', sibs()); }
+      const cl = $('cp-link'); if (cl) cl.onclick = () => copyText(new URL('?q=' + encodeURIComponent(org) + '&tab=' + tab, location.href.split(/[?#]/)[0]).href, 'Link');
     }
-    function run() { if (!org) return; lastRows = null; ({ awards, nonprofit: () => nonprofit(''), lobbying, tenders }[tab])().catch(fail); }
+    function run() { if (!org) return; lastRows = null; syncUrl(); ({ awards, nonprofit: () => nonprofit(''), lobbying, tenders }[tab])().catch(fail); }
     document.querySelectorAll('.tab').forEach(t => t.onclick = () => { tab = t.dataset.t; document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-selected', x === t)); run(); });
-    $('f').onsubmit = e => { e.preventDefault(); const v = $('q').value.trim(); if (v.length < 2) return; org = v; year = null; run(); };
+    $('f').onsubmit = e => { e.preventDefault(); const v = $('q').value.trim(); if (v.length < 2) return; org = v; year = null; store.set('q', v); run(); };
+    { const P = new URLSearchParams(location.search), q = (P.get('q') || '').trim(), t = P.get('tab');
+      if (['awards', 'nonprofit', 'lobbying', 'tenders'].includes(t)) { tab = t; document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-selected', x.dataset.t === t)); }
+      if (q) { $('q').value = q; $('f').requestSubmit(); } else { const l = store.get('q'); if (l) $('q').placeholder = 'Last: ' + l; } }
   </script>
 </body>
 </html>

@@ -77,15 +77,19 @@
     const sec = d => d.items.map(i => { const [c, g] = ICON[i.status] || ['', '?']; return `<div class="sec"><span class="badge ${c}" aria-label="${esc(i.status)}">${g}</span><div><b>${esc(i.name)}</b> <span class="faint small">${esc(i.header)}</span><div class="d">${esc(i.note)}</div>${i.value ? `<div class="v">${esc(i.value)}</div>` : ''}</div></div>`; }).join('');
     const kv = rows => `<table class="kv">${rows.filter(r => r[1] != null && r[1] !== '' && !(Array.isArray(r[1]) && !r[1].length)).map(([k, v, raw]) => `<tr><th>${esc(k)}</th><td>${raw ? v : esc(Array.isArray(v) ? v.join(', ') : v)}</td></tr>`).join('')}</table>`;
     const card = (title, body, extra = '') => `<section class="card"><div class="card-head"><h3 class="h3">${esc(title)}</h3>${extra}</div>${body}</section>`;
+    function renderTls(t) {
+      return t.available ? `<div class="chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><span class="badge">${esc(t.version)}</span><span class="badge">${esc(t.cipher)}</span>${t.alpn ? `<span class="badge">ALPN ${esc(t.alpn)}</span>` : ''}<span class="badge ${t.trusted ? 'ok' : 'err'}">${t.trusted ? 'chain trusted' : 'not trusted'}</span></div>${t.trust_error ? `<div class="notice warn"><div>${esc(t.trust_error)}</div></div>` : ''}` +
+        t.chain.map((c, i) => `<div class="well" style="margin-top:8px"><b>${i === 0 ? 'Leaf' : c.self_signed ? 'Root' : 'Intermediate'}</b> ${c.expired ? '<span class="badge err">expired</span>' : c.days_left < 15 ? `<span class="badge warn">${c.days_left} days left</span>` : `<span class="badge ok">${c.days_left} days left</span>`}` + kv([['Subject', c.subject], ['Issuer', c.issuer], ['Valid', c.not_before.slice(0, 10) + ' to ' + c.not_after.slice(0, 10) + ` (${c.lifetime_days} days)`], ['Key', c.key + ', ' + c.signature], ['Names', c.san_count > c.sans.length ? c.sans.join(', ') + ` and ${c.san_count - c.sans.length} more` : c.sans.join(', ')], ['SHA-256', `<span class="mono wrap-anywhere">${esc(c.sha256)}</span>`, true]]) + '</div>').join('')
+        : `<span class="muted">${esc(t.note || t.error || 'Not available.')}</span>`;
+    }
     function render(d) {
+      if (d.partial) return `<section class="card"><div class="head"><span class="grade F" aria-label="Certificate rejected">!</span><div class="u"><div class="big" style="font-size:18px;font-weight:650">Certificate problem</div><div class="mono small">${esc(d.final_url)}</div></div></div><div class="notice err" style="margin-top:10px" role="alert"><div>${esc(d.error)}</div></div><p class="hint">${esc(d.note)}</p></section>${card('TLS', renderTls(d.tls), '<span class="faint small">Mozilla roots</span>')}`;
       const s = d.security, pg = d.page;
       const chain = d.redirects.map((h, i) => `<span class="step"><span class="badge ${h.status < 300 ? 'ok' : h.status < 400 ? '' : 'err'}">${h.status}</span> ${esc(h.url)}</span>${i < d.redirects.length - 1 ? '<span class="arrow" aria-hidden="true">→</span>' : ''}`).join('');
       const tech = d.tech.length ? `<div class="tech">${d.tech.map(t => `<div><b>${esc(t.name)}</b>${t.version ? ` <span class="badge">${esc(t.version)}</span>` : ''}<div class="small muted">${esc(t.category)}</div><div class="ev">${t.evidence.map(esc).join('<br>')}</div></div>`).join('')}</div>` : '<span class="muted">No known technologies recognised from headers or markup.</span>';
       const cookies = d.cookies.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Cookie</th><th>Secure</th><th>HttpOnly</th><th>SameSite</th><th>Notes</th></tr></thead><tbody>${d.cookies.map(c => `<tr><td class="mono">${esc(c.name)}</td><td>${c.secure ? '✓' : '–'}</td><td>${c.httponly ? '✓' : '–'}</td><td>${esc(c.samesite || '–')}</td><td>${c.issues.map(i => `<span class="badge warn">${esc(i)}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div><p class="hint">Values are never shown.</p>` : '<span class="muted">No cookies were set by these responses.</span>';
       const t = d.tls;
-      const certs = t.available ? `<div class="chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><span class="badge">${esc(t.version)}</span><span class="badge">${esc(t.cipher)}</span>${t.alpn ? `<span class="badge">ALPN ${esc(t.alpn)}</span>` : ''}<span class="badge ${t.trusted ? 'ok' : 'err'}">${t.trusted ? 'chain trusted' : 'not trusted'}</span></div>${t.trust_error ? `<div class="notice warn"><div>${esc(t.trust_error)}</div></div>` : ''}` +
-        t.chain.map((c, i) => `<div class="well" style="margin-top:8px"><b>${i === 0 ? 'Leaf' : c.self_signed ? 'Root' : 'Intermediate'}</b> ${c.expired ? '<span class="badge err">expired</span>' : c.days_left < 15 ? `<span class="badge warn">${c.days_left} days left</span>` : `<span class="badge ok">${c.days_left} days left</span>`}` + kv([['Subject', c.subject], ['Issuer', c.issuer], ['Valid', c.not_before.slice(0, 10) + ' to ' + c.not_after.slice(0, 10) + ` (${c.lifetime_days} days)`], ['Key', c.key + ', ' + c.signature], ['Names', c.san_count > c.sans.length ? c.sans.join(', ') + ` and ${c.san_count - c.sans.length} more` : c.sans.join(', ')], ['SHA-256', `<span class="mono wrap-anywhere">${esc(c.sha256)}</span>`, true]]) + '</div>').join('')
-        : `<span class="muted">${esc(t.note || t.error || 'Not available.')}</span>`;
+      const certs = renderTls(t);
       const f = d.files.robots, m = d.files.sitemap;
       const files = kv([['robots.txt', f.found ? `${f.disallow_rules} Disallow rule(s), ${f.allow_rules} Allow, ${f.user_agents} user-agent group(s)${f.crawl_delay ? ', crawl-delay ' + f.crawl_delay : ''}` : 'not found (' + (f.note || '') + ')'], ['Disallowed paths', f.found ? f.disallow_sample : null], ['Sitemap', m.found ? (m.entries != null ? `${m.entries} ${m.kind === 'index' ? 'sitemaps' : 'URLs'}${m.newest_lastmod ? ', newest ' + m.newest_lastmod : ''}${m.truncated ? ' (file truncated)' : ''}` : m.note) + ` (${m.url})` : 'not found (' + (m.note || '') + ')'], ['Sample URLs', m.sample]]);
       const fv = d.favicon;
@@ -105,14 +109,32 @@
           <div class="notice warn"><div>SSL Labs has no read-only mode: if nobody assessed <b>${esc(labsHost)}</b> recently, asking <b>starts a public assessment</b> that probes the site's TLS configuration from SSL Labs' servers. Only continue for hosts you are allowed to test.</div></div>
           <div class="row" style="margin-top:10px"><button class="btn" id="labsb" data-host="${esc(labsHost)}">Ask SSL Labs</button></div><div id="labsout" style="margin-top:10px" aria-live="polite"></div></section>`;
     }
+    let last = null;
+    async function copyText(text, what) {
+      try { await navigator.clipboard.writeText(text); toast(what + ' copied'); return; } catch {}
+      try { const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;opacity:0'; document.body.append(t); t.select(); const ok = document.execCommand('copy'); t.remove(); toast(ok ? what + ' copied' : 'Copy failed', ok ? '' : 'err'); } catch { toast('Copy failed', 'err'); }
+    }
+    // Copy buttons and plain links to sibling plugins (they may not be installed).
+    function tools(d) {
+      let host = ''; try { host = new URL(d.final_url).hostname; } catch {}
+      const q = encodeURIComponent(host), L = (p, t) => `<a class="btn sm" href="/p/${p}/?q=${q}" target="_top">${t}</a>`;
+      return `<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn sm" type="button" id="cp-link">Copy link</button><button class="btn sm" type="button" id="cp-json">Copy JSON</button>${L('ioc-lookup', 'Reputation')}${L('threat-feeds', 'Blocklists')}${L('ip-intel', 'IP intel')}</div>`;
+    }
     $('f').onsubmit = async e => {
       e.preventDefault(); const v = $('u').value.trim(); if (!v) return;
       $('out').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Fetching the page, robots.txt, sitemap, favicon and TLS handshake…</div>';
       $('go').setAttribute('aria-busy', 'true');
-      try { $('out').innerHTML = render(await api('api/fingerprint?url=' + encodeURIComponent(v))); }
+      try {
+        const d = await api('api/fingerprint?url=' + encodeURIComponent(v)); last = d; $('out').innerHTML = render(d) + tools(d);
+        try { localStorage.setItem('osnt-site-fingerprint:u', v); } catch {}
+        history.replaceState(null, '', '?q=' + encodeURIComponent(v));
+        const cj = $('cp-json'); if (cj) cj.onclick = () => copyText(JSON.stringify(last, null, 2), 'JSON');
+        const cl = $('cp-link'); if (cl) cl.onclick = () => copyText(new URL('?q=' + encodeURIComponent(v), location.href.split(/[?#]/)[0]).href, 'Link');
+      }
       catch (err) { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">Could not fingerprint that</div><p>${esc(err.message)}</p></div>`; }
       $('go').removeAttribute('aria-busy');
     };
+    { const q = (new URLSearchParams(location.search).get('q') || '').trim(); if (q) { $('u').value = q; $('f').requestSubmit(); } else { try { const l = localStorage.getItem('osnt-site-fingerprint:u'); if (l) $('u').placeholder = 'Last: ' + l; } catch {} } }
     document.addEventListener('click', async e => {
       const c = e.target.closest('.copy'); if (c) { try { await navigator.clipboard.writeText(c.dataset.copy); toast('Copied'); } catch { toast('Copy failed', 'err'); } return; }
       const b = e.target.closest('#labsb'); if (!b) return;

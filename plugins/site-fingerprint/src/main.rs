@@ -87,8 +87,32 @@ fn same_origin(a: &Url, b: &Url) -> bool {
     a.scheme() == b.scheme() && a.host_str() == b.host_str() && a.port_or_known_default() == b.port_or_known_default()
 }
 
+/// True when a fetch failed because the server's certificate was rejected (expired, self-signed, wrong host...).
+pub fn is_certificate_error(e: &str) -> bool {
+    let l = e.to_ascii_lowercase();
+    l.contains("certificate") || l.contains("unknownissuer") || l.contains("invalid peer")
+}
+
+/// A site with a broken certificate cannot be fetched, but the certificate itself is exactly what the user wants to see:
+/// read the handshake without trusting it and return a partial result (`partial: true`) instead of a bare error.
+fn certificate_fallback(s: &AppState, start: &Url, err: String) -> Result<Value, String> {
+    if start.scheme() != "https" || !is_certificate_error(&err) {
+        return Err(err);
+    }
+    let host = start.host_str().unwrap_or("").to_string();
+    let addrs = s.guard.check_url(start, false).map_err(|_| err.clone())?;
+    let a = addrs.first().map(|a| SocketAddr::new(a.ip(), s.tls_port.unwrap_or(443))).ok_or_else(|| err.clone())?;
+    let mut tls_v = tls::inspect(a, &host).map_err(|_| err.clone())?;
+    tls_v["available"] = json!(true);
+    Ok(json!({ "partial": true, "input": start.to_string(), "final_url": start.to_string(), "error": err,
+               "tls": tls_v, "note": "The page itself could not be fetched because the certificate was not accepted. The certificate chain the server presented is shown below." }))
+}
+
 pub fn fingerprint(s: &AppState, start: &Url) -> Result<Value, String> {
-    let page = fetch::fetch_chain(&s.agent, &s.guard, start)?;
+    let page = match fetch::fetch_chain(&s.agent, &s.guard, start) {
+        Ok(p) => p,
+        Err(e) => return certificate_fallback(s, start, e),
+    };
     let fin = page.final_url.clone();
     let https = fin.scheme() == "https";
     let text = String::from_utf8_lossy(&page.body).to_string();

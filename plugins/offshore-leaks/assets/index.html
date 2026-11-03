@@ -53,6 +53,11 @@
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const toast = (m, k = '') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
     async function api(p) { const r = await fetch(p), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+    const store = { get(k) { try { return localStorage.getItem('osnt-offshore-leaks:' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-offshore-leaks:' + k, v); } catch {} } };
+    async function copyText(text, what) {
+      try { await navigator.clipboard.writeText(text); toast(what + ' copied'); return; } catch {}
+      try { const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;opacity:0'; document.body.append(t); t.select(); const ok = document.execCommand('copy'); t.remove(); toast(ok ? what + ' copied' : 'Copy failed', ok ? '' : 'err'); } catch { toast('Copy failed', 'err'); }
+    }
     let map, layer, results = [], info = {}, pins = {};
     (async () => { try { ({ map } = await OSNT.createMap('map')); layer = L.layerGroup().addTo(map); map.setView([20, 0], 1); } catch (e) { $('map').innerHTML = '<div class="state" style="margin:12px"><div class="h3">Map unavailable</div><p>The shared map could not load; the list still works.</p></div>'; } })();
     function drawPins() {
@@ -72,7 +77,7 @@
         const d = await api('api/entity?id=' + r.id); info[r.id] = d;
         const kv = [['Kind', d.kind], ['Source leak', d.source], ['Jurisdiction', d.jurisdiction], ['Status', d.status], ['Incorporated', d.incorporation_date], ['Inactivated', d.inactivation_date], ['Struck off', d.struck_off_date], ['Original name', d.original_name !== d.name ? d.original_name : null], ['Service provider', d.service_provider], ['Countries', d.countries], ['Note', d.note]].filter(x => x[1]);
         const counts = Object.entries(d.connected_counts || {}).map(([k, v]) => `${v} ${k.toLowerCase()} record${v === 1 ? '' : 's'}`).join(', ');
-        el.innerHTML = `<h3 class="h3" style="margin-bottom:6px;overflow-wrap:anywhere">${esc(d.name)}</h3><table class="kv">${kv.map(([k, v]) => `<tr><th>${k}</th><td>${esc(v)}</td></tr>`).join('')}${counts ? `<tr><th>Connected</th><td>${esc(counts)} <span class="faint">(counts only)</span></td></tr>` : ''}</table>${d.valid_until ? `<p class="small faint" style="margin:8px 0 0">${esc(d.valid_until)}</p>` : ''}<p style="margin:10px 0 0"><a class="btn sm" href="${esc(d.url)}" target="_blank" rel="noopener">Open on ICIJ</a></p>`;
+        el.innerHTML = `<h3 class="h3" style="margin-bottom:6px;overflow-wrap:anywhere">${esc(d.name)}</h3><table class="kv">${kv.map(([k, v]) => `<tr><th>${k}</th><td>${esc(v)}</td></tr>`).join('')}${counts ? `<tr><th>Connected</th><td>${esc(counts)} <span class="faint">(counts only)</span></td></tr>` : ''}</table>${d.valid_until ? `<p class="small faint" style="margin:8px 0 0">${esc(d.valid_until)}</p>` : ''}<p style="margin:10px 0 0"><a class="btn sm" href="${esc(d.url)}" target="_blank" rel="noopener">Open on ICIJ</a>${d.kind === 'entity' ? ['corp-registries|Registries', 'sec-edgar|SEC filings', 'sanctions-screen|Sanctions screen'].map(x => { const [p, t] = x.split('|'); return ` <a class="btn sm" href="/p/${p}/?q=${encodeURIComponent(d.name)}" target="_top">${t}</a>`; }).join('') : ''}</p>`;
         list(); document.querySelector(`.rows button[data-i="${i}"]`)?.setAttribute('aria-current', 'true'); drawPins();
       } catch (e) { el.innerHTML = `<h3 class="h3">${esc(r.name)}</h3><div class="notice err" style="margin-top:8px"><div>${esc(e.message)}</div></div>`; }
     }
@@ -81,11 +86,16 @@
       const box = $('res'); box.parentElement.setAttribute('aria-busy', 'true'); box.innerHTML = '<div class="loading" style="padding:14px"><span class="spin"></span>Searching…</div>'; info = {}; if (layer) layer.clearLayers(); $('mapit').disabled = true;
       try {
         const d = await api(`api/search?q=${encodeURIComponent(q)}` + ($('inter').checked ? '&intermediaries=1' : '')); results = d.results; box.parentElement.setAttribute('aria-busy', 'false');
-        $('rn').textContent = `${results.length} found`;
+        $('rn').innerHTML = `${results.length} found <button class="btn sm" type="button" id="cp-link">Copy link</button> <button class="btn sm" type="button" id="cp-csv">CSV</button>`;
+        store.set('q', q); history.replaceState(null, '', '?q=' + encodeURIComponent(q) + ($('inter').checked ? '&intermediaries=1' : ''));
+        $('cp-link').onclick = () => copyText(new URL(location.search ? location.href : location.href).href, 'Link');
+        $('cp-csv').onclick = () => { const c = v => `"${String(v ?? '').replace(/"/g, '""')}"`; const t = ['Name,Kind,Leak,Score,URL', ...results.map(r => [r.name, r.kind, r.leak, r.score, r.url].map(c).join(','))].join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/csv' })); a.download = 'offshore-leaks.csv'; document.body.append(a); a.click(); a.remove(); };
         if (!results.length) { box.innerHTML = `<div class="state" style="margin:12px"><div class="h3">Nothing found for "${esc(q)}"</div><p>Try a shorter name or another spelling.</p></div>`; return; }
         list(); $('mapit').disabled = !results.some(r => r.kind === 'entity');
       } catch (err) { box.parentElement.setAttribute('aria-busy', 'false'); box.innerHTML = `<div class="state error" style="margin:12px" role="alert"><div class="h3">Search failed</div><p>${esc(err.message)}</p></div>`; }
     };
+    { const P = new URLSearchParams(location.search), q = (P.get('q') || '').trim(); if (P.get('intermediaries') === '1') $('inter').checked = true;
+      if (q) { $('q').value = q; $('f').requestSubmit(); } else { const l = store.get('q'); if (l) $('q').placeholder = 'Last: ' + l; } }
     $('mapit').onclick = async () => {
       const ids = results.filter(r => r.kind === 'entity').slice(0, 10).map(r => r.id); $('mapit').disabled = true;
       for (let i = 0; i < ids.length; i += 5) {

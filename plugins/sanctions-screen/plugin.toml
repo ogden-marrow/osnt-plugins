@@ -3,7 +3,7 @@ name = "Sanctions screening"
 description = "Fuzzy name search over official sanctions lists (OFAC, EU, UN, UK, US CSL, SECO, BIS) for companies, vessels and aircraft."
 grid = "Organisations"
 port = 8140
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

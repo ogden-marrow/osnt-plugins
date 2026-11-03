@@ -21,6 +21,7 @@
     .why table { border-collapse: collapse; } .why td, .why th { padding: 2px 14px 2px 0; text-align: left; font-weight: 400; }
     .nm { font-weight: 600; }
     button.lnk { all: unset; cursor: pointer; color: var(--link); font-size: var(--fs-xs); } button.lnk:focus-visible { outline: 2px solid var(--focus); }
+    @media (pointer: coarse), (max-width: 640px) { button.lnk { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; } .co .acts a, td a.small { display: inline-flex; align-items: center; min-height: 44px; } }
     footer.src { margin-top: 28px; font-size: var(--fs-xs); color: var(--ink-3); max-width: 90ch; }
     .idform { display: flex; flex-wrap: wrap; gap: 8px; }
     .idform input { flex: 1 1 180px; min-height: 40px; font-size: 16px; }
@@ -54,7 +55,20 @@
     const toast = (m, k = '') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
     async function api(path, opt) { const r = await fetch(path, opt), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
     const age = s => s == null ? 'not downloaded yet' : s < 120 ? 'just now' : s < 7200 ? Math.round(s / 60) + ' min old' : s < 172800 ? Math.round(s / 3600) + ' h old' : Math.round(s / 86400) + ' d old';
-    let LISTS = [];
+    let LISTS = [], lastD = null;
+    const store = { get(k) { try { return localStorage.getItem('osnt-sanctions-screen:' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-sanctions-screen:' + k, v); } catch {} } };
+    async function copyText(text, what) {
+      try { await navigator.clipboard.writeText(text); toast(what + ' copied'); return; } catch {}
+      try { const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;opacity:0'; document.body.append(t); t.select(); const ok = document.execCommand('copy'); t.remove(); toast(ok ? what + ' copied' : 'Copy failed', ok ? '' : 'err'); } catch { toast('Copy failed', 'err'); }
+    }
+    // Plain links to sibling plugins (they may not be installed). Never offered for natural persons.
+    function crossLinks(r) {
+      const L = (p, q, t) => ` · <a class="small" href="/p/${p}/?q=${encodeURIComponent(q)}" target="_top">${t}</a>`;
+      if (r.kind === 'vessel') { const ids = r.identifiers || [], imo = ids.find(x => /^IMO\d{7}$/.test(x)), mmsi = ids.find(x => /^\d{9}$/.test(x)); const k = mmsi || (imo && imo.slice(3)); return k ? L('ais-vessels', k, 'Track vessel') : ''; }
+      if (r.kind === 'aircraft') { const reg = (r.identifiers || []).find(x => /^[A-Z0-9-]{3,8}$/.test(x) && /[A-Z]/.test(x)); return reg ? L('adsb', reg, 'Aircraft') : ''; }
+      if (r.kind === 'entity') return L('corp-registries', r.name, 'Registries') + L('sec-edgar', r.name, 'SEC filings') + L('offshore-leaks', r.name, 'Offshore Leaks');
+      return '';
+    }
     function strip() {
       $('strip').innerHTML = LISTS.map(l => `<div class="chip"><label><input type="checkbox" data-l="${l.id}" checked> ${esc(l.name)}</label><div class="meta">${l.records != null ? `${l.entities} entities, ${l.vessels} vessels, ${l.aircraft} aircraft · ` : ''}${esc(age(l.age_seconds))}</div><button class="lnk" data-r="${l.id}" title="Download a fresh copy">Refresh</button></div>`).join('');
       $('strip').querySelectorAll('[data-r]').forEach(b => b.onclick = async () => { b.textContent = 'Refreshing…'; try { await api('api/lists/refresh?list=' + b.dataset.r, { method: 'POST' }); toast('List refreshed'); } catch (e) { toast(e.message, 'err'); } loadLists(); });
@@ -69,10 +83,13 @@
       if (!d.results.length) { out.innerHTML = h + `<div class="state"><div class="h3">No match at ${d.min_score.toFixed(2)} or above</div><p>Nothing in the selected lists resembles "${esc(d.query)}". That is not clearance: try variant spellings, a shorter name, or a lower minimum score.</p></div>`; return; }
       h += `<div class="card flush"><div class="card-head" style="padding:12px 16px 0"><h3 class="h3">${d.total_matches} match${d.total_matches === 1 ? '' : 'es'}${d.total_matches > d.results.length ? ` (top ${d.results.length})` : ''}</h3><span class="small faint">searched as "${esc(d.normalised)}"</span></div><div class="table-wrap" style="padding:0 16px 12px"><table class="data"><thead><tr><th>Score</th><th>Name</th><th>List</th><th>Programme</th><th>First seen</th></tr></thead><tbody>`;
       d.results.forEach((r, i) => {
-        h += `<tr><td>${scoreBadge(r.score)}</td><td><div class="nm">${esc(r.name)}</div><div class="small muted"><span class="badge">${kindBadge(r.kind)}</span> ${r.matched_on === 'alias' ? 'matched on an alias' : ''} ${r.countries ? ' · ' + esc(r.countries) : ''}</div>${r.aliases && r.aliases.length ? `<div class="small faint">aka ${esc(r.aliases.slice(0, 4).join('; '))}</div>` : ''}${r.identifiers ? `<div class="small mono faint">${esc(r.identifiers.join(' · '))}</div>` : ''}<button class="lnk" data-w="${i}">Why this score?</button> · <a class="small" href="${esc(r.url)}" target="_blank" rel="noopener">Entry</a></td><td>${esc(r.list_name)}</td><td class="small">${esc(r.programme_ids || '')}<div class="faint">${esc((r.programme || '').slice(0, 140))}</div></td><td class="mono">${esc(r.first_seen)}</td></tr><tr hidden id="w${i}"><td></td><td colspan="4"><div class="why"><b>${esc(r.quality)}</b> match. <table>${r.explanation.map(x => `<tr><td>${esc(x.query)}</td><td>${x.candidate ? '&rarr; ' + esc(x.candidate) : '&rarr; no counterpart'}</td><td class="muted">${esc(x.how)}</td><td class="mono">${x.similarity.toFixed(2)}</td></tr>`).join('')}</table></div></td></tr>`;
+        h += `<tr><td>${scoreBadge(r.score)}</td><td><div class="nm">${esc(r.name)}</div><div class="small muted"><span class="badge">${kindBadge(r.kind)}</span> ${r.matched_on === 'alias' ? 'matched on an alias' : ''} ${r.countries ? ' · ' + esc(r.countries) : ''}</div>${r.aliases && r.aliases.length ? `<div class="small faint">aka ${esc(r.aliases.slice(0, 4).join('; '))}</div>` : ''}${r.identifiers ? `<div class="small mono faint">${esc(r.identifiers.join(' · '))}</div>` : ''}<button class="lnk" data-w="${i}">Why this score?</button> · <a class="small" href="${esc(r.url)}" target="_blank" rel="noopener">Entry</a>${crossLinks(r)}</td><td>${esc(r.list_name)}</td><td class="small">${esc(r.programme_ids || '')}<div class="faint">${esc((r.programme || '').slice(0, 140))}</div></td><td class="mono">${esc(r.first_seen)}</td></tr><tr hidden id="w${i}"><td></td><td colspan="4"><div class="why"><b>${esc(r.quality)}</b> match. <table>${r.explanation.map(x => `<tr><td>${esc(x.query)}</td><td>${x.candidate ? '&rarr; ' + esc(x.candidate) : '&rarr; no counterpart'}</td><td class="muted">${esc(x.how)}</td><td class="mono">${x.similarity.toFixed(2)}</td></tr>`).join('')}</table></div></td></tr>`;
       });
       h += `</tbody></table></div><p class="small faint" style="padding:0 16px 12px;margin:0">${esc(d.how_scoring_works)}</p></div>`;
-      out.innerHTML = h;
+      h += `<div class="row" style="gap:8px;margin-top:10px"><button class="btn sm" type="button" id="cp-link">Copy link</button><button class="btn sm" type="button" id="cp-csv">Export CSV</button></div>`;
+      lastD = d; out.innerHTML = h;
+      $('cp-link').onclick = () => copyText(new URL('?q=' + encodeURIComponent(d.query), location.href.split(/[?#]/)[0]).href, 'Link');
+      $('cp-csv').onclick = () => { const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`; const t = ['Score,Name,Kind,List,Programme,First seen,Matched on', ...d.results.map(r => [r.score, r.name, r.kind, r.list_name, r.programme_ids, r.first_seen, r.matched_on].map(q).join(','))].join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/csv' })); a.download = 'sanctions-matches.csv'; document.body.append(a); a.click(); a.remove(); };
       out.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { const r = $('w' + b.dataset.w); r.hidden = !r.hidden; });
     }
     $('f').onsubmit = async e => {
@@ -80,6 +97,7 @@
       const lists = [...document.querySelectorAll('[data-l]:checked')].map(x => x.dataset.l);
       if (!lists.length) { toast('Select at least one list', 'warn'); return; }
       out.setAttribute('aria-busy', 'true'); out.innerHTML = `<div class="loading"><span class="spin"></span>Screening (lists not yet downloaded can take a minute)…</div>`;
+      store.set('q', q); history.replaceState(null, '', '?q=' + encodeURIComponent(q));
       try { render(await api(`api/search?q=${encodeURIComponent(q)}&lists=${lists.join(',')}&min=${$('min').value}` + ($('persons').checked ? '&persons=1' : ''))); }
       catch (err) { out.setAttribute('aria-busy', 'false'); out.innerHTML = `<div class="state error" role="alert"><div class="h3">Screening failed</div><p>${esc(err.message)}</p></div>`; }
       loadLists();
@@ -91,7 +109,8 @@
         el.innerHTML = d.listed ? `<div class="notice warn"><div><b>Listed.</b> ${d.matches.map(m => `${esc(m.name)} (${esc(m.list_name)}, ${esc(m.programme_ids)})`).join('; ')}</div></div>` : `<div class="notice ok"><div>No exact match for ${esc(d.value)} in ${d.lists_checked.length} lists. ${esc(d.note)}</div></div>`; }
       catch (err) { el.innerHTML = `<div class="notice err"><div>${esc(err.message)}</div></div>`; }
     };
-    loadLists();
+    // Deep link: ?q=<name> pre-fills and screens (natural persons stay off unless ticked; never taken from the URL).
+    loadLists().then(() => { const q = (new URLSearchParams(location.search).get('q') || '').trim(); if (q) { $('q').value = q; $('f').requestSubmit(); } else { const l = store.get('q'); if (l) $('q').placeholder = 'Last: ' + l; } });
   </script>
 </body>
 </html>

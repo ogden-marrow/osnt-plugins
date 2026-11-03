@@ -104,6 +104,11 @@ pub fn get_json(agent: &ureq::Agent, url: &str, headers: &[(&str, &str)], what: 
     }
 }
 
+/// Like `post_json` with a longer overall timeout, for USAspending queries over large recipients (several seconds each).
+pub fn post_json_slow(agent: &ureq::Agent, url: &str, body: &Value, what: &str) -> Result<Value, ApiError> {
+    agent.post(url).header("Accept", "application/json").config().timeout_global(Some(Duration::from_secs(45))).build().send_json(body).map_err(|e| map_ureq(what, e)).and_then(|r| read_value(what, r))
+}
+
 pub fn post_json(agent: &ureq::Agent, url: &str, body: &Value, headers: &[(&str, &str)], what: &str) -> Result<Value, ApiError> {
     let mut req = agent.post(url).header("Accept", "application/json");
     for (k, v) in headers {

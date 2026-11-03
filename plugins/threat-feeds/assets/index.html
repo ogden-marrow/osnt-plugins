@@ -68,6 +68,7 @@
 
     <p class="attr">Feeds: <a href="https://feodotracker.abuse.ch/" target="_blank" rel="noopener noreferrer">abuse.ch Feodo Tracker</a> (CC0), <a href="https://www.spamhaus.org/drop/" target="_blank" rel="noopener noreferrer">Spamhaus DROP</a> (&copy; The Spamhaus Project, free under its DROP terms), <a href="https://github.com/stamparm/ipsum" target="_blank" rel="noopener noreferrer">IPsum</a> (Unlicense), <a href="https://check.torproject.org/torbulkexitlist" target="_blank" rel="noopener noreferrer">Tor bulk exit list</a> and <a href="https://metrics.torproject.org/onionoo.html" target="_blank" rel="noopener noreferrer">Onionoo</a> (The Tor Project), <a href="https://openphish.com/" target="_blank" rel="noopener noreferrer">OpenPhish community feed</a> (personal, non-commercial use). With a free <a href="https://auth.abuse.ch/" target="_blank" rel="noopener noreferrer">abuse.ch Auth-Key</a> (set on the Credentials page) URLhaus, ThreatFox and MalwareBazaar are queried live. A feed hit means a list contains the indicator; it is not proof of present maliciousness, and absence is not proof of safety. Tor relay operator contact lines are never shown.</p>
   </main>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
   <script>
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -82,7 +83,13 @@
     const ago = s => s == null ? 'never' : s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago';
     const lnk = (u, t) => safe(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>` : esc(t);
 
-    let feedList = [];
+    const store = { get(k) { try { return localStorage.getItem('osnt-threat-feeds:' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-threat-feeds:' + k, v); } catch {} } };
+    const toast = (m, k = '') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 3500); };
+    async function copy(text, what) {
+      try { await navigator.clipboard.writeText(text); toast(what + ' copied'); return; } catch {}
+      try { const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;opacity:0'; document.body.append(t); t.select(); const ok = document.execCommand('copy'); t.remove(); toast(ok ? what + ' copied' : 'Copy failed', ok ? '' : 'err'); } catch { toast('Copy failed', 'err'); }
+    }
+    let feedList = [], lastCheck = null;
     function tiles(d) {
       feedList = d.feeds;
       $('tiles').innerHTML = d.feeds.map(f => `<div class="tile ${f.loaded ? '' : 'dim'}"><div class="t">${lnk(f.info, f.name)}</div>
@@ -90,7 +97,9 @@
         <div class="s">${f.error ? `<span class="err">${esc(f.error)}</span>` : f.loaded ? 'Fetched ' + ago(f.age_secs) + (f.source_updated ? ', source updated ' + esc(f.source_updated) : '') : 'Not downloaded yet'}</div>
         <div class="s faint">${esc(f.licence)}</div></div>`).join('') +
         d.keyed.map(k => `<div class="tile ${k.enabled ? '' : 'dim'}"><div class="t">${lnk(k.info, k.name)}</div><div class="n"><span class="badge ${k.enabled ? 'ok' : ''}">${k.enabled ? 'live queries on' : 'needs key'}</span></div><div class="s">${k.enabled ? 'Queried live per lookup; nothing is mirrored.' : 'Set ABUSECH_AUTH_KEY (free) on the Credentials page.'}</div></div>`).join('');
+      const keep = $('rf').value || store.get('feed');
       $('rf').innerHTML = d.feeds.map(f => `<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('') + d.keyed.filter(k => k.enabled).map(k => `<option value="${esc(k.id)}">${esc(k.name)}</option>`).join('');
+      if (keep && [...$('rf').options].some(o => o.value === keep)) $('rf').value = keep;
     }
     async function loadTiles() {
       try { tiles(await api('api/feeds')); } catch (e) { fail($('tiles'), e.message, 'Could not load feed status'); return; }
@@ -108,24 +117,39 @@
       const rows = (d.feeds).map(f => {
         const [cls, label] = STATUS[f.status] || ['', f.status];
         const h = f.hits;
-        const items = h && h.items.length ? `<ul class="hit-list">${h.items.map(e => `<li><span class="mono">${esc(e.indicator)}</span> ${e.since ? `<span class="muted">since ${esc(e.since)}</span>` : ''} ${lnk(e.link, esc(e.detail)) === esc(e.detail) ? esc(e.detail) : lnk(e.link, e.detail)}</li>`).join('')}${h.count > h.items.length ? `<li class="muted">and ${h.count - h.items.length} more</li>` : ''}</ul>` : '';
+        const items = h && h.items.length ? `<ul class="hit-list">${h.items.map(e => `<li><span class="mono">${esc(e.indicator)}</span> ${e.since ? `<span class="muted">since ${esc(e.since)}</span>` : ''} ${lnk(e.link, e.detail)}</li>`).join('')}${h.count > h.items.length ? `<li class="muted">and ${h.count - h.items.length} more</li>` : ''}</ul>` : '';
         const fresh = f.fetched_at ? `<div class="small faint">${f.entries?.toLocaleString() ?? ''} entries${f.stale ? ', <b>stale copy (feed unreachable)</b>' : ''}${f.source_updated ? ', source updated ' + esc(f.source_updated) : ''}</div>` : '';
         return `<tr class="${f.status === 'n/a' ? 'faint' : ''}"><td style="min-width:150px"><b>${esc(f.name)}</b>${fresh}</td><td><span class="badge ${cls}">${label}${h && h.count ? ' · ' + h.count : ''}</span></td><td>${esc(f.note)}${items}</td></tr>`;
       }).join('');
       return `<div class="card"><div class="verdict"><span class="big">${d.feeds_with_hits ? `Listed in ${d.feeds_with_hits} of ${d.feeds_answered} feeds that answered` : `Not listed in any of the ${d.feeds_answered} feeds that answered`}</span><span class="badge">${esc(d.kind)}</span><span class="mono wrap-anywhere small">${esc(d.query)}</span></div>
         ${d.note ? `<div class="notice info" style="margin-top:10px"><div>${esc(d.note)}</div></div>` : ''}
         <div class="table-wrap" style="margin-top:10px"><table class="data resp"><thead><tr><th>Feed</th><th>Result</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="hint">Not being listed does not make an indicator safe, and being listed can be out of date: check the dates.</p></div>`;
+        <p class="hint">Not being listed does not make an indicator safe, and being listed can be out of date: check the dates.</p>
+        <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn sm" type="button" id="cp-link">Copy link</button><button class="btn sm" type="button" id="cp-json">Copy JSON</button>${related(d)}</div></div>`;
+    }
+    // Plain links to sibling plugins (they may not be installed); shown only where the indicator type fits.
+    function related(d) {
+      const q = encodeURIComponent(d.query), L = (p, t) => `<a class="btn sm" href="/p/${p}/?q=${q}" target="_top">${t}</a>`;
+      if (d.kind === 'ip') return L('ip-intel', 'IP intel') + L('asn-bgp', 'ASN and routing') + L('ioc-lookup', 'Reputation sources') + L('cidr-exposure', 'Exposure');
+      if (d.kind === 'cidr') return L('asn-bgp', 'ASN and routing') + L('cidr-exposure', 'Exposure');
+      if (d.kind === 'domain' || d.kind === 'url') return L('ioc-lookup', 'Reputation sources') + L('site-fingerprint', 'Site fingerprint');
+      return L('ioc-lookup', 'Reputation sources');
     }
     $('f').onsubmit = async e => {
       e.preventDefault(); const q = $('q').value.trim(); if (!q) return;
       busy($('out'), 'Checking feeds (the first check downloads them)…'); $('go').setAttribute('aria-busy', 'true');
-      try { $('out').innerHTML = renderCheck(await api('api/check?q=' + encodeURIComponent(q))); loadTiles(); }
+      try {
+        const d = await api('api/check?q=' + encodeURIComponent(q)); lastCheck = d; $('out').innerHTML = renderCheck(d); loadTiles();
+        store.set('q', q); history.replaceState(null, '', '?q=' + encodeURIComponent(q));
+        $('cp-link').onclick = () => copy(new URL('?q=' + encodeURIComponent(q), location.href.split(/[?#]/)[0]).href, 'Link');
+        $('cp-json').onclick = () => copy(JSON.stringify(lastCheck, null, 2), 'JSON');
+        if (d.kind === 'ip' && d.feeds.some(f => f.id === 'tor-exit' && f.status === 'hit')) $('tq').value = d.query;
+      }
       catch (err) { fail($('out'), err.message, 'Check failed'); }
       $('go').removeAttribute('aria-busy');
     };
     $('fr').onsubmit = async e => {
-      e.preventDefault(); const el = $('recent'); busy(el, 'Loading…');
+      e.preventDefault(); const el = $('recent'); busy(el, 'Loading…'); store.set('feed', $('rf').value);
       try {
         const d = await api('api/recent?limit=50&feed=' + encodeURIComponent($('rf').value));
         el.innerHTML = d.items.length ? `<p class="small muted">${esc(d.name)}: ${esc(d.label)}</p><table class="data"><thead><tr><th>Indicator</th><th>Since</th><th>Detail</th></tr></thead><tbody>${d.items.map(i => `<tr><td class="mono wrap-anywhere">${esc(i.indicator)}</td><td class="nowrap">${esc(i.since || '')}</td><td>${lnk(i.link, i.detail)}</td></tr>`).join('')}</tbody></table>` : '<span class="muted">No entries.</span>';
@@ -138,6 +162,11 @@
         el.innerHTML = d.relays.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Relay</th><th>Flags</th><th>Where</th><th>Seen</th></tr></thead><tbody>${d.relays.map(r => `<tr><td><b>${lnk(r.link, r.nickname)}</b><div class="mono small wrap-anywhere">${esc(r.fingerprint)}</div><div class="small muted">${esc((r.addresses || []).join(', '))}</div></td><td>${(r.flags || []).map(f => `<span class="badge">${esc(f)}</span>`).join(' ')}</td><td>${esc((r.country || '').toUpperCase())} ${esc(r.as || '')}</td><td class="small">${r.running ? '<span class="badge ok">running</span>' : '<span class="badge">offline</span>'}<div class="muted">first ${esc((r.first_seen || '').slice(0, 10))}, last ${esc((r.last_seen || '').slice(0, 10))}</div></td></tr>`).join('')}</tbody></table></div>` : '<span class="muted">No relay matches.</span>';
       } catch (err) { fail(el, err.message, 'Relay lookup failed'); }
     };
+    // Deep link: ?q=<indicator> pre-fills the form and runs the check; the last query is remembered as a hint.
+    (() => {
+      const q = (new URLSearchParams(location.search).get('q') || '').trim();
+      if (q) { $('q').value = q; $('f').requestSubmit(); } else { const last = store.get('q'); if (last) $('q').placeholder = 'Last: ' + last; }
+    })();
     loadTiles();
   </script>
 </body>

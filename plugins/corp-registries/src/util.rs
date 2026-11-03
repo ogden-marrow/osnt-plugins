@@ -87,7 +87,7 @@ pub fn map_ureq(what: &str, e: ureq::Error) -> ApiError {
     }
 }
 
-fn read_value(what: &str, mut res: ureq::http::Response<ureq::Body>) -> Result<Value, ApiError> {
+pub fn read_value(what: &str, mut res: ureq::http::Response<ureq::Body>) -> Result<Value, ApiError> {
     res.body_mut().with_config().limit(32 << 20).read_json::<Value>().map_err(|_| upstream(format!("{what} sent an unreadable response")))
 }
 

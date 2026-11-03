@@ -29,7 +29,9 @@
     .bar { display: grid; grid-template-columns: 56px minmax(0, 1fr) 36px; gap: 8px; align-items: center; font-size: var(--fs-sm); padding: 2px 0; }
     .bar .t { height: 10px; background: var(--surface-3); border-radius: 99px; overflow: hidden; }
     .bar .t i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
-    .bar button { all: unset; cursor: pointer; color: var(--link); }
+    .bar button { all: unset; cursor: pointer; color: var(--link); padding: 8px 0; }
+    .bar button:focus-visible { outline: 2px solid var(--focus); }
+    @media (max-width: 640px) { #flt { min-height: 44px !important; max-width: none !important; } .cell.open, .cell.high, .cell.seen { min-height: 24px; } }
     .bar .l { overflow-wrap: anywhere; }
     .prog { height: 8px; background: var(--surface-3); border-radius: 99px; overflow: hidden; margin: 8px 0 4px; }
     .prog i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
@@ -56,7 +58,7 @@
 
     <form class="inline" id="f">
       <label class="sr-only" for="cidr">IPv4 block</label>
-      <input id="cidr" placeholder="IPv4 block, e.g. 203.0.113.0/24" autocomplete="off" spellcheck="false" autofocus>
+      <input id="cidr" placeholder="IPv4 block or address, e.g. 203.0.113.0/24" autocomplete="off" spellcheck="false" autofocus>
       <button class="btn primary" id="go">Summarise</button>
       <button class="btn hidden" type="button" id="stop">Cancel</button>
     </form>
@@ -74,6 +76,7 @@
       if (!r.ok) throw new Error(r.status === 401 ? 'Sign in through the OSNT hub to use this page.' : (d.error || 'HTTP ' + r.status));
       return d;
     }
+    const store = { get(k) { try { return localStorage.getItem('osnt-cidr-exposure:' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-cidr-exposure:' + k, v); } catch {} } };
     let cur = null, timer = null, filter = '', sel = -1, last = null;
 
     function cols(total) { return total <= 16 ? total : total <= 64 ? 8 : total <= 256 ? 16 : 32; }
@@ -91,7 +94,7 @@
         const lab = c ? `${c.ip}: ${c.ports.length} open port(s)${c.vulns.length ? ', ' + c.vulns.length + ' CVE(s)' : ''}` : `${d.first.split('.').slice(0, 3).join('.')}.${(base[3] + i) & 255}: ${i < d.done ? 'no data' : 'not checked yet'}`;
         h += c ? `<button class="cell ${cls}${dim}${i === sel ? ' sel' : ''}" data-i="${i}" title="${esc(lab)}" aria-label="${esc(lab)}"></button>` : `<span class="cell ${cls}${dim}" title="${esc(lab)}"></span>`;
       }
-      return `<div class="heat" style="grid-template-columns:repeat(${n},minmax(0,1fr))" role="group" aria-label="Address map, one square per address">${h}</div>
+      return `<div class="heat" style="grid-template-columns:repeat(${n},minmax(0,1fr));max-width:${Math.min(560, n * 40)}px" role="group" aria-label="Address map, one square per address">${h}</div>
         <div class="legend"><span><i style="background:var(--err)"></i>known CVE or malware tag</span><span><i style="background:var(--accent)"></i>open ports</span><span><i style="background:color-mix(in srgb,var(--accent) 35%,var(--surface-3))"></i>seen, no ports</span><span><i style="background:var(--surface-3)"></i>no data</span></div>`;
     }
     function bars(list, key) {
@@ -101,9 +104,10 @@
     }
     function detail(d) {
       const c = d.cells.find(x => x.i === sel); if (!c) return '<span class="muted small">Select a coloured square for details.</span>';
-      return `<table class="kv"><tr><th>Address</th><td class="mono">${esc(c.ip)}</td></tr><tr><th>Ports</th><td>${esc(c.ports.join(', ') || 'none')}</td></tr>${c.hostnames.length ? `<tr><th>Hostnames</th><td>${c.hostnames.map(esc).join(', ')}</td></tr>` : ''}${c.products.length ? `<tr><th>Products</th><td>${c.products.map(esc).join(', ')}</td></tr>` : ''}${c.tags.length ? `<tr><th>Tags</th><td>${c.tags.map(esc).join(', ')}</td></tr>` : ''}${c.vulns.length ? `<tr><th>CVEs</th><td>${c.vulns.map(v => `<span class="badge err">${esc(v)}</span>`).join(' ')}</td></tr>` : ''}<tr><th>Open at</th><td><a href="https://www.shodan.io/host/${esc(c.ip)}" target="_blank" rel="noopener noreferrer">Shodan</a></td></tr></table>`;
+      return `<table class="kv"><tr><th>Address</th><td class="mono">${esc(c.ip)}</td></tr><tr><th>Ports</th><td>${esc(c.ports.join(', ') || 'none')}</td></tr>${c.hostnames.length ? `<tr><th>Hostnames</th><td>${c.hostnames.map(esc).join(', ')}</td></tr>` : ''}${c.products.length ? `<tr><th>Products</th><td>${c.products.map(esc).join(', ')}</td></tr>` : ''}${c.tags.length ? `<tr><th>Tags</th><td>${c.tags.map(esc).join(', ')}</td></tr>` : ''}${c.vulns.length ? `<tr><th>CVEs</th><td>${c.vulns.map(v => `<span class="badge err">${esc(v)}</span>`).join(' ')}</td></tr>` : ''}<tr><th>Open at</th><td><a href="https://www.shodan.io/host/${esc(c.ip)}" target="_blank" rel="noopener noreferrer">Shodan</a> · <a href="/p/ip-intel/?q=${encodeURIComponent(c.ip)}" target="_top">IP intel</a> · <a href="/p/threat-feeds/?q=${encodeURIComponent(c.ip)}" target="_top">Blocklists</a> · <a href="/p/ioc-lookup/?q=${encodeURIComponent(c.ip)}" target="_top">Reputation</a>${c.vulns.map(v => ` · <a href="/p/cve-watch/?q=${encodeURIComponent(v)}" target="_top">${esc(v)}</a>`).join('').slice(0, 600)}</td></tr></table>`;
     }
     function render(d) {
+      const ae = document.activeElement, keepFlt = ae && ae.id === 'flt' ? ae.selectionStart : null;
       last = d; const s = d.summary, pct = Math.round(d.done / d.total * 100);
       const running = d.state === 'running';
       $('go').classList.toggle('hidden', false); $('stop').classList.toggle('hidden', !running);
@@ -119,6 +123,7 @@
           <div class="stack"><div class="card"><h3 class="h3" style="margin-bottom:6px">Open ports</h3>${bars(s.ports.slice(0, 12))}</div><div class="card"><h3 class="h3" style="margin-bottom:6px">Products</h3>${bars(s.products.slice(0, 10))}</div><div class="card"><h3 class="h3" style="margin-bottom:6px">Known CVEs</h3>${bars(s.cves.slice(0, 10))}</div></div></div>`;
       const f = $('flt'); f.oninput = () => { filter = f.value.trim(); const pos = f.selectionStart; render(last); const g = $('flt'); g.focus(); g.setSelectionRange(pos, pos); };
       $('csvb').onclick = csv;
+      if (keepFlt != null) { f.focus(); f.setSelectionRange(keepFlt, keepFlt); }
     }
     document.addEventListener('click', e => {
       const c = e.target.closest('.cell[data-i]'); if (c && last) { sel = +c.dataset.i; render(last); return; }
@@ -126,7 +131,7 @@
     });
     async function csv() {
       try { const r = await fetch(`api/scan/${cur}/csv`); if (!r.ok) throw new Error('HTTP ' + r.status); const u = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = u; a.download = 'exposure-' + last.cidr.replace(/\W+/g, '_') + '.csv'; a.click(); URL.revokeObjectURL(u); }
-      catch (e) { alert('Export failed: ' + e.message); }
+      catch (e) { $('limit').innerHTML = '<span class="err" role="alert">Export failed: ' + esc(e.message) + '</span>'; }
     }
     async function poll() {
       clearTimeout(timer);
@@ -137,11 +142,14 @@
     }
     $('f').onsubmit = async e => {
       e.preventDefault(); filter = ''; sel = -1; $('go').setAttribute('aria-busy', 'true');
+      let v = $('cidr').value.trim(); if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) { v += '/32'; $('cidr').value = v; }
+      store.set('cidr', v); history.replaceState(null, '', '?q=' + encodeURIComponent(v));
       $('out').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Starting…</div>';
-      try { const r = await api('api/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cidr: $('cidr').value }) }); cur = r.id; poll(); }
+      try { const r = await api('api/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cidr: v }) }); cur = r.id; poll(); }
       catch (err) { $('go').removeAttribute('aria-busy'); $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">Cannot scan that</div><p>${esc(err.message)}</p></div>`; }
     };
     $('stop').onclick = async () => { try { await api(`api/scan/${cur}/cancel`, { method: 'POST' }); } catch (e) {} };
+    { const q = (new URLSearchParams(location.search).get('q') || '').trim(); if (q) { $('cidr').value = q; $('f').requestSubmit(); } else { const l = store.get('cidr'); if (l) $('cidr').placeholder = 'Last: ' + l; } }
     api('api/config').then(c => { $('limit').textContent = `Largest block: /${c.min_prefix} (${c.max_addresses} addresses), one lookup about every ${c.delay_ms} ms.`; }).catch(() => {});
   </script>
 </body>

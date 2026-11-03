@@ -263,13 +263,13 @@ struct Metric {
     tags: &'static [(&'static str, &'static str)],
 }
 const METRICS: &[Metric] = &[
-    Metric { key: "revenue", label: "Revenue", duration: true, tags: &[("us-gaap", "Revenues"), ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"), ("us-gaap", "SalesRevenueNet"), ("us-gaap", "RevenueFromContractWithCustomerIncludingAssessedTax")] },
-    Metric { key: "net_income", label: "Net income", duration: true, tags: &[("us-gaap", "NetIncomeLoss"), ("us-gaap", "ProfitLoss")] },
-    Metric { key: "operating_income", label: "Operating income", duration: true, tags: &[("us-gaap", "OperatingIncomeLoss")] },
-    Metric { key: "assets", label: "Total assets", duration: false, tags: &[("us-gaap", "Assets")] },
-    Metric { key: "liabilities", label: "Total liabilities", duration: false, tags: &[("us-gaap", "Liabilities")] },
-    Metric { key: "equity", label: "Stockholders' equity", duration: false, tags: &[("us-gaap", "StockholdersEquity"), ("us-gaap", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest")] },
-    Metric { key: "cash", label: "Cash and equivalents", duration: false, tags: &[("us-gaap", "CashAndCashEquivalentsAtCarryingValue")] },
+    Metric { key: "revenue", label: "Revenue", duration: true, tags: &[("us-gaap", "Revenues"), ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"), ("us-gaap", "SalesRevenueNet"), ("us-gaap", "RevenueFromContractWithCustomerIncludingAssessedTax"), ("ifrs-full", "Revenue")] },
+    Metric { key: "net_income", label: "Net income", duration: true, tags: &[("us-gaap", "NetIncomeLoss"), ("us-gaap", "ProfitLoss"), ("ifrs-full", "ProfitLoss")] },
+    Metric { key: "operating_income", label: "Operating income", duration: true, tags: &[("us-gaap", "OperatingIncomeLoss"), ("ifrs-full", "ProfitLossFromOperatingActivities")] },
+    Metric { key: "assets", label: "Total assets", duration: false, tags: &[("us-gaap", "Assets"), ("ifrs-full", "Assets")] },
+    Metric { key: "liabilities", label: "Total liabilities", duration: false, tags: &[("us-gaap", "Liabilities"), ("ifrs-full", "Liabilities")] },
+    Metric { key: "equity", label: "Stockholders' equity", duration: false, tags: &[("us-gaap", "StockholdersEquity"), ("us-gaap", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"), ("ifrs-full", "Equity")] },
+    Metric { key: "cash", label: "Cash and equivalents", duration: false, tags: &[("us-gaap", "CashAndCashEquivalentsAtCarryingValue"), ("ifrs-full", "CashAndCashEquivalents")] },
     Metric { key: "shares", label: "Shares outstanding (cover page)", duration: false, tags: &[("dei", "EntityCommonStockSharesOutstanding")] },
 ];
 

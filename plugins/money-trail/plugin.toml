@@ -3,7 +3,7 @@ name = "Public funds"
 description = "Where public money goes: US contracts and grants, nonprofit Form 990 totals, federal lobbying filings and EU tenders, by organisation."
 grid = "Organisations"
 port = 8143
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

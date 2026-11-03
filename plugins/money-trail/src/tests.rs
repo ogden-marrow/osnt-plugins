@@ -173,3 +173,11 @@ async fn gateway_and_tools() {
     let (_, v) = call(format!("{url}/tools")).await;
     assert_eq!(v.as_array().unwrap().len(), 4);
 }
+
+#[test]
+fn lobbying_default_year_is_newest_with_filings() {
+    let c = json!([{ "year": 2022, "filings": 5 }, { "year": 2023, "filings": 3 }, { "year": 2024, "filings": 0 }, { "year": 2025, "filings": 0 }]);
+    assert_eq!(pick_lobby_year(&c, 2025), 2023);
+    assert_eq!(pick_lobby_year(&json!([{ "year": 2025, "filings": 0 }]), 2025), 2024);
+    assert_eq!(pick_lobby_year(&json!([{ "year": 2025, "filings": 9 }]), 2025), 2025);
+}

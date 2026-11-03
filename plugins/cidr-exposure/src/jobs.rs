@@ -188,7 +188,9 @@ fn product(cpe: &str) -> String {
     let parts: Vec<&str> = cpe.trim_start_matches("cpe:/").trim_start_matches("cpe:2.3:").split(':').collect();
     if parts.len() >= 3 {
         let ver = parts.get(3).filter(|v| !v.is_empty() && **v != "*").map(|v| format!(" {v}")).unwrap_or_default();
-        format!("{} {}{}", parts[1].replace('_', " "), parts[2].replace('_', " "), ver)
+        let (vendor, prod) = (parts[1].replace('_', " "), parts[2].replace('_', " "));
+        // "cloudflare cloudflare" reads like a bug: when vendor and product are the same, say it once.
+        if vendor == prod { format!("{vendor}{ver}") } else { format!("{vendor} {prod}{ver}") }
     } else {
         cpe.to_string()
     }

@@ -75,9 +75,14 @@
       return `<svg viewBox="0 0 200 36" preserveAspectRatio="none" role="img" aria-label="trend over ${v.length} years"><polyline fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" points="${pts.map(p => p.join(',')).join(' ')}"/><circle cx="${pts.at(-1)[0]}" cy="${pts.at(-1)[1]}" r="3" fill="currentColor"/></svg>`;
     }
 
-    let currentCik = null;
+    const store = { get(k) { try { return localStorage.getItem('osnt-sec-edgar:' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-sec-edgar:' + k, v); } catch {} } };
+    async function copyText(text, what) {
+      try { await navigator.clipboard.writeText(text); toast(what + ' copied'); return; } catch {}
+      try { const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;opacity:0'; document.body.append(t); t.select(); const ok = document.execCommand('copy'); t.remove(); toast(ok ? what + ' copied' : 'Copy failed', ok ? '' : 'err'); } catch { toast('Copy failed', 'err'); }
+    }
+    let currentCik = null, lastCompany = null, lastFilings = [];
     async function showCompany(cik) {
-      currentCik = cik; history.replaceState(null, '', '#cik=' + cik);
+      currentCik = cik; history.replaceState(null, '', '?q=' + cik); store.set('q', cik);
       busy('Loading company…');
       try {
         const d = await api('api/company?cik=' + encodeURIComponent(cik));
@@ -89,6 +94,7 @@
               ['Business address', c.business_address], ['Mailing address', c.mailing_address], ['Phone', c.phone], ['Website', c.website ? { html: `<a href="${esc(/^https?:/.test(c.website) ? c.website : 'https://' + c.website)}" target="_blank" rel="noopener noreferrer">${esc(c.website)}</a>` } : null],
               ['Former names', c.former_names.length ? { html: `<ul class="former">${c.former_names.map(f => `<li>${esc(f.name)} <span class="faint">${esc(f.from || '')} to ${esc(f.to || '')}</span></li>`).join('')}</ul>` } : null]])}
             <div class="row" style="margin-top:10px"><a class="btn sm" href="${esc(c.links.edgar)}" target="_blank" rel="noopener">Open on EDGAR</a><button class="btn sm" id="ex21">Find subsidiary list (Exhibit 21)</button><span id="ex21out" class="small muted"></span></div>
+            <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" id="cp-link">Copy link</button><button class="btn sm" type="button" id="cp-json">Copy JSON</button>${['corp-registries|Company registries', 'money-trail|Public funds', 'sanctions-screen|Sanctions screen', 'offshore-leaks|Offshore Leaks'].map(x => { const [p, t] = x.split('|'); return `<a class="btn sm" href="/p/${p}/?q=${encodeURIComponent(c.name)}" target="_top">${t}</a>`; }).join('')}</div>
             ${d.other_matches.length ? `<p class="small muted" style="margin:10px 0 0">Other matches: ${d.other_matches.map(m => `<a href="#cik=${esc(m.cik)}" data-cik="${esc(m.cik)}">${esc(m.name)}</a>`).join(', ')}</p>` : ''}
           </section>
           <section class="card"><h3 class="h3" style="margin-bottom:8px">Latest filings</h3><div id="latest" class="latest"><span class="loading"><span class="spin"></span>Loading…</span></div></section>
@@ -96,6 +102,9 @@
           <section class="card"><div class="card-head"><h3 class="h3">Filing timeline</h3><span class="small faint" id="fcount"></span></div>
             <div class="chips" id="chips" role="group" aria-label="Filter by form">${[['', 'All'], ['annual', 'Annual'], ['quarterly', 'Quarterly'], ['current', '8-K / 6-K'], ['registration', 'Registration'], ['ownership', 'Ownership (metadata)']].map(([k, l], i) => `<button class="btn sm${i ? '' : ' on'}" data-form="${k}" aria-pressed="${i ? 'false' : 'true'}">${l}</button>`).join('')}</div>
             <div id="timeline"><span class="loading"><span class="spin"></span>Loading…</span></div></section>`;
+        lastCompany = d;
+        $('cp-json').onclick = () => copyText(JSON.stringify(d, null, 2), 'JSON');
+        $('cp-link').onclick = () => copyText(new URL('?q=' + cik, location.href.split(/[?#]/)[0]).href, 'Link');
         out.querySelectorAll('[data-cik]').forEach(a => a.onclick = e => { e.preventDefault(); showCompany(a.dataset.cik); });
         $('ex21').onclick = async () => {
           $('ex21out').textContent = 'Looking…';
@@ -117,7 +126,8 @@
       const el = $('timeline'); busy('Loading filings…', el);
       try {
         const d = await api(`api/filings?cik=${cik}&limit=60` + (form ? '&form=' + form : '')); if (currentCik !== cik) return; done(el);
-        $('fcount').textContent = `${d.shown} of ${d.total_matching}`;
+        $('fcount').innerHTML = `${esc(d.shown)} of ${esc(d.total_matching)} <button class="btn sm" type="button" id="fcsv">CSV</button>`; lastFilings = d.filings;
+        $('fcsv').onclick = () => { const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`; const t = ['Filed,Form,Description,Period,Document', ...lastFilings.map(f => [f.filed, f.form, f.description, f.period, f.document_url || f.index_url].map(q).join(','))].join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/csv' })); a.download = 'filings-' + cik + '.csv'; document.body.append(a); a.click(); a.remove(); };
         el.innerHTML = d.filings.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Filed</th><th>Form</th><th>Details</th><th>Period</th><th></th></tr></thead><tbody>${d.filings.map(f => `<tr><td class="mono">${esc(f.filed)}</td><td><span class="badge">${esc(f.form)}</span></td><td>${esc(f.description && f.description !== f.form ? f.description : '')}${f.items.length ? `<div class="items">${f.items.map(i => `<span class="badge" title="${esc(i.label || '')}">${esc(i.code)}${i.label ? ' · ' + esc(i.label) : ''}</span>`).join('')}</div>` : ''}</td><td class="mono">${esc(f.period || '')}</td><td>${f.document_url ? `<a href="${esc(f.document_url)}" target="_blank" rel="noopener">Open</a>` : ''} ${f.index_url ? `<a href="${esc(f.index_url)}" target="_blank" rel="noopener">Index</a>` : ''}</td></tr>`).join('')}</tbody></table></div><p class="small faint" style="margin:8px 0 0">${esc(d.note)}</p>` : '<div class="state"><div class="h3">No filings of this kind</div><p>Try another filter.</p></div>';
       } catch (e) { done(el); el.innerHTML = `<div class="state error"><div class="h3">Could not load filings</div><p>${esc(e.message)}</p></div>`; }
     }
@@ -131,7 +141,7 @@
         try {
           const d = await api(`api/facts?cik=${cik}&metric=${m}`); if (currentCik !== cik) return;
           const last = d.series.at(-1);
-          if (last) { any = true; html = `<div class="lbl">${esc(d.label)}</div><div class="val">${d.unit === 'USD' ? '$' : ''}${money(last.value)}</div>${spark(d.series)}<div class="sub">FY ending ${esc(last.end)} · ${d.series.length} years</div>`; }
+          if (last) { any = true; html = `<div class="lbl">${esc(d.label)}</div><div class="val">${d.unit === 'USD' ? '$' : ''}${money(last.value)}${d.unit && d.unit !== 'USD' && d.unit !== 'shares' ? ' <span class="small muted" style="font-weight:400">' + esc(d.unit) + '</span>' : ''}</div>${spark(d.series)}<div class="sub">FY ending ${esc(last.end)} · ${d.series.length} years</div>`; }
           else html = `<div class="lbl">${esc(d.label)}</div><div class="sub">Not reported in XBRL</div>`;
         } catch (e) { html = `<div class="lbl">${esc(m)}</div><div class="sub">${esc(e.message)}</div>`; }
         const tiles = el.children, idx = metrics.indexOf(m); if (tiles[idx]) tiles[idx].innerHTML = html;
@@ -140,7 +150,7 @@
     }
     $('f').onsubmit = async e => {
       e.preventDefault(); const q = $('q').value.trim(); if (!q) return;
-      busy('Searching…');
+      busy('Searching…'); store.set('q', q);
       try {
         const d = await api('api/search?q=' + encodeURIComponent(q)); done();
         if (!d.matches.length) { out.innerHTML = `<div class="state"><div class="h3">No listed company matches "${esc(q)}"</div><p>${esc(d.note || '')} Try a ticker symbol, or a CIK number.</p></div>`; return; }
@@ -150,7 +160,8 @@
       } catch (e) { fail(e); }
     };
     api('api/status').then(s => { if (!s.contact_set) $('contact').hidden = false; }).catch(() => {});
-    const m = location.hash.match(/cik=(\d+)/); if (m) showCompany(m[1]);
+    { const P = new URLSearchParams(location.search), q = (P.get('q') || '').trim(), m = location.hash.match(/cik=(\d+)/);
+      if (q) { $('q').value = q; $('f').requestSubmit(); } else if (m) showCompany(m[1]); else { const l = store.get('q'); if (l) $('q').placeholder = 'Last: ' + l; } }
   </script>
 </body>
 </html>

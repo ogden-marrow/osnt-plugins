@@ -32,7 +32,7 @@ fn fake() -> F {
             return if p.ends_with("9.9.9.9") { Resp::status(404) } else { Resp::json(json!({ "ip": "8.8.8.8", "noise": true, "riot": false, "classification": "malicious", "name": "unknown", "last_seen": "2026-11-01" })) };
         }
         if p.starts_with("/otx/") {
-            return if p.contains("nothing") { Resp::status(404) } else { Resp::json(json!({ "pulse_info": { "count": 2, "pulses": [ { "name": "Campaign A" }, { "name": "B" } ] }, "validation": [ { "name": "Whitelisted domain" } ], "country_name": "US" })) };
+            return if p.contains("nothing") { Resp::status(404) } else { Resp::json(json!({ "pulse_info": { "count": 2, "pulses": [ { "name": "Campaign A" }, { "name": "B" } ] }, "validation": [ { "name": "Seen in sandbox" } ], "country_name": "US" })) };
         }
         if p.starts_with("/us/search") {
             return if p.contains("empty") { Resp::json(json!({ "total": 0, "results": [] })) } else { Resp::json(json!({ "total": 12, "results": [ { "task": { "time": "2026-11-03T04:30:40.628Z" }, "page": { "domain": "e.example", "ip": "1.2.3.4", "country": "US" } } ] })) };
@@ -243,4 +243,11 @@ async fn http_surface() {
     let sig: String = mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect();
     let req = Request::get(path).header("x-osnt-gateway", format!("v1.{ts}.{sig}")).body(Body::empty()).unwrap();
     assert_eq!(call(&a2, req).await.0, StatusCode::OK);
+}
+
+#[test]
+fn otx_benign_validation_is_not_a_hit() {
+    assert_eq!(sources::otx_verdict(50, "Akamai Popular Domain, Whitelisted domain").0, "info");
+    assert_eq!(sources::otx_verdict(3, "").0, "hit");
+    assert_eq!(sources::otx_verdict(0, "Whitelisted IP").0, "clear");
 }

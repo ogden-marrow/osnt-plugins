@@ -3,7 +3,7 @@ name = "Company registries"
 description = "Search company registers (GLEIF, Wikidata, Norway, Czechia, Finland, Denmark, optional UK/OpenCorporates/Aleph) and see ownership links. Companies only."
 grid = "Organisations"
 port = 8142
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true
