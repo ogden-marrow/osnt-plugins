@@ -59,6 +59,13 @@ The installer generates the systemd unit itself (sandboxed: dynamic user, read-o
 cannot choose its own command line, privileges or paths. In code, read a credential with
 `osnt_common::secret("SERVICE_API_KEY")`; only the names declared above are handed to that plugin.
 
+### Who is the user?
+
+The hub handles sign-in. Plugins never see passwords or passkeys; every request the hub proxies carries a signature the
+plugin can verify with its own key: `osnt_common::gateway_authorized(method, path_and_query, header)` where the header is
+`X-OSNT-Gateway`. Use it for anything that changes state or exposes private data (see `plugins/credentials`). A plugin
+cannot forge a signature for another plugin because each gets a different derived key.
+
 ## Writing a plugin
 
 Copy `plugins/example`, or open this repository in Claude Code: the `osnt-plugin` skill (`.claude/skills/`) knows the

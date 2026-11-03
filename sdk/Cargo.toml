@@ -9,6 +9,8 @@ license = "MIT"
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots", "gzip", "json"] }
 rustls-rustcrypto = "0.0.2-alpha"
 serde_json = "1"
+hmac = "0.12"
+sha2 = "0.10"
 
 [profile.release]
 lto = true

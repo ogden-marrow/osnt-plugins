@@ -1,7 +1,7 @@
 //! Credentials plugin: the secret store for the whole hub.
 //!
-//! The browser side (/api/credentials, via the portal proxy at /p/credentials/) needs the admin token and never receives
-//! values back. Other plugins read secrets at /internal/secrets/<name> directly on this service's loopback port, using
+//! The browser side (/api/credentials, via the portal proxy at /p/credentials/) needs the portal's gateway signature,
+//! which it only adds for a signed-in user, and never receives values back. Other plugins read secrets at /internal/secrets/<name> directly on this service's loopback port, using
 //! their own per-plugin token; a plugin only gets names its manifest declares. The portal refuses to proxy
 //! `internal/*`, so that endpoint is not reachable from the network.
 
@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, env, fs, io::Write, net::SocketAddr, os::unix::
 use axum::{
     Json, Router,
     extract::{ConnectInfo, Path},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, Method, StatusCode, Uri, header},
     response::{Html, IntoResponse, Response},
     routing::get,
 };
@@ -55,32 +55,12 @@ fn state_dir() -> PathBuf {
     PathBuf::from(env::var("OSNT_STATE_DIR").unwrap_or_else(|_| "/var/lib/osnt-credentials".into()))
 }
 
-fn random_hex() -> String {
-    let mut buf = [0u8; 32];
-    fs::File::open("/dev/urandom").and_then(|mut f| std::io::Read::read_exact(&mut f, &mut buf)).expect("read /dev/urandom");
-    buf.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 fn write_private(path: &FsPath, data: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     let mut f = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
     f.write_all(data)?;
     f.sync_all()?;
     fs::rename(tmp, path)
-}
-
-/// Created on first start; print it with `cargo deploy token` from the hub repo.
-fn admin_token() -> String {
-    let path = state_dir().join("admin-token");
-    if let Ok(t) = fs::read_to_string(&path) {
-        if !t.trim().is_empty() {
-            return t.trim().to_string();
-        }
-    }
-    fs::create_dir_all(state_dir()).expect("create state dir");
-    let token = random_hex();
-    write_private(&path, token.as_bytes()).expect("write admin token");
-    token
 }
 
 fn ct_eq(a: &str, b: &str) -> bool {
@@ -91,8 +71,9 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
     headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")
 }
 
-fn is_admin(headers: &HeaderMap) -> bool {
-    bearer(headers).is_some_and(|t| ct_eq(t, &admin_token()))
+/// Was this request vouched for by the portal (a signed-in user)? See `osnt_common::gateway_authorized`.
+fn signed_in(method: &Method, uri: &Uri, headers: &HeaderMap) -> bool {
+    osnt_common::gateway_authorized(method.as_str(), uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"), headers.get("x-osnt-gateway").and_then(|v| v.to_str().ok()))
 }
 
 fn valid_name(name: &str) -> bool {
@@ -113,12 +94,12 @@ fn error(status: StatusCode, msg: &str) -> Response {
 }
 
 fn unauthorized() -> Response {
-    error(StatusCode::UNAUTHORIZED, "admin token required")
+    error(StatusCode::UNAUTHORIZED, "sign in required")
 }
 
 /// Declared credentials (from plugin manifests) plus any stored by hand. Never includes values.
-async fn list(headers: HeaderMap) -> Response {
-    if !is_admin(&headers) {
+async fn list(method: Method, uri: Uri, headers: HeaderMap) -> Response {
+    if !signed_in(&method, &uri, &headers) {
         return unauthorized();
     }
     let stored = load();
@@ -142,8 +123,8 @@ struct PutBody {
     value: String,
 }
 
-async fn put(headers: HeaderMap, Path(name): Path<String>, Json(body): Json<PutBody>) -> Response {
-    if !is_admin(&headers) {
+async fn put(method: Method, uri: Uri, headers: HeaderMap, Path(name): Path<String>, Json(body): Json<PutBody>) -> Response {
+    if !signed_in(&method, &uri, &headers) {
         return unauthorized();
     }
     let value = body.value.trim().to_string();
@@ -159,8 +140,8 @@ async fn put(headers: HeaderMap, Path(name): Path<String>, Json(body): Json<PutB
     }
 }
 
-async fn delete(headers: HeaderMap, Path(name): Path<String>) -> Response {
-    if !is_admin(&headers) {
+async fn delete(method: Method, uri: Uri, headers: HeaderMap, Path(name): Path<String>) -> Response {
+    if !signed_in(&method, &uri, &headers) {
         return unauthorized();
     }
     let _guard = WRITE_LOCK.lock().unwrap();
@@ -202,7 +183,6 @@ async fn tools() -> Json<Value> {
 
 #[tokio::main]
 async fn main() {
-    admin_token(); // create on first start
     let app = Router::new()
         .route("/", get(page))
         .route("/tools", get(tools))
