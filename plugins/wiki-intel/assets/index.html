@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Wikipedia event watch · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+    .li { padding: 10px 0; border-top: 1px solid var(--edge); }
+    .li:first-child { border-top: 0; padding-top: 0; }
+    .li .y { font-weight: 650; color: var(--accent); margin-right: 6px; }
+    .li .links, .cat { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 3px; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+    .cat-h { font-size: var(--fs-sm); font-weight: 650; color: var(--ink-2); margin: 16px 0 4px; }
+    .cat-h:first-child { margin-top: 0; }
+    .topic { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 10px 14px; padding: 12px 0; border-top: 1px solid var(--edge); align-items: center; }
+    .topic:first-child { border-top: 0; padding-top: 0; }
+    .topic .n { font-weight: 600; overflow-wrap: anywhere; }
+    .topic svg { width: 100%; height: 38px; display: block; }
+    .topic .acts { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+    .chg { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 6px 0; border-top: 1px solid var(--edge); font-size: var(--fs-sm); }
+    .chg:first-child { border-top: 0; }
+    .res { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-top: 1px solid var(--edge); background: none; font: inherit; color: inherit; cursor: pointer; }
+    .res:first-child { border-top: 0; } .res:hover { background: var(--surface-2); }
+    .res small { display: block; color: var(--ink-3); }
+    #sform, #tform { display: flex; flex-wrap: wrap; gap: 8px; }
+    #sq, #tt { flex: 1 1 240px; min-height: 44px; font-size: 16px; }
+    #sform .btn, #tform .btn { min-height: 44px; }
+    @media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } .topic { grid-template-columns: minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Wikipedia event watch</h1>
+  </header>
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="t-today" aria-selected="true" aria-controls="p-today">Today</button>
+    <button class="tab" role="tab" id="t-watch" aria-selected="false" aria-controls="p-watch">Watchlist</button>
+    <button class="tab" role="tab" id="t-entity" aria-selected="false" aria-controls="p-entity">Wikidata</button>
+  </div>
+  <main class="page wide">
+    <section id="p-today" role="tabpanel" aria-labelledby="t-today">
+      <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">What is happening, and what happened on this day</h2><p>Current events as curated by Wikipedia's volunteers, next to historical events for the same date.</p></div>
+        <div class="row"><label class="sr-only" for="cdate">Date</label><input type="date" id="cdate"><label class="sr-only" for="lang">Language</label><select id="lang"><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option><option value="ru">Русский</option><option value="uk">Українська</option><option value="ar">العربية</option><option value="it">Italiano</option><option value="pt">Português</option><option value="zh">中文</option><option value="ja">日本語</option><option value="he">עברית</option><option value="tr">Türkçe</option></select></div></div>
+      <div class="two"><section class="card"><div class="card-head"><h3 class="h3">Current events</h3><span class="badge" id="ceDate"></span></div><div id="ce"><div class="loading"><span class="spin" aria-hidden="true"></span>Loading…</div></div></section>
+      <section class="card"><div class="card-head"><h3 class="h3">On this day</h3><span class="badge" id="otdDate"></span></div><div id="otd"><div class="loading"><span class="spin" aria-hidden="true"></span>Loading…</div></div></section></div>
+    </section>
+    <section id="p-watch" role="tabpanel" aria-labelledby="t-watch" hidden>
+      <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Page-view spikes</h2><p>Watch Wikipedia articles about events, places and organisations. A jump in daily views often follows breaking news.</p></div></div>
+      <div class="two">
+        <section class="card"><div class="card-head"><h3 class="h3">Watched topics</h3><span class="badge" id="tcount"></span></div>
+          <form id="tform"><label class="sr-only" for="tt">Article title</label><input id="tt" placeholder="Article title, e.g. Suez Canal" maxlength="255" autocomplete="off" spellcheck="false" required><button class="btn primary">Add</button></form>
+          <p class="hint">Pages about people are not accepted. Views are daily, human traffic only (Wikimedia's “user” agent type).</p>
+          <div id="topics" style="margin-top:12px"><div class="loading"><span class="spin" aria-hidden="true"></span>Loading…</div></div></section>
+        <section class="card"><div class="card-head"><h3 class="h3">Live change notices</h3><span class="badge" id="liveBadge">idle</span></div>
+          <div id="changes"><div class="muted small">Add a topic to see edits to its article as they happen.</div></div>
+          <p class="hint">From Wikimedia EventStreams while this tab is open. Shows which article changed and by how many bytes. Editors and edit comments are not shown or stored.</p></section>
+      </div>
+    </section>
+    <section id="p-entity" role="tabpanel" aria-labelledby="t-entity" hidden>
+      <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Wikidata facts</h2><p>Look up an organisation, place, event, vessel or aircraft type. People are not shown.</p></div></div>
+      <div class="two"><section class="card"><form id="sform" role="search"><label class="sr-only" for="sq">Search Wikidata</label><input id="sq" type="search" placeholder="e.g. Suez Canal, Maersk, Boeing 737" maxlength="100" autocomplete="off" required><button class="btn primary">Search</button></form><div id="results" style="margin-top:10px"></div></section>
+      <section class="card" id="card"><div class="state"><div class="h3">No entity selected</div><p>Search, then choose a result.</p></div></section></div>
+    </section>
+    <div class="notice info" style="margin-top:16px"><div><b>Sources and licences.</b> Text from <a href="https://www.wikipedia.org/" rel="noopener noreferrer" target="_blank">Wikipedia</a> (current events, On this day, page views, change stream) is available under <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="noopener noreferrer" target="_blank">CC BY-SA 4.0</a>; follow each linked article for its authors. <a href="https://www.wikidata.org/" rel="noopener noreferrer" target="_blank">Wikidata</a> facts are <a href="https://creativecommons.org/publicdomain/zero/1.0/" rel="noopener noreferrer" target="_blank">CC0</a>. Data comes from the Wikimedia REST, Action and EventStreams APIs, used within their fair-use guidelines with a descriptive User-Agent.</div></div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const safeUrl = u => /^https?:\/\//i.test(u) ? u : '#';
+    const A = (u, t) => `<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`;
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast' + (kind ? ' ' + kind : ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 5000); }
+    async function api(path, opts) {
+      const r = await fetch(path, opts), d = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(d.error || ('HTTP ' + r.status)); e.status = r.status; e.person = d.person; throw e; }
+      return d;
+    }
+    const errBox = (t, e) => `<div class="state error" role="alert"><div class="h3">${esc(t)}</div><p>${esc(e.message)}</p></div>`;
+
+    // Tabs
+    const tabs = ['today', 'watch', 'entity'];
+    function show(name) {
+      for (const t of tabs) { $('t-' + t).setAttribute('aria-selected', t === name); $('p-' + t).hidden = t !== name; }
+      if (name === 'watch') { loadWatch(); } else { stopPoll(); }
+      try { history.replaceState(null, '', '#' + name); } catch {}
+    }
+    tabs.forEach(t => $('t-' + t).onclick = () => show(t));
+
+    // Today
+    const iso = d => d.toISOString().slice(0, 10);
+    $('cdate').value = iso(new Date()); $('cdate').max = iso(new Date());
+    async function loadToday() {
+      const date = $('cdate').value, [y, m, d] = date.split('-').map(Number);
+      $('ce').innerHTML = $('otd').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Loading…</div>';
+      api('api/current?date=' + date).then(v => {
+        $('ceDate').textContent = v.date;
+        if (!v.items.length) { $('ce').innerHTML = `<div class="state"><div class="h3">Nothing listed</div><p>${esc(v.note || 'No items for this date.')} ${v.page_url ? A(v.page_url, 'Open the page') : ''}</p></div>`; return; }
+        let html = '', cat = null;
+        for (const it of v.items) {
+          if (it.category !== cat) { cat = it.category; html += `<div class="cat-h">${esc(cat || 'Other')}</div>`; }
+          html += `<div class="li">${it.topic ? `<div class="cat">${esc(it.topic)}</div>` : ''}${esc(it.text)}<div class="links">${it.source_url ? A(it.source_url, it.source || 'Source') : ''}${(it.pages || []).slice(0, 3).map(p => A('https://en.wikipedia.org/wiki/' + encodeURIComponent(p.replace(/ /g, '_')), p)).join('')}</div></div>`;
+        }
+        $('ce').innerHTML = html + `<p class="hint">${A(v.page_url, 'Portal:Current events')} on Wikipedia</p>`;
+      }).catch(e => $('ce').innerHTML = errBox('Could not load current events', e));
+      api(`api/onthisday?month=${m}&day=${d}&lang=${$('lang').value}`).then(v => {
+        $('otdDate').textContent = `${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        $('otd').innerHTML = v.events.length ? v.events.slice().sort((a, b) => b.year - a.year).slice(0, 40).map(e => `<div class="li"><span class="y">${esc(e.year)}</span>${esc(e.text)}<div class="links">${e.pages.map(p => A(p.url, p.title)).join('')}</div></div>`).join('') : '<div class="state"><div class="h3">Nothing listed</div></div>';
+      }).catch(e => $('otd').innerHTML = errBox('Could not load On this day', e));
+    }
+    $('cdate').onchange = $('lang').onchange = loadToday;
+
+    // Watchlist
+    function spark(series) {
+      if (!series || series.length < 2) return '';
+      const vs = series.map(p => p[1]), hi = Math.max(...vs), lo = Math.min(...vs), W = 150, H = 38, r = (hi - lo) || 1;
+      const d = vs.map((v, i) => (i ? 'L' : 'M') + (i / (vs.length - 1) * W).toFixed(1) + ' ' + (H - 3 - (v - lo) / r * (H - 6)).toFixed(1)).join('');
+      return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Daily views, ${series.length} days, from ${lo} to ${hi}"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+    }
+    let poll = null;
+    function stopPoll() { clearInterval(poll); poll = null; }
+    async function loadWatch() {
+      try {
+        const [t, w] = [await api('api/topics'), null];
+        $('tcount').textContent = t.topics.length + ' / ' + t.max;
+        if (!t.topics.length) { $('topics').innerHTML = '<div class="state"><div class="h3">No topics yet</div><p>Add an article such as “Suez Canal” or “Black Sea”.</p></div>'; $('changes').innerHTML = '<div class="muted small">Add a topic to see edits to its article as they happen.</div>'; return; }
+        $('topics').innerHTML = t.topics.map(x => `<div class="topic"><div><div class="n">${A('https://' + x.lang + '.wikipedia.org/wiki/' + encodeURIComponent(x.title), x.display || x.title)}</div><div class="tiny faint">${esc(x.description || '')}</div></div><div class="faint tiny" id="tp${x.id}"><span class="loading"><span class="spin" aria-hidden="true"></span>Loading…</span></div><div class="acts"><button class="btn sm danger" data-del="${x.id}">Remove</button></div></div>`).join('');
+        const full = await api('api/watch');
+        for (const x of full.topics) {
+          const el = $('tp' + x.topic.id); if (!el) continue;
+          if (x.error) { el.innerHTML = `<span class="err">${esc(x.error)}</span>`; continue; }
+          const sp = x.spike, badge = !sp ? '<span class="badge">Not enough data</span>' : sp.spike ? `<span class="badge err">Spike ${sp.ratio.toFixed(1)}×</span>` : '<span class="badge ok">Normal</span>';
+          el.innerHTML = `${spark(x.series)}<div class="row spread" style="margin-top:2px">${badge}<span>${sp ? Math.round(sp.latest).toLocaleString() + ' views' : ''}</span></div>${sp ? `<div>${esc(sp.latest_date)} · median ${Math.round(sp.median).toLocaleString()}</div>` : ''}`;
+        }
+        refreshChanges(); if (!poll) poll = setInterval(refreshChanges, 5000);
+      } catch (e) {
+        $('topics').innerHTML = e.status === 401 ? '<div class="notice warn">Sign in through the hub to use the watchlist.</div>' : errBox('Could not load the watchlist', e);
+      }
+    }
+    async function refreshChanges() {
+      try {
+        const c = await api('api/changes');
+        $('liveBadge').className = 'badge ' + (c.connected ? 'ok live' : c.note ? 'warn' : ''); $('liveBadge').textContent = c.connected ? 'live' : c.note ? 'reconnecting' : c.running ? 'connecting' : 'idle';
+        $('changes').innerHTML = c.events.length ? c.events.slice(0, 40).map(e => `<div class="chg"><span class="badge ${e.kind === 'new' ? 'ok' : ''}">${esc(e.kind)}</span><span>${A(e.url, e.title.replace(/_/g, ' '))}</span><span class="faint">${e.delta == null ? '' : (e.delta > 0 ? '+' : '') + e.delta + ' B'}</span></div>`).join('') : `<div class="muted small">${c.note ? esc(c.note) : 'Waiting for edits to watched articles. Quiet articles can take a long time.'}</div>`;
+      } catch { /* keep the last view */ }
+    }
+    $('topics').onclick = async e => {
+      const b = e.target.closest('[data-del]'); if (!b) return;
+      try { await api('api/topics/' + b.dataset.del, { method: 'DELETE' }); loadWatch(); } catch (err) { toast(err.message, 'err'); }
+    };
+    $('tform').onsubmit = async e => {
+      e.preventDefault();
+      try { await api('api/topics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: $('tt').value }) }); $('tt').value = ''; loadWatch(); }
+      catch (err) { toast(err.message, 'err'); }
+    };
+
+    // Wikidata
+    $('sform').onsubmit = async e => {
+      e.preventDefault(); $('results').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Searching…</div>';
+      try {
+        const d = await api('api/entity/search?q=' + encodeURIComponent($('sq').value));
+        $('results').innerHTML = d.results.length ? `<div style="border:1px solid var(--edge);border-radius:var(--radius-sm);overflow:hidden">${d.results.map(r => `<button class="res" data-q="${esc(r.id)}"><b>${esc(r.label || r.id)}</b> <span class="faint tiny">${esc(r.id)}</span><small>${esc(r.description || '')}</small></button>`).join('')}</div>` : '<div class="state"><div class="h3">No results</div></div>';
+      } catch (err) { $('results').innerHTML = errBox('Search failed', err); }
+    };
+    async function openEntity(q) {
+      $('card').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Loading…</div>';
+      try {
+        const c = await api('api/entity/' + q);
+        const val = v => v.url ? A(v.url, v.text) : v.coord ? esc(v.text) : esc(v.label ? v.label + (v.unit ? '' : '') : v.text) + (v.qid && v.label ? ` <span class="faint tiny">${esc(v.qid)}</span>` : '') + (v.unit && v.label ? ' ' + esc(v.label) : '');
+        $('card').innerHTML = `<div class="card-head"><h3 class="h3">${esc(c.label || c.id)}</h3><span class="badge">${esc(c.id)}</span></div><p class="muted" style="margin:0 0 10px">${esc(c.description || '')}</p>
+          <table class="kv">${c.facts.map(f => `<tr><th>${esc(f.label)}</th><td>${f.values.map(val).join('<br>')}</td></tr>`).join('')}${c.aliases.length ? `<tr><th>Also called</th><td>${c.aliases.map(esc).join(', ')}</td></tr>` : ''}</table>
+          <div class="row" style="margin-top:12px">${A(c.url, 'Wikidata')}${c.wikipedia_title ? A('https://en.wikipedia.org/wiki/' + encodeURIComponent(c.wikipedia_title.replace(/ /g, '_')), 'Wikipedia') : ''}${c.coordinates && c.coordinates.lat != null ? A(`https://www.openstreetmap.org/?mlat=${c.coordinates.lat}&mlon=${c.coordinates.lon}#map=9/${c.coordinates.lat}/${c.coordinates.lon}`, 'Map') : ''}</div>`;
+      } catch (err) { $('card').innerHTML = err.person ? `<div class="notice warn"><div><b>Not shown.</b> ${esc(err.message)}</div></div>` : errBox('Could not load the entity', err); }
+    }
+    $('results').onclick = e => { const b = e.target.closest('[data-q]'); if (b) openEntity(b.dataset.q); };
+
+    loadToday();
+    const h = location.hash.slice(1); if (tabs.includes(h)) show(h);
+  </script>
+</body>
+</html>

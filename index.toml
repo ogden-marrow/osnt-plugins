@@ -167,3 +167,31 @@ name = "Domain hygiene"
 description = "Scored checklist for a domain: DNS records, SPF/DMARC/DKIM/MTA-STS, DNSSEC, delegation, CAA and security.txt."
 version = "0.1.0"
 path = "plugins/domain-hygiene"
+
+[[plugin]]
+id = "gdelt-news"
+name = "Global news monitor (GDELT)"
+description = "Search worldwide news coverage with volume and tone timelines, the latest GDELT export files, and saved stories that flag volume spikes."
+version = "0.1.0"
+path = "plugins/gdelt-news"
+
+[[plugin]]
+id = "rss-watch"
+name = "Feed watcher"
+description = "Poll your own RSS/Atom feeds, Hacker News keyword alerts and opt-in public Telegram channel previews, with keyword and regex alerts and a new-since-last-visit inbox."
+version = "0.1.0"
+path = "plugins/rss-watch"
+
+[[plugin]]
+id = "wiki-intel"
+name = "Wikipedia event watch"
+description = "Wikipedia On this day and current events, page-view spike detection and live change notices for watched topics, and Wikidata facts for organisations, places and events."
+version = "0.1.0"
+path = "plugins/wiki-intel"
+
+[[plugin]]
+id = "conflict-events"
+name = "Conflict events"
+description = "Georeferenced armed-conflict events from UCDP (free token) and optionally ACLED, on a map with timeline and event-type breakdown."
+version = "0.1.0"
+path = "plugins/conflict-events"

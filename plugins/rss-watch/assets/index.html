@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Feed watcher · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--gap); align-items: start; }
+    .side > * + * { margin-top: var(--gap); }
+    .feed { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 8px; margin: 0 -8px; border-radius: var(--radius-sm); cursor: pointer; border: 0; background: none; width: calc(100% + 16px); text-align: left; font: inherit; color: inherit; }
+    .feed:hover { background: var(--surface-2); }
+    .feed[aria-pressed="true"] { background: var(--accent-soft); }
+    .feed .dot { margin-top: 7px; }
+    .feed .t { font-weight: 600; overflow-wrap: anywhere; line-height: 1.3; }
+    .feed .s { font-size: var(--fs-xs); color: var(--ink-3); overflow-wrap: anywhere; }
+    .feed .s.err { color: var(--err); }
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .tools input[type=search] { flex: 1 1 200px; }
+    .item { padding: 12px 0; border-top: 1px solid var(--edge); display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 10px; }
+    .item:first-child { border-top: 0; }
+    .item .pip { width: 8px; height: 8px; border-radius: 50%; margin-top: 8px; background: transparent; }
+    .item.new .pip { background: var(--accent); }
+    .item a.title { font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+    .item a.title:hover { color: var(--link); text-decoration: underline; }
+    .item p { margin: 4px 0 0; color: var(--ink-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+    .item .sub { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: var(--fs-xs); color: var(--ink-3); align-items: center; }
+    mark { background: var(--warn-soft); color: var(--ink); padding: 0 2px; border-radius: 3px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .rule { display: flex; justify-content: space-between; gap: 8px; align-items: start; padding: 8px 0; border-top: 1px solid var(--edge); }
+    .rule:first-child { border-top: 0; }
+    .rule code { display: inline-block; max-width: 100%; }
+    details > summary { cursor: pointer; font-weight: 600; font-size: var(--fs-md); min-height: 32px; display: flex; align-items: center; }
+    details[open] > summary { margin-bottom: 8px; }
+    form.stack-sm input, form.stack-sm select { width: 100%; }
+    @media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } .side { order: 2; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Feed watcher</h1>
+    <div class="bar-end"><span id="status" class="status" role="status"></span></div>
+  </header>
+  <main class="page wide">
+    <div class="page-head">
+      <div><h2 class="h2" style="font-size:22px;margin:0">Your feeds</h2>
+      <p>Watch the sources you choose. New items are flagged since your last visit, and alert rules highlight what matters.</p></div>
+      <div class="row"><button class="btn" id="refresh" type="button">Refresh all</button><button class="btn primary" id="markRead" type="button">Mark all read</button></div>
+    </div>
+    <div class="layout">
+      <aside class="side" aria-label="Feeds and alert rules">
+        <section class="card">
+          <div class="card-head"><h3 class="h3">Feeds</h3><span class="badge" id="feedCount"></span></div>
+          <div id="feeds"><div class="muted small">Loading…</div></div>
+          <hr>
+          <details id="addBox">
+            <summary>Add a feed</summary>
+            <form id="addForm" class="stack-sm">
+              <label class="field"><span class="label">Type</span><select id="kind"><option value="rss">RSS / Atom feed URL</option><option value="hn">Hacker News keyword alert</option><option value="telegram">Public Telegram channel (opt-in)</option></select></label>
+              <label class="field"><span class="label" id="targetLabel">Feed URL</span><input id="target" required maxlength="500" autocomplete="off" spellcheck="false" placeholder="https://example.org/feed.xml"></label>
+              <label class="field"><span class="label">Name (optional)</span><input id="title" maxlength="80" autocomplete="off"></label>
+              <label class="field"><span class="label">Check every</span><select id="interval"><option value="15">15 minutes</option><option value="30" selected>30 minutes</option><option value="60">1 hour</option><option value="360">6 hours</option><option value="1440">1 day</option></select></label>
+              <p class="hint" id="kindHint">Only public http(s) addresses are fetched. Addresses on private networks, localhost and cloud metadata are always refused.</p>
+              <button class="btn primary block" id="addBtn">Add and fetch</button>
+            </form>
+          </details>
+          <details style="margin-top:8px">
+            <summary>OPML import / export</summary>
+            <div class="stack-sm">
+              <label class="field"><span class="label">Import an OPML file</span><input type="file" id="opmlFile" accept=".opml,.xml,text/xml"></label>
+              <a class="btn block" id="opmlOut" href="api/opml" download="osnt-feeds.opml">Export OPML</a>
+            </div>
+          </details>
+        </section>
+        <section class="card">
+          <div class="card-head"><h3 class="h3">Alert rules</h3><span class="badge" id="ruleCount"></span></div>
+          <div id="rules"><div class="muted small">Loading…</div></div>
+          <hr>
+          <form id="ruleForm" class="stack-sm">
+            <div class="grid2"><label class="field"><span class="label">Name</span><input id="rname" maxlength="60" placeholder="Quakes"></label>
+            <label class="field"><span class="label">Match</span><select id="rkind"><option value="keyword">Keywords</option><option value="regex">Regex</option></select></label></div>
+            <label class="field"><span class="label" id="rpLabel">Keywords (comma separated)</span><input id="rpattern" required maxlength="200" autocomplete="off" spellcheck="false" placeholder="earthquake, tsunami"></label>
+            <button class="btn block">Add rule</button>
+          </form>
+          <p class="hint">Rules match the title and summary, ignoring case. Regex uses the Rust engine (no look-around).</p>
+        </section>
+      </aside>
+      <section class="card" aria-label="Inbox">
+        <div class="tools">
+          <div class="seg" role="group" aria-label="Filter"><button id="fAll" aria-pressed="true">All</button><button id="fNew" aria-pressed="false">New <span id="newN"></span></button><button id="fAlert" aria-pressed="false">Alerts</button></div>
+          <label class="sr-only" for="search">Search stored items</label><input type="search" id="search" placeholder="Search items" autocomplete="off">
+        </div>
+        <div id="inbox" aria-live="polite"><div class="loading"><span class="spin" aria-hidden="true"></span>Loading…</div></div>
+      </section>
+    </div>
+    <div class="notice info" style="margin-top:16px"><div><b>About the data.</b> Items are fetched directly from the feeds you add and stored here for 30 days (up to 150 per feed); text belongs to its publishers and is shown as a short summary with a link. Hacker News search is provided by <a href="https://hn.algolia.com/api" rel="noopener noreferrer" target="_blank">Algolia's public HN API</a>. Telegram previews read only the public <code>t.me/s/&lt;channel&gt;</code> page of a channel you name: post text, time and link. Groups, members and users are not supported, and nobody's profile is read.</div></div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const safeUrl = u => /^https?:\/\//i.test(u) ? u : '#';
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast' + (kind ? ' ' + kind : ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 5000); }
+    async function api(path, opts) {
+      const r = await fetch(path, opts), d = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(d.error || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+      return d;
+    }
+    const post = (p, body) => api(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const ago = t => { if (!t) return 'never'; const s = Math.max(0, Math.round(Date.now() / 1000 - t)); return s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago'; };
+    function hl(text, terms) {
+      text = String(text ?? ''); const lc = text.toLowerCase(), spans = [];
+      for (const t of new Set((terms || []).map(x => x.toLowerCase()).filter(Boolean))) { let i = 0; while ((i = lc.indexOf(t, i)) >= 0) { spans.push([i, i + t.length]); i += t.length; } }
+      spans.sort((a, b) => a[0] - b[0]); let out = '', pos = 0;
+      for (const [s, e] of spans) { if (s < pos) continue; out += esc(text.slice(pos, s)) + '<mark>' + esc(text.slice(s, e)) + '</mark>'; pos = e; }
+      return out + esc(text.slice(pos));
+    }
+    let state = { feed: null, filter: 'all', q: '' };
+
+    async function loadFeeds() {
+      try {
+        const d = await api('api/feeds');
+        $('feedCount').textContent = d.feeds.length + ' / ' + d.max;
+        const all = `<button class="feed" data-id="" aria-pressed="${state.feed === null}"><span class="dot ok"></span><span><span class="t">All feeds</span></span><span></span></button>`;
+        $('feeds').innerHTML = d.feeds.length ? all + d.feeds.map(f => {
+          const cls = { ok: 'ok', pending: 'off', warn: 'warn', failing: 'err' }[f.health];
+          const sub = f.last_error ? `<div class="s err">${esc(f.last_error)}</div>` : `<div class="s">${f.items} items · ${esc(ago(f.last_fetch))}</div>`;
+          return `<button class="feed" data-id="${f.id}" aria-pressed="${state.feed === f.id}" title="${esc(f.label)}"><span class="dot ${cls}" title="${esc(f.health)}"></span><span><span class="t">${esc(f.title)}</span><div class="s">${esc(f.kind === 'rss' ? f.label : f.kind === 'hn' ? 'Hacker News' : 'Telegram')} · every ${f.interval_min >= 60 ? f.interval_min / 60 + ' h' : f.interval_min + ' min'}</div>${sub}</span><span class="row" style="gap:2px"><span class="btn ghost sm" role="button" tabindex="0" data-act="fetch" data-id="${f.id}" aria-label="Fetch ${esc(f.title)} now" title="Fetch now">↻</span><span class="btn ghost sm" role="button" tabindex="0" data-act="del" data-id="${f.id}" aria-label="Remove ${esc(f.title)}" title="Remove">✕</span></span></button>`;
+        }).join('') : '<div class="state"><div class="h3">No feeds yet</div><p>Add an RSS or Atom feed URL below, or import an OPML file.</p></div>';
+      } catch (e) { $('feeds').innerHTML = `<div class="state error"><div class="h3">Could not load feeds</div><p>${esc(e.message)}</p></div>`; }
+    }
+    async function loadRules() {
+      try {
+        const d = await api('api/rules'); $('ruleCount').textContent = d.rules.length + ' / ' + d.max;
+        $('rules').innerHTML = d.rules.length ? d.rules.map(r => `<div class="rule"><div><b>${esc(r.name)}</b><div class="tiny faint">${esc(r.kind)}</div><code>${esc(r.pattern)}</code></div><button class="btn ghost sm" data-rule="${r.id}" aria-label="Delete rule ${esc(r.name)}">✕</button></div>`).join('') : '<div class="muted small">No rules. Add keywords to highlight matching items and get an Alerts view.</div>';
+      } catch (e) { $('rules').innerHTML = e.status === 401 ? '<div class="notice warn">Sign in through the hub to manage alert rules.</div>' : `<div class="state error"><div class="h3">Could not load rules</div><p>${esc(e.message)}</p></div>`; }
+    }
+    async function loadInbox() {
+      const p = new URLSearchParams();
+      if (state.feed !== null) p.set('feed', state.feed);
+      if (state.filter === 'new') p.set('unread', 'true');
+      if (state.filter === 'alerts') p.set('alerts_only', 'true');
+      let path = 'api/inbox';
+      if (state.q.trim().length >= 2) { p.set('q', state.q.trim()); path = 'api/search'; }
+      try {
+        const d = await api(path + '?' + p);
+        $('newN').textContent = d.new && state.filter !== 'new' ? '(' + d.new + ')' : '';
+        $('status').textContent = d.total + ' items' + (d.new ? ', ' + d.new + ' new' : '');
+        $('inbox').innerHTML = d.items.length ? d.items.map(i => {
+          const terms = i.matches.flatMap(m => m.terms);
+          const chips = i.matches.map(m => `<span class="badge warn">${esc(m.name)}</span>`).join('');
+          return `<article class="item${i.new ? ' new' : ''}"><span class="pip" ${i.new ? 'title="New since your last visit"' : ''}></span><div><a class="title" href="${esc(safeUrl(i.link))}" target="_blank" rel="noopener noreferrer">${hl(i.title, terms)}</a>${i.summary ? `<p>${hl(i.summary, terms)}</p>` : ''}<div class="sub"><span>${esc(i.feed_title)}</span><span>${esc(ago(i.published || i.fetched))}</span>${i.new ? '<span class="badge ok">New</span>' : ''}${chips}</div></div></article>`;
+        }).join('') : `<div class="state"><div class="h3">${state.filter === 'new' ? 'Nothing new' : state.q ? 'No matches' : 'No items yet'}</div><p>${state.filter === 'new' ? 'You are up to date.' : state.q ? 'No stored item contains that text.' : 'Items appear after a feed has been fetched. Use Refresh all to fetch now.'}</p></div>`;
+      } catch (e) { $('inbox').innerHTML = `<div class="state error" role="alert"><div class="h3">Could not load the inbox</div><p>${esc(e.message)}</p></div>`; }
+    }
+    const reload = () => Promise.all([loadFeeds(), loadInbox()]);
+
+    $('feeds').addEventListener('click', async e => {
+      const act = e.target.closest('[data-act]');
+      if (act) {
+        e.stopPropagation(); const id = act.dataset.id;
+        try {
+          if (act.dataset.act === 'del') { if (!confirm('Remove this feed and its stored items?')) return; await api('api/feeds/' + id, { method: 'DELETE' }); if (state.feed === +id) state.feed = null; toast('Feed removed.'); }
+          else { act.textContent = '…'; const r = await post(`api/feeds/${id}/refresh`); toast(r.ok ? `${r.new} new item${r.new === 1 ? '' : 's'}.` : 'Fetch failed: ' + r.error, r.ok ? '' : 'err'); }
+        } catch (err) { toast(err.message, 'err'); }
+        return reload();
+      }
+      const b = e.target.closest('.feed'); if (!b) return;
+      state.feed = b.dataset.id === '' ? null : +b.dataset.id; reload();
+    });
+    $('feeds').addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-act]')) { e.preventDefault(); e.target.click(); } });
+    for (const [id, f] of [['fAll', 'all'], ['fNew', 'new'], ['fAlert', 'alerts']]) $(id).onclick = () => { state.filter = f; for (const [i, g] of [['fAll', 'all'], ['fNew', 'new'], ['fAlert', 'alerts']]) $(i).setAttribute('aria-pressed', g === f); loadInbox(); };
+    let tm; $('search').oninput = e => { clearTimeout(tm); tm = setTimeout(() => { state.q = e.target.value; loadInbox(); }, 250); };
+
+    const hints = { rss: ['Feed URL', 'https://example.org/feed.xml', 'Only public http(s) addresses are fetched. Addresses on private networks, localhost and cloud metadata are always refused.'],
+      hn: ['Keywords', 'earthquake OR tsunami', 'New Hacker News stories matching these words, from the public Algolia HN API.'],
+      telegram: ['Channel name', 'channel_name', 'Opt-in. Reads the public preview page of a channel you name (post text, time, link). Only public channels with a web preview work; groups and users are not supported.'] };
+    $('kind').onchange = () => { const h = hints[$('kind').value]; $('targetLabel').textContent = h[0]; $('target').placeholder = h[1]; $('kindHint').textContent = h[2]; };
+    $('addForm').onsubmit = async e => {
+      e.preventDefault(); $('addBtn').disabled = true; $('addBtn').textContent = 'Fetching…';
+      try {
+        const r = await post('api/feeds', { kind: $('kind').value, target: $('target').value, title: $('title').value, interval_min: +$('interval').value });
+        toast(r.fetch.ok ? `Added. ${r.fetch.new} items fetched.` : 'Added, but the first fetch failed: ' + r.fetch.error, r.fetch.ok ? '' : 'warn');
+        $('target').value = ''; $('title').value = ''; reload();
+      } catch (err) { toast(err.message, 'err'); }
+      $('addBtn').disabled = false; $('addBtn').textContent = 'Add and fetch';
+    };
+    $('opmlFile').onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        const r = await api('api/opml', { method: 'POST', headers: { 'Content-Type': 'text/xml' }, body: await f.text() });
+        toast(`Imported ${r.added} feed${r.added === 1 ? '' : 's'}${r.skipped.length ? ', skipped ' + r.skipped.length + ' (' + r.skipped[0].reason + ')' : ''}.`, r.skipped.length ? 'warn' : '');
+        reload();
+      } catch (err) { toast(err.message, 'err'); }
+      e.target.value = '';
+    };
+    $('rkind').onchange = () => { const rx = $('rkind').value === 'regex'; $('rpLabel').textContent = rx ? 'Regular expression' : 'Keywords (comma separated)'; $('rpattern').placeholder = rx ? 'M[5-9]\\.\\d' : 'earthquake, tsunami'; };
+    $('ruleForm').onsubmit = async e => {
+      e.preventDefault();
+      try { await post('api/rules', { name: $('rname').value, kind: $('rkind').value, pattern: $('rpattern').value }); $('rname').value = ''; $('rpattern').value = ''; toast('Rule added.'); loadRules(); loadInbox(); }
+      catch (err) { toast(err.message, 'err'); }
+    };
+    $('rules').onclick = async e => {
+      const b = e.target.closest('[data-rule]'); if (!b) return;
+      try { await api('api/rules/' + b.dataset.rule, { method: 'DELETE' }); loadRules(); loadInbox(); } catch (err) { toast(err.message, 'err'); }
+    };
+    $('refresh').onclick = async () => {
+      $('refresh').disabled = true; $('refresh').textContent = 'Refreshing…';
+      try { const r = await post('api/refresh'); toast(r.fetched ? `Fetched ${r.fetched} feed${r.fetched === 1 ? '' : 's'}, ${r.new} new item${r.new === 1 ? '' : 's'}.` : 'Everything was fetched within the last minute.'); }
+      catch (err) { toast(err.message, 'err'); }
+      $('refresh').disabled = false; $('refresh').textContent = 'Refresh all'; reload();
+    };
+    $('markRead').onclick = async () => { try { await post('api/seen'); toast('Marked as read.'); } catch (err) { toast(err.message, 'err'); } loadInbox(); };
+    reload(); loadRules();
+  </script>
+</body>
+</html>

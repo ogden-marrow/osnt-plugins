@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Global news monitor · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--gap); align-items: start; }
+    .col > * + * { margin-top: var(--gap); }
+    #f { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    #f .line { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 280px; font-size: 16px; min-height: 44px; }
+    #f .btn { min-height: 44px; }
+    .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+    .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
+    .chart svg { width: 100%; height: 120px; display: block; }
+    .chart .axis { font-size: 11px; fill: var(--ink-3); }
+    .chart .meta { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--ink-3); margin-top: 4px; gap: 8px; }
+    .bars { display: grid; gap: 6px; }
+    .bar { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 8px; align-items: center; font-size: var(--fs-sm); }
+    .bar .t { position: relative; min-width: 0; padding: 3px 8px; border-radius: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; background: linear-gradient(90deg, var(--accent-soft) var(--w), transparent var(--w)); }
+    .bar .n { text-align: right; color: var(--ink-2); }
+    .art { padding: 12px 0; border-top: 1px solid var(--edge); }
+    .art:first-child { border-top: 0; padding-top: 0; }
+    .art a.title { font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+    .art a.title:hover { color: var(--link); text-decoration: underline; }
+    .art .sub { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; font-size: var(--fs-xs); color: var(--ink-3); }
+    .story { padding: 12px 0; border-top: 1px solid var(--edge); }
+    .story:first-child { border-top: 0; padding-top: 0; }
+    .story .name { font-weight: 600; overflow-wrap: anywhere; }
+    .story .q { font: 12px/1.4 var(--font-mono); color: var(--ink-3); overflow-wrap: anywhere; margin: 2px 0 6px; }
+    .story svg { width: 100%; height: 34px; display: block; margin: 6px 0; }
+    .story .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .files td:first-child { white-space: nowrap; }
+    #qstat { font-size: var(--fs-sm); color: var(--ink-3); }
+    @media (max-width: 640px) { #qstat { display: none; } }
+    @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } .charts { grid-template-columns: minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Global news monitor</h1>
+    <div class="bar-end"><span id="qstat" class="status" role="status"></span></div>
+  </header>
+  <main class="page wide">
+    <div class="page-head">
+      <div><h2 class="h2" style="font-size:22px;margin:0">Worldwide news coverage</h2>
+      <p>Search what the world's media are reporting about events, places and organisations, and watch how coverage volume and tone change.</p></div>
+    </div>
+    <div class="layout">
+      <div class="col">
+        <section class="card">
+          <form id="f" role="search">
+            <div class="line">
+              <label class="sr-only" for="q">Search query</label>
+              <input id="q" type="search" placeholder='e.g. "port closure" OR strike' autocomplete="off" spellcheck="false" maxlength="200">
+              <button class="btn primary" id="go">Search</button>
+              <button class="btn" type="button" id="save" title="Save this search as a story and watch for volume spikes">Save as story</button>
+            </div>
+            <div class="opts">
+              <label class="field"><span class="label">Timespan</span><select id="timespan"><option value="15min">15 minutes</option><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h" selected>24 hours</option><option value="3d">3 days</option><option value="7d">7 days</option><option value="2w">2 weeks</option><option value="1m">1 month</option><option value="3m">3 months</option></select></label>
+              <label class="field"><span class="label">Source language</span><select id="lang"><option value="">Any</option><option value="english">English</option><option value="spanish">Spanish</option><option value="french">French</option><option value="german">German</option><option value="russian">Russian</option><option value="arabic">Arabic</option><option value="chinese">Chinese</option><option value="portuguese">Portuguese</option><option value="ukrainian">Ukrainian</option><option value="hebrew">Hebrew</option><option value="turkish">Turkish</option><option value="japanese">Japanese</option></select></label>
+              <label class="field"><span class="label">Source country</span><input id="country" placeholder="US, FR, unitedkingdom" maxlength="30" autocomplete="off" spellcheck="false"></label>
+              <label class="field"><span class="label">Sort</span><select id="sort"><option value="datedesc">Newest first</option><option value="relevance">Relevance</option><option value="tonedesc">Most positive</option><option value="toneasc">Most negative</option><option value="dateasc">Oldest first</option></select></label>
+            </div>
+          </form>
+          <p class="hint">Quotes match a phrase, <code>(a OR b)</code> matches alternatives, <code>-word</code> excludes. GDELT allows one request every 5 seconds, so the charts load one after another.</p>
+        </section>
+        <div id="out" aria-live="polite"></div>
+      </div>
+      <aside class="col" aria-label="Saved stories and data files">
+        <section class="card">
+          <div class="card-head"><h3 class="h3">Story tracker</h3><span class="badge" id="storyCount"></span></div>
+          <div id="stories"><div class="muted small">Loading…</div></div>
+          <p class="hint">Saved stories are checked in the background about once an hour. A spike means the last hour's share of coverage is far above the previous three days.</p>
+        </section>
+        <section class="card">
+          <div class="card-head"><h3 class="h3">Latest GDELT files</h3><button class="btn sm" id="reloadFiles" type="button">Refresh</button></div>
+          <div id="files"><div class="muted small">Loading…</div></div>
+          <p class="hint">The event, mentions and GKG tables are published every 15 minutes. These are links only; nothing is downloaded here. <a href="http://data.gdeltproject.org/gdeltv2/masterfilelist.txt" rel="noopener noreferrer" target="_blank">Full file list</a> · <a href="https://www.gdeltproject.org/data.html" rel="noopener noreferrer" target="_blank">Data formats</a></p>
+        </section>
+      </aside>
+    </div>
+    <div class="notice info" style="margin-top:16px"><div><b>Data source.</b> News metadata from the <a href="https://www.gdeltproject.org/" rel="noopener noreferrer" target="_blank">GDELT Project</a> (DOC 2.0 API and 15-minute export files), used under GDELT's open terms: free use with attribution, citing GDELT. Article text belongs to its publishers; this page shows titles and links only. Use it for events, places, organisations and media coverage, not for following private individuals.</div></div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const safeUrl = u => /^https?:\/\//i.test(u) ? u : '#';
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast' + (kind ? ' ' + kind : ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 5000); }
+    async function api(path, opts) {
+      const r = await fetch(path, opts), d = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(d.error || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+      return d;
+    }
+    const ago = t => { if (!t) return 'never'; const s = Math.max(0, Math.round(Date.now() / 1000 - t)); return s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago'; };
+    const fmtDate = iso => iso ? iso.replace('T', ' ').replace(/:\d\dZ$/, 'Z') : '';
+
+    function params() {
+      const p = new URLSearchParams({ q: $('q').value, timespan: $('timespan').value });
+      if ($('lang').value) p.set('lang', $('lang').value);
+      if ($('country').value.trim()) p.set('country', $('country').value.trim());
+      return p;
+    }
+
+    // Line chart as inline SVG: points are [iso, value].
+    function line(points, { zero = false, fmt = v => v.toFixed(3) } = {}) {
+      if (!points.length) return '<div class="muted small" style="padding:30px 0">GDELT has no data for this query and timespan.</div>';
+      const W = 400, H = 120, L = 6, R = 6, T = 8, B = 18;
+      const vs = points.map(p => p[1]); let lo = Math.min(...vs), hi = Math.max(...vs);
+      if (zero) lo = Math.min(lo, 0); if (hi === lo) { hi += 1; lo -= zero ? 0 : 1; }
+      const x = i => L + (W - L - R) * (points.length === 1 ? .5 : i / (points.length - 1)), y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+      const d = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join('');
+      const zeroLine = lo < 0 && hi > 0 ? `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--edge-strong)" stroke-dasharray="3 3"/>` : '';
+      return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Chart from ${esc(points[0][0])} to ${esc(points[points.length - 1][0])}, range ${fmt(lo)} to ${fmt(hi)}">
+        <line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--edge)"/>${zeroLine}
+        <path d="${d}L${x(points.length - 1)} ${H - B}L${x(0)} ${H - B}Z" fill="var(--accent-soft)" stroke="none"/>
+        <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+        <div class="meta"><span>${esc(fmtDate(points[0][0]))}</span><span>min ${fmt(lo)} · max ${fmt(hi)}</span><span>${esc(fmtDate(points[points.length - 1][0]))}</span></div>`;
+    }
+
+    let runId = 0;
+    async function search(e) {
+      e && e.preventDefault();
+      const id = ++runId, out = $('out');
+      if ($('q').value.trim().length < 3) { toast('Enter at least 3 characters.', 'warn'); return; }
+      const arts = params(); arts.set('sort', $('sort').value); arts.set('max', '100');
+      $('go').setAttribute('aria-busy', 'true'); $('go').disabled = true;
+      out.innerHTML = `<section class="card"><div class="loading"><span class="spin" aria-hidden="true"></span>Searching GDELT…</div></section>`;
+      try {
+        const d = await api('api/articles?' + arts);
+        if (id !== runId) return;
+        let html = '';
+        if (!d.count) html = `<div class="state"><div class="h3">No articles found</div><p>Nothing matched <code>${esc(d.query)}</code> in the last ${esc(d.timespan)}. Try a longer timespan or fewer words.</p></div>`;
+        else {
+          const bars = list => { const m = Math.max(...list.map(x => x.count)); return `<div class="bars">${list.map(x => `<div class="bar"><div class="t" style="--w:${Math.round(x.count / m * 100)}%" title="${esc(x.name)}">${esc(x.name)}</div><div class="n">${x.count}</div></div>`).join('')}</div>`; };
+          html = `<div class="charts" id="charts"><section class="card chart" id="chVol"><div class="card-head"><h3 class="h3">Coverage volume</h3><span class="badge">share of all coverage</span></div><div class="loading"><span class="spin" aria-hidden="true"></span>Waiting for GDELT's queue…</div></section>
+            <section class="card chart" id="chTone"><div class="card-head"><h3 class="h3">Average tone</h3><span class="badge">negative &lt; 0 &lt; positive</span></div><div class="muted small">Loads after the volume chart.</div></section></div>
+            <div class="grid cols-auto" style="margin-top:var(--gap)">
+              <section class="card"><h3 class="h3" style="margin-bottom:8px">Top sources</h3>${bars(d.top_domains)}</section>
+              <section class="card"><h3 class="h3" style="margin-bottom:8px">Source countries</h3>${bars(d.top_countries)}<h3 class="h3" style="margin:14px 0 8px">Languages</h3>${bars(d.top_languages)}</section></div>
+            <section class="card" style="margin-top:var(--gap)"><div class="card-head"><h3 class="h3">Articles</h3><span class="badge">${d.count} shown${d.cached ? ' · cached' : ''}</span></div>
+            ${d.articles.map(a => `<div class="art"><a class="title" href="${esc(safeUrl(a.url))}" target="_blank" rel="noopener noreferrer">${esc(a.title || a.url)}</a><div class="sub"><span>${esc(a.domain)}</span>${a.language ? `<span>${esc(a.language)}</span>` : ''}${a.country ? `<span>${esc(a.country)}</span>` : ''}<span>${esc(fmtDate(a.seen))}</span></div></div>`).join('')}</section>`;
+        }
+        out.innerHTML = html;
+        if (d.count) { timelines(id); }
+      } catch (err) {
+        if (id !== runId) return;
+        out.innerHTML = `<div class="state error" role="alert"><div class="h3">Search failed</div><p>${esc(err.message)}</p>${err.status === 429 ? '<button class="btn" id="retry" type="button">Try again</button>' : ''}</div>`;
+        const r = $('retry'); if (r) r.onclick = () => search();
+      } finally { $('go').removeAttribute('aria-busy'); $('go').disabled = false; }
+    }
+    async function timelines(id) {
+      for (const [mode, el, opts] of [['vol', 'chVol', { zero: true, fmt: v => v.toFixed(4) + '%' }], ['tone', 'chTone', { fmt: v => v.toFixed(2) }]]) {
+        const box = $(el); if (!box || id !== runId) return;
+        box.querySelector('.loading,.muted')?.remove();
+        box.insertAdjacentHTML('beforeend', `<div class="loading" id="${el}L"><span class="spin" aria-hidden="true"></span>Loading…</div>`);
+        const p = params(); p.set('mode', mode);
+        try {
+          const t = await api('api/timeline?' + p); if (id !== runId) return;
+          $(el + 'L')?.remove(); box.insertAdjacentHTML('beforeend', line(t.points, opts));
+        } catch (err) { $(el + 'L')?.remove(); box.insertAdjacentHTML('beforeend', `<div class="muted small err">${esc(err.message)}</div>`); }
+      }
+    }
+
+    // Saved stories ------------------------------------------------------------------------------------------
+    function spark(vals) {
+      if (!vals || vals.length < 2) return '';
+      const W = 200, H = 34, hi = Math.max(...vals), lo = Math.min(...vals), r = (hi - lo) || 1;
+      const d = vals.map((v, i) => (i ? 'L' : 'M') + (i / (vals.length - 1) * W).toFixed(1) + ' ' + (H - 3 - (v - lo) / r * (H - 6)).toFixed(1)).join('');
+      return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+    }
+    let storyData = [];
+    async function loadStories() {
+      const box = $('stories');
+      try {
+        const d = await api('api/stories'); storyData = d.stories;
+        $('storyCount').textContent = d.stories.length + ' / 10';
+        box.innerHTML = d.stories.length ? d.stories.map(s => {
+          const sp = s.spike, badge = s.error && !sp ? '<span class="badge warn">Check failed</span>' : !s.checked ? '<span class="badge">Not checked yet</span>' : sp?.spike ? '<span class="badge err">Spike</span>' : sp ? '<span class="badge ok">Normal</span>' : '<span class="badge">Not enough data</span>';
+          const detail = sp ? `Last hour ${sp.ratio ? sp.ratio.toFixed(1) + '× the 3-day average' : 'new coverage'} (z ${sp.z.toFixed(1)}).` : '';
+          return `<div class="story" data-id="${s.id}"><div class="row spread"><span class="name">${esc(s.name)}</span>${badge}</div><div class="q">${esc(s.q)}${s.lang ? ' · ' + esc(s.lang) : ''}${s.country ? ' · ' + esc(s.country) : ''}</div>${spark(s.spark)}
+            <div class="tiny faint">Checked ${esc(ago(s.checked))}. ${esc(detail)} ${s.error ? `<span class="err">${esc(s.error)}</span>` : ''}</div>
+            <div class="acts"><button class="btn sm" data-act="run">Search</button><button class="btn sm" data-act="check">Check now</button><button class="btn sm danger" data-act="del">Delete</button></div></div>`;
+        }).join('') : '<div class="state"><div class="h3">No saved stories</div><p>Run a search, then choose Save as story to be told when its coverage jumps.</p></div>';
+      } catch (err) {
+        $('storyCount').textContent = '';
+        box.innerHTML = err.status === 401 ? '<div class="notice warn">Sign in through the hub to use saved stories.</div>' : `<div class="state error"><div class="h3">Could not load stories</div><p>${esc(err.message)}</p></div>`;
+      }
+    }
+    $('stories').onclick = async e => {
+      const b = e.target.closest('button[data-act]'); if (!b) return;
+      const id = b.closest('.story').dataset.id, s = storyData.find(x => String(x.id) === id);
+      if (b.dataset.act === 'run') { $('q').value = s.q; $('lang').value = s.lang; $('country').value = s.country; search(); return; }
+      b.disabled = true;
+      try {
+        if (b.dataset.act === 'del') { if (!confirm(`Delete the story “${s.name}”?`)) { b.disabled = false; return; } await api('api/stories/' + id, { method: 'DELETE' }); toast('Story deleted.'); }
+        else { b.textContent = 'Checking…'; await api(`api/stories/${id}/check`, { method: 'POST' }); }
+      } catch (err) { toast(err.message, 'err'); }
+      loadStories();
+    };
+    $('save').onclick = async () => {
+      const q = $('q').value.trim(); if (q.length < 3) { toast('Type a query first.', 'warn'); return; }
+      try {
+        const s = await api('api/stories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ q, lang: $('lang').value, country: $('country').value.trim() }) });
+        toast('Saved. Checking it now…'); await loadStories();
+        api(`api/stories/${s.id}/check`, { method: 'POST' }).then(loadStories, () => {});
+      } catch (err) { toast(err.message, 'err'); }
+    };
+
+    // Latest files -------------------------------------------------------------------------------------------
+    async function loadFiles() {
+      const box = $('files');
+      try {
+        const d = await api('api/latest');
+        const names = { events: 'Events', mentions: 'Mentions', gkg: 'GKG' };
+        box.innerHTML = `<div class="table-wrap"><table class="data files"><thead><tr><th>Table</th><th class="num">Size</th></tr></thead><tbody>${d.files.map(f => `<tr><td><a href="${esc(safeUrl(f.url))}" rel="noopener noreferrer">${esc(names[f.kind] || f.kind)}</a><div class="tiny faint">${esc(fmtDate(f.time))}</div></td><td class="num">${f.bytes != null ? (f.bytes / 1024 > 1024 ? (f.bytes / 1048576).toFixed(1) + ' MB' : Math.round(f.bytes / 1024) + ' KB') : ''}</td></tr>`).join('')}</tbody></table></div>`;
+      } catch (err) { box.innerHTML = `<div class="state error"><div class="h3">Could not load the file list</div><p>${esc(err.message)}</p></div>`; }
+    }
+    $('reloadFiles').onclick = loadFiles;
+    $('f').onsubmit = search;
+    api('api/info').then(i => { $('qstat').textContent = 'One GDELT request per ' + i.spacing_secs + ' s'; }).catch(() => {});
+    loadStories(); loadFiles();
+  </script>
+</body>
+</html>

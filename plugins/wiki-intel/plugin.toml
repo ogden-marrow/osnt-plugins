@@ -1,0 +1,13 @@
+id = "wiki-intel"
+name = "Wikipedia event watch"
+description = "Wikipedia On this day and current events, page-view spike detection and live change notices for watched topics, and Wikidata facts for organisations, places and events."
+grid = "Events & News"
+port = 8151
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_WIKI_BIND = "127.0.0.1:{port}"
+OSNT_WIKI_DB = "{state_dir}/wiki.redb"

@@ -1,0 +1,30 @@
+id = "conflict-events"
+name = "Conflict events"
+description = "Georeferenced armed-conflict events from UCDP (free token) and optionally ACLED, on a map with timeline and event-type breakdown."
+grid = "Events & News"
+port = 8152
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_CONFLICT_BIND = "127.0.0.1:{port}"
+
+[[secret]]
+name = "UCDP_ACCESS_TOKEN"
+label = "UCDP API access token"
+help_url = "https://ucdp.uu.se/apidocs/"
+required = true
+
+[[secret]]
+name = "ACLED_API_KEY"
+label = "ACLED API key (optional)"
+help_url = "https://acleddata.com/register/"
+required = false
+
+[[secret]]
+name = "ACLED_EMAIL"
+label = "ACLED account email (optional)"
+help_url = "https://acleddata.com/register/"
+required = false

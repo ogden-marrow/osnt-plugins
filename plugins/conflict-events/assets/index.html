@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Conflict events · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    .bar2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 10px var(--gutter); background: var(--surface); border-bottom: 1px solid var(--edge); }
+    .bar2 .field { flex: 0 1 auto; } .bar2 .field .label { margin-bottom: 2px; font-size: var(--fs-xs); }
+    .bar2 input[type=date] { width: 150px; } .bar2 input#country { width: 170px; } .bar2 select { max-width: 180px; }
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 340px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px; font-size: 13px; }
+    aside h2 { margin: 18px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    aside h2:first-child { margin-top: 0; }
+    .big { font-size: 22px; font-weight: 650; line-height: 1.1; } .stats { display: flex; gap: 20px; flex-wrap: wrap; }
+    .stats .tiny { color: var(--ink-3); }
+    .tbar { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 5px 0; }
+    .tbar i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .tbar .t { position: relative; padding: 2px 6px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: linear-gradient(90deg, var(--surface-3) var(--w), transparent var(--w)); }
+    .months { display: flex; align-items: end; gap: 2px; height: 70px; }
+    .months button { flex: 1 1 0; min-width: 3px; border: 0; padding: 0; background: var(--accent); opacity: .7; border-radius: 2px 2px 0 0; cursor: pointer; }
+    .months button:hover, .months button.cur { opacity: 1; }
+    .ev { padding: 8px 10px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); line-height: 1.4; cursor: pointer; }
+    .ev:hover { border-color: var(--edge-strong); } .ev.sel { border-color: var(--accent); }
+    .ev small { display: block; color: var(--ink-2); font-size: 12px; }
+    #slideRow { position: absolute; left: 10px; right: 350px; bottom: 56px; z-index: 1000; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--edge); border-radius: var(--radius-sm); padding: 6px 10px; display: flex; gap: 10px; align-items: center; font-size: 12px; }
+    #slideRow input[type=range] { flex: 1; min-width: 0; }
+    #slideRow select { min-height: 28px; padding: 2px 6px; font-size: 12px; }
+    .dotc { border-radius: 50%; border: 2px solid rgba(255,255,255,.85); color: #fff; font: 600 11px/1 var(--font); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+    #panelBtn { display: none; }
+    #msg { position: absolute; z-index: 1100; left: 50%; top: 14px; transform: translateX(-50%); max-width: min(560px, calc(100% - 24px)); }
+    @media (max-width: 760px) {
+      #panelBtn { display: inline-flex; } #status { display: none; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 58dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); padding-bottom: 24px; }
+      aside#panel.open { display: block; }
+      .bar2 input[type=date], .bar2 input#country, .bar2 select { width: 100%; max-width: none; } .bar2 .field { flex: 1 1 140px; }
+      #slideRow { bottom: 40px; right: 10px; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Conflict events</h1>
+    <div class="bar-end"><span id="status" class="status" role="status"></span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Panel</button></div>
+  </header>
+  <form class="bar2" id="f">
+    <label class="field"><span class="label">Source</span><select id="source"><option value="ucdp">UCDP GED</option><option value="acled">ACLED (optional)</option></select></label>
+    <label class="field"><span class="label">From</span><input type="date" id="start" required></label>
+    <label class="field"><span class="label">To</span><input type="date" id="end" required></label>
+    <label class="field"><span class="label">Country</span><input id="country" placeholder="e.g. Sudan, Ukraine" maxlength="80" autocomplete="off"></label>
+    <label class="field"><span class="label">Type</span><select id="type"></select></label>
+    <label class="field" id="verBox"><span class="label">UCDP version</span><select id="version"><option value="">default</option><option>25.1</option><option>24.1</option><option>23.1</option></select></label>
+    <button class="btn primary" id="go">Load events</button>
+  </form>
+  <div id="layout" class="fill map-box">
+    <div id="map" role="application" aria-label="Map of conflict events"></div>
+    <div id="msg"></div>
+    <div id="slideRow" hidden><label for="slide" class="sr-only">Show events up to this date</label><span id="slideL" style="min-width:150px">All dates</span><input type="range" id="slide" min="0" max="0" value="0"><select id="win" aria-label="Window"><option value="0">up to date</option><option value="7">last 7 days</option><option value="30">last 30 days</option><option value="90">last 90 days</option></select></div>
+    <div class="readout" id="readout"></div>
+    <aside id="panel" aria-label="Summary and events">
+      <h2>Summary</h2><div id="sum" class="muted">Load a period to see events.</div>
+      <h2>Event types</h2><div id="types"></div>
+      <h2>Events per month <span class="faint">(click to jump)</span></h2><div id="months" class="months" role="group" aria-label="Events per month"></div>
+      <h2>Events here</h2><div id="list" class="muted small">Click a marker.</div>
+      <h2>Detail</h2><div id="detail" class="muted small">Select an event.</div>
+      <h2>Source</h2><div id="attr" class="small muted">Data: <a href="https://ucdp.uu.se/" rel="noopener noreferrer" target="_blank">UCDP</a> (Uppsala Conflict Data Program) and <a href="https://acleddata.com/" rel="noopener noreferrer" target="_blank">ACLED</a>. Both require attribution and do not allow bulk redistribution, so only this page's current view is held, briefly. Counts are estimates; read the codebook before drawing conclusions. <a id="codebook" href="https://ucdp.uu.se/downloads/" rel="noopener noreferrer" target="_blank">Codebook</a></div>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast' + (kind ? ' ' + kind : ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 5000); }
+    const PAL = ['#e4572e', '#f2a541', '#8e6bbf', '#2e86c1', '#2fb19a', '#c0527a', '#7a8b99', '#b5a32c'];
+    const typeColour = {}; const colourOf = k => typeColour[k] ??= PAL[Object.keys(typeColour).length % PAL.length];
+    const TYPES = { ucdp: [['', 'All types'], ['1', 'State-based conflict'], ['2', 'Non-state conflict'], ['3', 'One-sided violence']], acled: [['', 'All types'], ['battles', 'Battles'], ['violence against civilians', 'Violence against civilians'], ['explosions', 'Explosions/remote violence'], ['riots', 'Riots'], ['protests', 'Protests'], ['strategic', 'Strategic developments']] };
+    function setTypes() { $('type').innerHTML = TYPES[$('source').value].map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join(''); $('verBox').hidden = $('source').value !== 'ucdp'; }
+    $('source').onchange = setTypes; setTypes();
+
+    let map, layer, data = [], shown = [], days = [], sel = null;
+    const iso = d => d.toISOString().slice(0, 10);
+    const dayNum = s => Math.floor(Date.parse(s + 'T00:00:00Z') / 864e5);
+    const dateOf = n => iso(new Date(n * 864e5));
+
+    async function load(e) {
+      e && e.preventDefault();
+      $('go').disabled = true; $('go').textContent = 'Loading…'; $('msg').innerHTML = '';
+      const p = new URLSearchParams({ source: $('source').value });
+      for (const k of ['start', 'end', 'country', 'type', 'version']) if ($(k).value) p.set(k, $(k).value.trim());
+      try {
+        const r = await fetch('api/events?' + p), d = await r.json().catch(() => ({}));
+        if (!r.ok) { const err = new Error(d.error || 'HTTP ' + r.status); err.setup = d.setup; throw err; }
+        data = d.events.filter(x => x.lat != null && x.lon != null);
+        $('start').value = d.start; $('end').value = d.end; if (!$('version').value && d.source === 'ucdp') $('version').value = '';
+        $('codebook').href = d.codebook; $('attr').firstChild && ($('attr').dataset.a = d.attribution);
+        $('status').textContent = `${d.total.toLocaleString()} events${d.cached ? ' (cached)' : ''}`;
+        const warn = [];
+        if (d.upstream_truncated) warn.push('The period is large: only the first part was fetched. Narrow the dates for a complete view.');
+        if (d.total > d.returned) warn.push(`Showing the first ${d.returned.toLocaleString()} of ${d.total.toLocaleString()} events.`);
+        if (data.length < d.returned) warn.push(`${d.returned - data.length} events have no coordinates and are not on the map.`);
+        if (warn.length) $('msg').innerHTML = `<div class="notice warn">${warn.map(esc).join(' ')}</div>`;
+        summary(d);
+        const ds = data.map(x => dayNum(x.date)).filter(Number.isFinite);
+        days = ds.length ? [Math.min(...ds), Math.max(...ds)] : [];
+        $('slideRow').hidden = !days.length; $('slide').min = days[0] ?? 0; $('slide').max = days[1] ?? 0; $('slide').value = days[1] ?? 0;
+        if (!d.total) $('msg').innerHTML = `<div class="notice">No events matched. ${d.source === 'ucdp' ? 'UCDP is released once a year, so the latest months of the current year are not in the dataset yet. Try an earlier period or another version.' : ''}</div>`;
+        draw(true);
+      } catch (err) {
+        data = []; draw(); summary(null);
+        $('msg').innerHTML = `<div class="notice ${err.setup ? 'warn' : 'err'}" role="alert"><div>${esc(err.message)}${err.setup === 'UCDP_ACCESS_TOKEN' ? ' <a href="https://ucdp.uu.se/apidocs/" rel="noopener noreferrer" target="_blank">Request a UCDP token</a>.' : ''}</div></div>`;
+        $('status').textContent = '';
+      } finally { $('go').disabled = false; $('go').textContent = 'Load events'; }
+    }
+
+    function summary(d) {
+      if (!d) { $('sum').textContent = 'No data.'; $('types').innerHTML = $('months').innerHTML = ''; return; }
+      const s = d.summary;
+      $('sum').innerHTML = `<div class="stats"><div><div class="big">${s.events.toLocaleString()}</div><div class="tiny">events</div></div><div><div class="big">${s.deaths.toLocaleString()}</div><div class="tiny">reported deaths (best estimate)</div></div></div>
+        <div class="tiny faint" style="margin-top:6px">${esc(d.source.toUpperCase())}${d.source === 'ucdp' ? ' GED ' + esc(d.version) : ''} · ${esc(d.start)} to ${esc(d.end)}</div>`;
+      $('attr').innerHTML = esc(d.attribution) + ` <a href="${esc(d.codebook)}" rel="noopener noreferrer" target="_blank">Codebook</a>`;
+      const m = Math.max(1, ...s.by_type.map(t => t.events));
+      $('types').innerHTML = s.by_type.map(t => `<div class="tbar"><i style="background:${colourOf(t.name)}"></i><div class="t" style="--w:${Math.round(t.events / m * 100)}%" title="${esc(t.name)}">${esc(t.name)}</div><span>${t.events.toLocaleString()}</span></div>`).join('') || '<div class="muted">none</div>';
+      const mm = Math.max(1, ...s.by_month.map(t => t.events));
+      $('months').innerHTML = s.by_month.map(t => `<button data-m="${esc(t.name)}" style="height:${Math.max(4, Math.round(t.events / mm * 100))}%" title="${esc(t.name)}: ${t.events} events, ${t.deaths} deaths" aria-label="${esc(t.name)}: ${t.events} events"></button>`).join('');
+    }
+
+    function filtered() {
+      if (!days.length) return data;
+      const hi = +$('slide').value, w = +$('win').value, lo = w ? hi - w : -Infinity;
+      return data.filter(x => { const n = dayNum(x.date); return n <= hi && n >= lo; });
+    }
+    function draw(fit) {
+      if (!map) return;
+      shown = filtered();
+      $('slideL').textContent = days.length ? ($('win').value === '0' ? 'Up to ' : 'To ') + dateOf(+$('slide').value) : 'All dates';
+      layer.clearLayers();
+      const cell = 44, buckets = new Map();
+      for (const e of shown) {
+        const p = map.latLngToContainerPoint([e.lat, e.lon]), k = Math.floor(p.x / cell) + ':' + Math.floor(p.y / cell);
+        const b = buckets.get(k) || { items: [], lat: 0, lon: 0 }; b.items.push(e); b.lat += e.lat; b.lon += e.lon; buckets.set(k, b);
+      }
+      for (const b of buckets.values()) {
+        const n = b.items.length, counts = {}; b.items.forEach(e => counts[e.kind] = (counts[e.kind] || 0) + 1);
+        const top = Object.entries(counts).sort((a, c) => c[1] - a[1])[0][0], size = Math.round(16 + Math.min(26, Math.sqrt(n) * 4));
+        const m = L.marker([b.lat / n, b.lon / n], { icon: L.divIcon({ className: '', iconSize: [size, size], html: `<div class="dotc" style="width:${size}px;height:${size}px;background:${colourOf(top)}cc">${n > 1 ? n : ''}</div>` }), keyboard: true, title: `${n} event${n > 1 ? 's' : ''}` });
+        m.on('click', () => { list(b.items); if (n > 1 && map.getZoom() < 9 && b.items.some(e => e.lat !== b.items[0].lat || e.lon !== b.items[0].lon)) map.fitBounds(L.latLngBounds(b.items.map(e => [e.lat, e.lon])).pad(.3), { maxZoom: 9 }); });
+        m.addTo(layer);
+      }
+      if (fit && data.length) map.fitBounds(L.latLngBounds(data.map(e => [e.lat, e.lon])).pad(.1), { maxZoom: 7 });
+    }
+    function list(items) {
+      const s = items.slice().sort((a, b) => b.date.localeCompare(a.date));
+      $('list').innerHTML = s.slice(0, 40).map((e, i) => `<div class="ev" tabindex="0" data-i="${i}"><b>${esc(e.date)}</b> · ${esc(e.location || e.admin1 || e.country)}<small>${esc(e.kind)}${e.deaths != null ? ' · ' + e.deaths + ' dead' : ''}</small></div>`).join('') + (s.length > 40 ? `<div class="faint tiny">and ${s.length - 40} more; zoom in.</div>` : '');
+      $('list')._items = s; if (matchMedia('(max-width: 760px)').matches) $('panel').classList.add('open');
+      if (s.length === 1) detail(s[0]);
+    }
+    function detail(e) {
+      const row = (k, v) => v ? `<tr><th>${k}</th><td>${esc(v)}</td></tr>` : '';
+      $('detail').innerHTML = `<table class="kv">${row('Date', e.end_date && e.end_date !== e.date ? e.date + ' to ' + e.end_date : e.date)}${row('Place', [e.location, e.admin1, e.country].filter(Boolean).join(', '))}${row('Region', e.region)}${row('Type', e.kind)}${row('Conflict / sub-type', e.subtype)}${row('Actors', e.actors.join(' vs '))}
+        ${e.deaths != null ? row('Deaths', e.deaths + (e.deaths_low != null ? ` (low ${e.deaths_low}, high ${e.deaths_high})` : '') + (e.civilians != null ? `, civilians ${e.civilians}` : '')) : ''}${row('Reported by', e.headline)}${row('Sources', e.sources)}${row('Event id', e.source.toUpperCase() + ' ' + e.id)}</table>`;
+    }
+    $('list').onclick = $('list').onkeydown = ev => { if (ev.type === 'keydown' && ev.key !== 'Enter') return; const el = ev.target.closest('.ev'); if (!el) return; $('list').querySelectorAll('.ev').forEach(x => x.classList.remove('sel')); el.classList.add('sel'); detail($('list')._items[+el.dataset.i]); };
+    $('months').onclick = ev => { const b = ev.target.closest('[data-m]'); if (!b || !days.length) return; const [y, m] = b.dataset.m.split('-').map(Number); const last = Date.UTC(y, m, 0) / 864e5; $('slide').value = Math.min(days[1], Math.max(days[0], last)); $('win').value = '30'; draw(); };
+    $('slide').oninput = $('win').onchange = () => draw();
+    $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', o); };
+
+    (async () => {
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      layer = L.layerGroup().addTo(map); map.on('zoomend', () => draw());
+      try {
+        const st = await (await fetch('api/status')).json();
+        if (!st.ucdp.configured) $('msg').innerHTML = `<div class="notice warn"><div><b>UCDP access token needed.</b> UCDP's API is free but requires a token. <a href="${esc(st.ucdp.token_help)}" rel="noopener noreferrer" target="_blank">Request one</a>, then store it as <code>UCDP_ACCESS_TOKEN</code> on the Credentials page.</div></div>`;
+        if (st.acled.configured) $('source').querySelector('option[value=acled]').textContent = 'ACLED';
+      } catch { /* status is informational */ }
+      // First load: the last quarter of the dataset's final year (UCDP lags real time).
+      const y = new Date().getUTCFullYear() - 2; $('start').value = `${y}-10-01`; $('end').value = `${y}-12-31`;
+      load();
+    })();
+    $('f').onsubmit = load;
+  </script>
+</body>
+</html>
