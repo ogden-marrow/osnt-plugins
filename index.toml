@@ -60,7 +60,7 @@ path = "plugins/credentials"
 id = "provenance"
 name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback."
-version = "0.2.0"
+version = "0.3.0"
 path = "plugins/provenance"
 
 [[plugin]]

@@ -20,6 +20,8 @@ pub const CRED_HINT: &str = "add the credential on the portal's Credentials page
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// Which wire format the provider speaks: OpenAI-compatible (default), Anthropic or Gemini native.
+    pub llm_style: crate::llm::Style,
     /// Base URL of any OpenAI-compatible chat-completions API (it serves `<base>/chat/completions`). Empty = not configured.
     pub llm_base: String,
     pub model: String,
@@ -32,6 +34,7 @@ impl Config {
     pub fn from_env() -> Self {
         let e = |k: &str, d: &str| std::env::var(k).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| d.to_string());
         Self {
+            llm_style: crate::llm::Style::parse(&e("OSNT_LLM_STYLE", "")),
             llm_base: e("OSNT_LLM_BASE", ""),
             model: e("OSNT_LLM_MODEL", ""),
             vision_base: e("OSNT_VISION_BASE", "https://vision.googleapis.com"),
@@ -47,6 +50,7 @@ pub struct Keys {
     pub llm: Option<String>,
     pub llm_base: Option<String>,
     pub llm_model: Option<String>,
+    pub llm_style: Option<String>,
     pub google: Option<String>,
     pub serpapi: Option<String>,
 }
@@ -57,6 +61,7 @@ impl Keys {
         Self {
             llm: osnt_common::secret("LLM_API_KEY"),
             llm_base: osnt_common::secret("LLM_BASE_URL").map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
+            llm_style: osnt_common::secret("LLM_API_STYLE"),
             llm_model: osnt_common::secret("LLM_MODEL").map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
             google: osnt_common::secret("GOOGLE_VISION_API_KEY"),
             serpapi: osnt_common::secret("SERPAPI_API_KEY"),
@@ -65,6 +70,9 @@ impl Keys {
     /// The configuration with the stored provider settings applied (they win over the environment defaults).
     pub fn apply_to(&self, cfg: &Config) -> Config {
         let mut c = cfg.clone();
+        if let Some(st) = &self.llm_style {
+            c.llm_style = crate::llm::Style::parse(st);
+        }
         if let Some(b) = &self.llm_base {
             c.llm_base = b.clone();
         }
@@ -497,7 +505,7 @@ mod tests {
 
     #[test]
     fn stored_provider_settings_override_defaults() {
-        let cfg = Config { llm_base: "http://default".into(), model: "m0".into(), vision_base: String::new(), serpapi_base: String::new(), wayback_base: String::new() };
+        let cfg = Config { llm_style: crate::llm::Style::OpenAi, llm_base: "http://default".into(), model: "m0".into(), vision_base: String::new(), serpapi_base: String::new(), wayback_base: String::new() };
         let c = Keys { llm_base: Some("https://api.openai.com/v1".into()), llm_model: Some("gpt-x".into()), ..Default::default() }.apply_to(&cfg);
         assert_eq!((c.llm_base.as_str(), c.model.as_str()), ("https://api.openai.com/v1", "gpt-x"));
         let c = Keys::default().apply_to(&cfg);

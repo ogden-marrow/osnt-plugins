@@ -3,6 +3,7 @@
 //! The LLM (any OpenAI-compatible provider) is text-only: it plans tool calls and writes the report, it never sees the image.
 
 mod agent;
+mod llm;
 mod analysis;
 mod html;
 mod ssrf;

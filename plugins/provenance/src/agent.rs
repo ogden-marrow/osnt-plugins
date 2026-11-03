@@ -1,7 +1,7 @@
 //! The investigation: local analysis, then (with an LLM configured) a tool-calling loop over the evidence tools,
 //! otherwise the raw backends only. The LLM can be any OpenAI-compatible chat-completions provider (OpenAI, OpenRouter,
 //! DeepSeek, Groq, Together, Mistral, Anthropic's and Google's compatibility endpoints, or a local Ollama / LM Studio).
-//! It is used as text only: it never sees the image, it plans the tool calls, reads the evidence and writes the report.
+//! Anthropic and Gemini are spoken natively (see llm.rs). It is used as text only: it never sees the image, it plans the tool calls, reads the evidence and writes the report.
 
 use std::{
     cell::RefCell,
@@ -9,6 +9,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
+use crate::llm;
 use ureq::Agent;
 
 use crate::{
@@ -133,24 +134,12 @@ fn chat(ctx: &Ctx, key: &str, messages: &[Value], tools: Option<&[Value]>, json_
     if remaining < Duration::from_secs(3) {
         return Err("time budget exhausted".into());
     }
-    let mut body = json!({ "model": ctx.cfg.model, "messages": messages, "temperature": 0.2, "max_tokens": 2500 });
-    if let Some(t) = tools {
-        body["tools"] = json!(t);
-        body["tool_choice"] = json!("auto");
+    let req = llm::build(ctx.cfg.llm_style, &ctx.cfg.llm_base, &ctx.cfg.model, key, messages, tools, json_mode);
+    let mut post = ctx.api.post(&req.url);
+    for (name, value) in &req.headers {
+        post = post.header(*name, value.as_str());
     }
-    if json_mode {
-        body["response_format"] = json!({ "type": "json_object" });
-    }
-    let url = format!("{}/chat/completions", ctx.cfg.llm_base.trim_end_matches('/'));
-    let mut req = ctx.api.post(&url);
-    if !key.is_empty() {
-        req = req.header("Authorization", format!("Bearer {key}"));
-    }
-    let res = req
-        .config()
-        .timeout_global(Some(remaining.min(Duration::from_secs(60))))
-        .build()
-        .send_json(&body);
+    let res = post.config().timeout_global(Some(remaining.min(Duration::from_secs(60)))).build().send_json(&req.body);
     let mut res = res.map_err(|e| {
         let m = match &e {
             ureq::Error::StatusCode(401) => "the LLM provider rejected the API key (HTTP 401)".to_string(),
@@ -162,11 +151,7 @@ fn chat(ctx: &Ctx, key: &str, messages: &[Value], tools: Option<&[Value]>, json_
         ctx.keys.redact(&m)
     })?;
     let v: Value = res.body_mut().read_json().map_err(|e| ctx.keys.redact(&format!("LLM response unreadable: {e}")))?;
-    let msg = v["choices"][0]["message"].clone();
-    if msg.is_null() {
-        return Err("the LLM returned no message".into());
-    }
-    Ok(msg)
+    llm::parse(ctx.cfg.llm_style, &v).ok_or_else(|| "the LLM returned no message".to_string())
 }
 
 fn push_trace(trace: &mut Vec<Value>, tool: &str, summary: String, started: Instant) {
@@ -466,6 +451,7 @@ mod tests {
     fn run(f: &Fake, keys: &Keys, url: bool, max_iters: usize) -> Value {
         let cfg = Config {
             // Without a key these tests model "no LLM configured"; the keyless local-server case is the stored base URL.
+            llm_style: crate::llm::Style::OpenAi,
             llm_base: if keys.llm.is_some() { format!("http://127.0.0.1:{}", f.port) } else { String::new() },
             model: "test-model".into(),
             vision_base: format!("http://127.0.0.1:{}", f.port),
@@ -621,7 +607,7 @@ mod tests {
         });
         let mut keys = keys_all();
         keys.google = Some("g-SECRET-vision".into());
-        let cfg_bad_vision = |f: &Fake| Config { vision_base: format!("http://127.0.0.1:{}/nope", f.port), llm_base: format!("http://127.0.0.1:{}", f.port), model: "m".into(), serpapi_base: String::new(), wayback_base: String::new() };
+        let cfg_bad_vision = |f: &Fake| Config { llm_style: crate::llm::Style::OpenAi, vision_base: format!("http://127.0.0.1:{}/nope", f.port), llm_base: format!("http://127.0.0.1:{}", f.port), model: "m".into(), serpapi_base: String::new(), wayback_base: String::new() };
         let guard = Guard { exempt_loopback_port: Some(f.port) };
         let (api, fetch) = (osnt_common::http_agent("t"), guarded_agent(guard.clone(), "t"));
         let out = investigate(&cfg_bad_vision(&f), &keys, &guard, Agents { api: &api, fetch: &fetch }, Input { bytes: tiny_jpeg_with_exif(), url: None }, 8);

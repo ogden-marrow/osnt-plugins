@@ -3,7 +3,7 @@ name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback, with honest confidence and caveats."
 grid = "Media & Verification"
 port = 8106
-version = "0.2.0"
+version = "0.3.0"
 
 [service]
 state_dir = false
@@ -11,11 +11,13 @@ state_dir = false
 [service.env]
 OSNT_PROVENANCE_BIND = "127.0.0.1:{port}"
 
-# The reasoning loop works with any OpenAI-compatible chat-completions API. Set all three (the key is optional for local servers):
+# The reasoning loop works with any OpenAI-compatible chat-completions API, and with Anthropic and Gemini natively.
+# Set LLM_BASE_URL and LLM_MODEL (and LLM_API_KEY; local servers need none). LLM_API_STYLE is "openai" (default), "anthropic" or "gemini":
 #   DeepSeek:   https://api.deepseek.com                      deepseek-chat
 #   OpenAI:     https://api.openai.com/v1                     gpt-4o-mini
 #   OpenRouter: https://openrouter.ai/api/v1                  <any model id>
-#   Anthropic:  https://api.anthropic.com/v1                  claude-sonnet-4-5
+#   Anthropic:  https://api.anthropic.com/v1                  claude-sonnet-4-5   (style: anthropic)
+#   Gemini:     https://generativelanguage.googleapis.com/v1beta  gemini-2.5-flash   (style: gemini)
 #   Ollama:     http://127.0.0.1:11434/v1                     <your model>   (no key)
 [[secret]]
 name = "LLM_BASE_URL"
@@ -26,6 +28,11 @@ required = true
 name = "LLM_MODEL"
 label = "LLM model name"
 required = true
+
+[[secret]]
+name = "LLM_API_STYLE"
+label = "LLM API style: openai (default), anthropic or gemini"
+required = false
 
 [[secret]]
 name = "LLM_API_KEY"
