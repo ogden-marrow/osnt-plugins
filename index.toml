@@ -62,3 +62,10 @@ name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback."
 version = "0.1.0"
 path = "plugins/provenance"
+
+[[plugin]]
+id = "packages"
+name = "Packages"
+description = "Package repositories, and which of their plugins are installed on this hub."
+version = "0.1.0"
+path = "plugins/packages"
