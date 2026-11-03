@@ -94,7 +94,15 @@ fn viterbi(sp: &Spectrogram, mask: &[Vec<bool>]) -> Vec<usize> {
     let nb = sp.contrast[0].len();
     // A pass can glide at most ~1500 Hz/s.
     let jmax = ((1500.0 * sp.hop_s / sp.bin_hz).ceil() as usize + 1).clamp(3, 24);
-    let reward = |t: usize, k: usize| if mask[t][k] { 0.0 } else { sp.contrast[t][k].clamp(0.0, 40.0) };
+    let base = |t: usize, k: usize| if mask[t][k] { 0.0 } else { sp.contrast[t][k].clamp(0.0, 40.0) };
+    // A source with harmonics has parallel lines at k and ~2k whose contrast both saturate in a clean recording, so the
+    // path could hop between them (giving a nonsense fit). Rewarding support at the second harmonic prefers the lowest
+    // line consistently; speed, distance and timing are the same on any harmonic, only f0 scales.
+    let k0 = sp.k0 as f64;
+    let reward = |t: usize, k: usize| {
+        let h = (2.0 * (k0 + k as f64) - k0).round() as usize; // bin of 2x the frequency of bin k
+        base(t, k) + if h < nb { 0.5 * base(t, h) } else { 0.0 }
+    };
     let mut score = vec![0.0f32; nb];
     let mut back = vec![vec![0u8; nb]; nf];
     for k in 0..nb {

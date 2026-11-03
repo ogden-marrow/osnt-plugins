@@ -152,7 +152,27 @@ fn update(st: &Shared, id: &str, f: impl FnOnce(&mut Job)) {
 fn last_error_line(s: &str) -> String {
     let lines: Vec<&str> = s.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     let pick = lines.iter().rev().find(|l| l.starts_with("ERROR")).or(lines.last()).copied().unwrap_or("no details");
-    clean_text(pick, 300)
+    let text = clean_text(pick, 300);
+    match friendly_hint(&text) {
+        Some(h) => format!("{text} ({h})"),
+        None => text,
+    }
+}
+
+/// Plain-language advice for the failures people actually hit with yt-dlp.
+fn friendly_hint(err: &str) -> Option<&'static str> {
+    let e = err.to_ascii_lowercase();
+    if e.contains("sign in to confirm") || e.contains("not a bot") {
+        Some("YouTube is asking this network for a sign-in check; updating yt-dlp or trying again later usually helps")
+    } else if e.contains("private video") || e.contains("members-only") || e.contains("sign in") && e.contains("age") {
+        Some("this video needs a signed-in account, which this plugin cannot use")
+    } else if e.contains("unavailable") {
+        Some("the video was removed, is private, or is blocked in this country")
+    } else if e.contains("http error 403") || e.contains("unable to extract") || e.contains("nsig") {
+        Some("yt-dlp is probably out of date: run sudo yt-dlp -U on the Pi")
+    } else {
+        None
+    }
 }
 
 async fn pipeline(st: &Shared, id: &str, video_id: &str, start: Option<u64>, end: Option<u64>) -> Result<(), String> {
@@ -524,4 +544,17 @@ async fn download(State(st): State<Shared>, m: Method, u: Uri, h: HeaderMap, Url
         hd.insert(header::CONTENT_DISPOSITION, v);
     }
     res
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+
+    #[test]
+    fn errors_get_plain_language_hints() {
+        assert!(last_error_line("ERROR: [youtube] x: Sign in to confirm you're not a bot").contains("updating yt-dlp"));
+        assert!(last_error_line("WARNING: x\nERROR: [youtube] x: Video unavailable").contains("removed, is private"));
+        assert!(last_error_line("ERROR: unable to extract uploader id").contains("yt-dlp -U"));
+        assert_eq!(last_error_line("something odd"), "something odd");
+    }
 }

@@ -3,7 +3,7 @@ name = "Image forensics"
 description = "EXIF, hashes and editing/GPS flags for an image, plus reverse-image-search links."
 grid = "Media & Verification"
 port = 8104
-version = "0.1.1"
+version = "0.1.2"
 
 [service]
 state_dir = false

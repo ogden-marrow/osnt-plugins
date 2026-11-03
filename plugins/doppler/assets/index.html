@@ -34,7 +34,7 @@
     <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Choose an audio clip to analyse"><strong>Drop an audio clip of one pass or click to choose</strong><span class="small">WAV, MP3, M4A/AAC, OGG, FLAC. Up to 40 MB and 180 s: trim to the pass with a few seconds either side.</span><input id="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac" hidden></div>
     <div class="card" style="margin-top:12px">
       <div class="fields">
-        <label class="field"><span class="label">Air temperature, &deg;C</span><input id="temp" type="number" value="15" step="1"></label>
+        <label class="field"><span class="label">Air temperature, &deg;C</span><input id="temp" type="number" value="15" step="1" min="-60" max="60"></label>
         <label class="field"><span class="label">Clip start (optional, UTC)</span><input id="start" placeholder="2026-11-02T14:03:00Z"></label>
         <label class="field"><span class="label">Min Hz</span><input id="fmin" type="number" value="60"></label>
         <label class="field"><span class="label">Max Hz</span><input id="fmax" type="number" value="5000"></label>
@@ -44,6 +44,18 @@
     <div id="msg" class="muted" style="margin-top:12px" aria-live="polite"></div>
     <div id="out" aria-live="polite"></div>
 
+    <section class="card" style="margin-top:12px">
+      <h2 class="h3">Test a claim</h2>
+      <p class="muted small" style="margin:2px 0 10px">No recording needed: enter a claimed pass and see what the Doppler physics predicts, for example a jet at 250 m/s passing 300 m away (900 km/h is 250 m/s).</p>
+      <form id="pf" class="fields">
+        <label class="field"><span class="label">Tone frequency f0, Hz</span><input id="pf0" type="number" value="800" min="20" max="20000" step="any" required></label>
+        <label class="field"><span class="label">Speed, m/s</span><input id="pv" type="number" value="200" min="1" max="450" step="any" required></label>
+        <label class="field"><span class="label">Closest distance, m</span><input id="pd" type="number" value="300" min="1" max="30000" step="any" required></label>
+        <button id="pgo" class="btn">Predict</button>
+      </form>
+      <div id="pout" aria-live="polite" style="margin-top:12px"></div>
+    </section>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
     <section id="stage2" class="card" style="margin-top:12px" hidden>
       <h2 class="h3">Optional: candidate aircraft from recorded ADS-B history</h2>
       <p class="muted small" style="margin:2px 0 10px">Needs the adsb-history plugin. Gives candidates to check, never matches. Doppler has no heading, speed is relative to the air, and you only supply an approximate area. The archive is 10-second resolution, so speed and track are derived from successive samples. The first request can take a minute while the archive downloads.</p>
@@ -69,10 +81,29 @@
     drop.ondragleave = () => drop.classList.remove('over');
     drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
     fin.onchange = () => pick(fin.files[0]);
-    function pick(f) { if (!f) return; file = f; drop.querySelector('strong').textContent = f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB). '; $('go').disabled = false; }
+    function pick(f) { if (!f) return; if (f.size > 40 * 1048576) { $('msg').innerHTML = '<span class="err" role="alert">That file is ' + (f.size / 1048576).toFixed(0) + ' MB; the limit is 40 MB. Trim it to the pass first.</span>'; return; } $('msg').textContent = ''; file = f; drop.querySelector('strong').textContent = f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB). '; $('go').disabled = false; }
 
     const pm = (o, unit, dp = 0) => o && o.value != null
       ? o.value.toFixed(dp) + (o.sigma != null ? ' &plusmn; ' + o.sigma.toFixed(dp) : '') + ' ' + unit : '-';
+
+    const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+    for (const id of ['temp', 'fmin', 'fmax']) { const v = store.get('doppler.' + id); if (v) $(id).value = v; $(id).addEventListener('change', () => store.set('doppler.' + id, $(id).value)); }
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 3000); }
+    $('pf').onsubmit = async e => {
+      e.preventDefault(); $('pgo').disabled = true;
+      const q = new URLSearchParams({ f0: $('pf0').value, speed_ms: $('pv').value, distance_m: $('pd').value, temp_c: $('temp').value || 15 });
+      try {
+        const r = await fetch('api/predict?' + q), j = await r.json();
+        if (!r.ok) { $('pout').innerHTML = '<div class="state error" role="alert"><div class="h3">Check the inputs</div><p>' + esc(j.error || r.status) + '</p></div>'; return; }
+        $('pout').innerHTML = '<div class="table-wrap"><table class="kv">' +
+          '<tr><th>Pitch far before the pass</th><td>' + j.approach_asymptote_hz.toFixed(0) + ' Hz</td></tr>' +
+          '<tr><th>Pitch far after the pass</th><td>' + j.recede_asymptote_hz.toFixed(0) + ' Hz</td></tr>' +
+          '<tr><th>Total shift (before / after)</th><td>&times;' + j.total_shift_ratio.toFixed(2) + '</td></tr>' +
+          '<tr><th>Steepest glide</th><td>' + j.max_glide_hz_per_s.toFixed(0) + ' Hz per second, at closest approach</td></tr>' +
+          '<tr><th>Sound delay at closest approach</th><td>' + j.sound_delay_at_closest_s.toFixed(2) + ' s</td></tr></table></div><p class="muted small" style="margin:8px 0 0">' + esc(j.note) + '</p>';
+      } catch (err) { $('pout').innerHTML = '<span class="err">' + esc(err.message) + '</span>'; }
+      finally { $('pgo').disabled = false; }
+    };
 
     $('go').onclick = async () => {
       if (!file) return;
@@ -98,7 +129,7 @@
         '<tr><th>Closest approach, as heard</th><td>' + pm(f.closest_approach_heard_s, 's', 2) + ' into the clip' + (f.closest_approach_heard_s.clip_absolute_unix ? ' (' + new Date(f.closest_approach_heard_s.clip_absolute_unix * 1000).toISOString() + ')' : '') + '</td></tr>' +
         '<tr><th>Closest approach, at the source</th><td>' + f.closest_approach_at_source_s.value.toFixed(2) + ' s (earlier by the sound delay d/c)</td></tr>' +
         '<tr><th>Fit quality</th><td>rms ' + f.rms_residual_hz + ' Hz; ' + L.points_used + ' of ' + L.points_tracked + ' points used; pitch-change coverage ' + Math.round(f.pitch_change_coverage * 100) + '%</td></tr>' +
-        '</table></div><p class="muted small" style="margin:8px 0 0">&plusmn; is one sigma and includes a floor for wind, temperature and tracker bias. It cannot cover a source that is not one steady tone on a straight constant-speed track.</p>';
+        '</table></div><p style="margin:8px 0 0"><button class="btn sm" type="button" id="cpj">Copy JSON</button></p><p class="muted small" style="margin:8px 0 0">&plusmn; is one sigma and includes a floor for wind, temperature and tracker bias. It cannot cover a source that is not one steady tone on a straight constant-speed track.</p>';
       for (const w of L.warnings) h += '<div class="notice warn" style="margin-top:8px">' + esc(w) + '</div>';
       if (j.line_consistency) h += '<p class="muted small" style="margin:8px 0 0">Second line: speed differs by ' + j.line_consistency.speed_difference_ms + ' m/s, timing by ' + j.line_consistency.closest_approach_difference_s + ' s, f0 ratio ' + j.line_consistency.ratio_f0 + '. ' + esc(j.line_consistency.note) + '</p>';
       h += '</section>';
@@ -106,6 +137,7 @@
         '<div class="legend small muted"><span><i class="sw" style="background:var(--ink)"></i>tracked, used</span><span><i class="sw" style="background:var(--err)"></i>tracked, rejected</span><span><i class="sw line" style="background:var(--link)"></i>fitted curve</span><span><i class="sw line" style="background:var(--ink-2)"></i>closest approach (heard)</span></div></section>';
       h += '<section class="card"><h2 class="h3" style="margin-bottom:4px">Clip</h2><p class="muted small" style="margin:0">' + j.clip.duration_s + ' s, ' + j.clip.sample_rate_hz + ' Hz, ' + j.clip.channels + ' ch; speed of sound ' + j.settings.speed_of_sound_ms + ' m/s; ' + j.settings.bin_hz + ' Hz bins. ' + esc(j.spectrogram.note) + '. Raw JSON via <code>POST api/analyze</code>.</p></section>';
       out.innerHTML = h;
+      $('cpj').onclick = async () => { try { const { spectrogram, lines, ...rest } = j; await navigator.clipboard.writeText(JSON.stringify({ ...rest, best: lines[j.best_line].fit }, null, 2)); toast('JSON copied (without the spectrogram image)'); } catch { toast('Copy failed: the browser blocked clipboard access', 'err'); } };
       draw();
       $('stage2').hidden = false;
     }
@@ -154,10 +186,12 @@
         distance_sigma_m: f.closest_distance_m.sigma ?? '', tca_s: f.closest_approach_at_source_s.value,
         clip_from: $('cfrom').value.trim(), clip_to: $('cto').value.trim(), lat: $('clat').value, lon: $('clon').value, radius_km: $('crad').value });
       for (const [k, v] of [...q]) if (v === '') q.delete(k);
+      const missing = [['clip_from', 'the earliest clip start'], ['clip_to', 'the latest clip start'], ['lat', 'the area latitude'], ['lon', 'the area longitude'], ['radius_km', 'the area radius']].filter(([k]) => !q.has(k)).map(x => x[1]);
+      if (missing.length) { $('cout').innerHTML = '<div class="state error" role="alert"><div class="h3">Fill in the search area and time window</div><p>Missing: ' + esc(missing.join(', ')) + '.</p></div>'; return; }
       $('cout').innerHTML = '<span class="loading"><span class="spin" aria-hidden="true"></span>Searching the archive (the first request can take a minute)…</span>';
       $('cgo').disabled = true;
       try {
-        const r = await fetch('api/candidates?' + q); const j = await r.json();
+        const r = await fetch('api/candidates?' + q); const j = await r.json().catch(() => ({ error: 'The server rejected the request (HTTP ' + r.status + ').' }));
         if (!r.ok) { $('cout').innerHTML = '<div class="state error" role="alert"><div class="h3">Check the inputs</div><p>' + esc(j.error) + '</p></div>'; return; }
         if (!j.available) { $('cout').innerHTML = '<div class="state"><div class="h3">adsb-history is not available</div><p>' + esc(j.reason) + '. ' + esc(j.hint || '') + '</p></div>'; return; }
         if (j.pending) { $('cout').innerHTML = '<div class="state"><div class="h3">Still downloading</div><p>' + esc(j.hint) + '</p></div>'; return; }

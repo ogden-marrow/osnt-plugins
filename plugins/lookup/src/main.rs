@@ -71,13 +71,89 @@ fn default_type() -> String {
     "A".into()
 }
 
+fn type_name(code: u64) -> String {
+    match code {
+        1 => "A".into(),
+        2 => "NS".into(),
+        5 => "CNAME".into(),
+        6 => "SOA".into(),
+        12 => "PTR".into(),
+        15 => "MX".into(),
+        16 => "TXT".into(),
+        28 => "AAAA".into(),
+        257 => "CAA".into(),
+        n => n.to_string(),
+    }
+}
+
+/// Reduce a DNS-over-HTTPS JSON answer to the fields that matter. `status` is the RCODE name (NOERROR, NXDOMAIN, ...).
+fn summarize_dns(v: &Value) -> Value {
+    let mut answers: Vec<Value> = v["Answer"]
+        .as_array()
+        .map(|a| a.iter().map(|r| json!({ "name": r["name"], "type": r["type"].as_u64().map(type_name), "ttl": r["TTL"], "data": r["data"] })).collect())
+        .unwrap_or_default();
+    // MX records are most useful in priority order ("10 mail.example.com").
+    answers.sort_by_key(|r| {
+        if r["type"] == "MX" { r["data"].as_str().and_then(|d| d.split_whitespace().next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(u32::MAX) } else { 0 }
+    });
+    let status = match v["Status"].as_u64() {
+        Some(0) => "NOERROR".to_string(),
+        Some(2) => "SERVFAIL".to_string(),
+        Some(3) => "NXDOMAIN".to_string(),
+        Some(5) => "REFUSED".to_string(),
+        Some(n) => format!("RCODE {n}"),
+        None => "UNKNOWN".to_string(),
+    };
+    json!({ "status": status, "answers": answers })
+}
+
 fn dns(agent: &ureq::Agent, name: &str, rtype: &str) -> Result<Value> {
     let v = get_json(agent, &format!("https://cloudflare-dns.com/dns-query?name={name}&type={rtype}"), "application/dns-json")?;
-    let answers: Vec<Value> = v["Answer"]
-        .as_array()
-        .map(|a| a.iter().map(|r| json!({ "name": r["name"], "type": r["type"], "ttl": r["TTL"], "data": r["data"] })).collect())
-        .unwrap_or_default();
-    Ok(json!({ "status": v["Status"], "answers": answers }))
+    Ok(summarize_dns(&v))
+}
+
+/// Accept what people paste: a URL, host:port, or a bare name. Returns the host part, trimmed.
+fn normalize_input(s: &str) -> String {
+    let mut s = s.trim();
+    if let Some((_, rest)) = s.split_once("://") {
+        s = rest;
+    }
+    s = s.split(['/', '?', '#']).next().unwrap_or(s);
+    if let Some((_, host)) = s.rsplit_once('@') {
+        s = host;
+    }
+    // Strip a :port from a name or IPv4 literal, but leave IPv6 literals (several colons) alone.
+    if s.matches(':').count() == 1 {
+        s = s.split(':').next().unwrap_or(s);
+    }
+    s.trim_matches(['[', ']']).trim().to_string()
+}
+
+const MAX_CERT_NAMES: usize = 3000;
+
+/// Reduce crt.sh rows to a sorted, de-duplicated name list.
+fn summarize_certs(name: &str, v: &Value) -> Value {
+    let mut names = BTreeSet::new();
+    let (mut first, mut last) = (String::new(), String::new());
+    let mut count = 0;
+    for row in v.as_array().map(Vec::as_slice).unwrap_or_default() {
+        count += 1;
+        if let Some(n) = row["name_value"].as_str() {
+            names.extend(n.lines().map(|l| l.trim().to_ascii_lowercase()).filter(|l| !l.is_empty() && l.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '*' | '_'))));
+        }
+        if let Some(d) = row["not_before"].as_str() {
+            if first.is_empty() || d < first.as_str() {
+                first = d.to_string();
+            }
+            if d > last.as_str() {
+                last = d.to_string();
+            }
+        }
+    }
+    let total = names.len();
+    let wildcards = names.iter().filter(|n| n.starts_with("*.")).count();
+    let names: Vec<String> = names.into_iter().take(MAX_CERT_NAMES).collect();
+    json!({ "domain": name, "certificates": count, "earliest_seen": first, "latest_seen": last, "total_names": total, "wildcards": wildcards, "truncated": total > names.len(), "names": names })
 }
 
 async fn dns_handler(State(s): State<Shared>, Query(q): Query<DnsQuery>) -> Result<Json<Value>, ApiError> {
@@ -149,28 +225,15 @@ async fn rdns(State(s): State<Shared>, Query(q): Query<IpQuery>) -> Result<Json<
 async fn certs(State(s): State<Shared>, Query(q): Query<NameQuery>) -> Result<Json<Value>, ApiError> {
     let name = valid_domain(&q.name).ok_or_else(|| bad("invalid domain name"))?;
     Ok(Json(blocking(move || {
-        let v = get_json(&s.agent, &format!("https://crt.sh/?q=%25.{name}&output=json"), "application/json")?;
-        let mut names = BTreeSet::new();
-        let mut first = String::new();
-        let mut count = 0;
-        for row in v.as_array().map(Vec::as_slice).unwrap_or_default() {
-            count += 1;
-            if let Some(n) = row["name_value"].as_str() {
-                names.extend(n.lines().map(|l| l.trim().to_ascii_lowercase()));
-            }
-            if let Some(d) = row["not_before"].as_str() {
-                if first.is_empty() || d < first.as_str() {
-                    first = d.to_string();
-                }
-            }
-        }
-        Ok(json!({ "domain": name, "certificates": count, "earliest_seen": first, "names": names }))
+        let v = get_json(&s.agent, &format!("https://crt.sh/?q=%25.{name}&output=json"), "application/json")
+            .map_err(|_| anyhow::anyhow!("crt.sh did not answer (it is often overloaded); try again in a minute"))?;
+        Ok(summarize_certs(&name, &v))
     }).await?))
 }
 
 /// One call for the common case: classify the input as IP or domain and gather the basics.
 async fn lookup(State(s): State<Shared>, Query(q): Query<QueryParam>) -> Result<Json<Value>, ApiError> {
-    let input = q.q.trim().to_string();
+    let input = normalize_input(&q.q);
     if let Ok(ip) = input.parse::<IpAddr>() {
         let (a, b) = (s.clone(), s.clone());
         let ip_s = ip.to_string();
@@ -181,22 +244,50 @@ async fn lookup(State(s): State<Shared>, Query(q): Query<QueryParam>) -> Result<
                 Ok(v["Answer"].as_array().map(|a| a.iter().map(|r| r["data"].clone()).collect::<Vec<_>>()).unwrap_or_default())
             })
         );
-        return Ok(Json(json!({ "kind": "ip", "input": input, "rdap": r.ok(), "ptr": p.ok() })));
+        let mut errors = serde_json::Map::new();
+        if let Err(e) = &r {
+            errors.insert("rdap".into(), json!(short_err(e)));
+        }
+        if let Err(e) = &p {
+            errors.insert("ptr".into(), json!(short_err(e)));
+        }
+        return Ok(Json(json!({ "kind": "ip", "input": ip.to_string(), "rdap": r.ok(), "ptr": p.ok(), "errors": errors })));
     }
-    let name = valid_domain(&input).ok_or_else(|| bad("enter a domain (example.com) or an IP address"))?;
+    let name = valid_domain(&input).ok_or_else(|| bad("enter a domain (example.com) or an IP address; internationalised names need their xn-- (punycode) form"))?;
     let (a, b) = (s.clone(), s.clone());
     let (n1, n2) = (name.clone(), name.clone());
     let (records, reg) = tokio::join!(
         blocking(move || {
             let mut out = serde_json::Map::new();
-            for t in ["A", "AAAA", "MX", "NS", "TXT"] {
-                out.insert(t.into(), dns(&a.agent, &n1, t)?["answers"].clone());
+            let mut status = "NOERROR".to_string();
+            for t in ["A", "AAAA", "CNAME", "MX", "NS", "TXT"] {
+                let r = dns(&a.agent, &n1, t)?;
+                if r["status"] != "NOERROR" {
+                    status = r["status"].as_str().unwrap_or("").to_string();
+                }
+                out.insert(t.into(), r["answers"].clone());
             }
-            Ok(Value::Object(out))
+            Ok(json!({ "status": status, "records": out }))
         }),
         blocking(move || rdap(&b.agent, "domain", &n2))
     );
-    Ok(Json(json!({ "kind": "domain", "input": name, "dns": records.ok(), "rdap": reg.ok() })))
+    let mut errors = serde_json::Map::new();
+    if let Err(e) = &records {
+        errors.insert("dns".into(), json!(short_err(e)));
+    }
+    if let Err(e) = &reg {
+        errors.insert("rdap".into(), json!(short_err(e)));
+    }
+    let (dns_status, dns_records) = match records {
+        Ok(v) => (v["status"].clone(), Some(v["records"].clone())),
+        Err(_) => (Value::Null, None),
+    };
+    Ok(Json(json!({ "kind": "domain", "input": name, "dns_status": dns_status, "dns": dns_records, "rdap": reg.ok(), "errors": errors })))
+}
+
+fn short_err(e: &ApiError) -> String {
+    let m = e.1.as_str();
+    if m.contains("404") { "no record found".into() } else if m.contains("429") { "rate limited, try again shortly".into() } else { "the upstream service did not answer".into() }
 }
 
 #[derive(Deserialize)]
@@ -242,4 +333,62 @@ async fn main() -> Result<()> {
     println!("lookup plugin on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_validation() {
+        assert_eq!(valid_domain(" Example.COM. ").as_deref(), Some("example.com"));
+        assert!(valid_domain("nodot").is_none());
+        assert!(valid_domain("-bad.example.com").is_none());
+        assert!(valid_domain("exa mple.com").is_none());
+        assert!(valid_domain("a..b.com").is_none());
+        assert!(valid_domain("bücher.example").is_none());
+    }
+
+    #[test]
+    fn pasted_urls_are_reduced_to_a_host() {
+        assert_eq!(normalize_input("https://user@Example.com:8443/a/b?x=1#f"), "Example.com");
+        assert_eq!(normalize_input("  example.org/path "), "example.org");
+        assert_eq!(normalize_input("1.1.1.1:53"), "1.1.1.1");
+        assert_eq!(normalize_input("[2606:4700:4700::1111]"), "2606:4700:4700::1111");
+        assert_eq!(normalize_input("2606:4700:4700::1111"), "2606:4700:4700::1111");
+    }
+
+    #[test]
+    fn ptr_names() {
+        assert_eq!(ptr_name("1.2.3.4".parse().unwrap()), "4.3.2.1.in-addr.arpa");
+        assert!(ptr_name("2001:db8::1".parse().unwrap()).starts_with("1.0.0.0."));
+        assert!(ptr_name("2001:db8::1".parse().unwrap()).ends_with("8.b.d.0.1.0.0.2.ip6.arpa"));
+    }
+
+    #[test]
+    fn dns_summary_names_types_status_and_sorts_mx() {
+        let v = json!({ "Status": 0, "Answer": [
+            { "name": "x.", "type": 15, "TTL": 60, "data": "20 b.mail." },
+            { "name": "x.", "type": 15, "TTL": 60, "data": "10 a.mail." },
+        ] });
+        let s = summarize_dns(&v);
+        assert_eq!(s["status"], "NOERROR");
+        assert_eq!(s["answers"][0]["data"], "10 a.mail.");
+        assert_eq!(s["answers"][0]["type"], "MX");
+        assert_eq!(summarize_dns(&json!({ "Status": 3 }))["status"], "NXDOMAIN");
+    }
+
+    #[test]
+    fn cert_summary_dedupes_and_counts_wildcards() {
+        let v = json!([
+            { "name_value": "a.example.com\n*.example.com", "not_before": "2024-02-01T00:00:00" },
+            { "name_value": "A.example.com\nsome intermediate - x\nadmin@example.com", "not_before": "2023-01-01T00:00:00" },
+        ]);
+        let s = summarize_certs("example.com", &v);
+        assert_eq!(s["certificates"], 2);
+        assert_eq!(s["total_names"], 2);
+        assert_eq!(s["wildcards"], 1);
+        assert_eq!(s["earliest_seen"], "2023-01-01T00:00:00");
+        assert_eq!(s["latest_seen"], "2024-02-01T00:00:00");
+    }
 }

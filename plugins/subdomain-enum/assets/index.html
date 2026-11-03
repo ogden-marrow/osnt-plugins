@@ -69,7 +69,7 @@
         sources.filter(s => s.default && s.available).forEach(s => picked.add(s.id));
         drawSources();
       } catch (e) { $('srcs').innerHTML = `<div class="state error" role="alert"><p>${esc(e.message)}</p></div>`; }
-      const q = new URLSearchParams(location.search).get('q'); if (q) { $('q').value = q; run(q); }
+      const q = new URLSearchParams(location.search).get('q'); if (q) { $('q').value = q; run(q); } else { try { const l = localStorage.getItem('subdomain-enum.q'); if (l) $('q').value = l; } catch {} }
     }
     function drawSources() {
       $('srcs').innerHTML = sources.map(s => { const st = status[s.id] || {};
@@ -78,8 +78,16 @@
       document.querySelectorAll('#srcs input').forEach(i => i.onchange = () => { i.checked ? picked.add(i.dataset.id) : picked.delete(i.dataset.id); });
     }
 
+    // Accept what people paste (a URL, host:port) and refuse anything that is not a hostname before any source is called.
+    function cleanDomain(v) {
+      v = String(v || '').trim().replace(/^[a-z]+:\/\//i, '').split(/[\/?#]/)[0].replace(/:\d+$/, '').replace(/\.$/, '').toLowerCase();
+      return /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/.test(v) ? v : '';
+    }
     async function run(d) {
-      const my = ++ticket; domain = d.trim(); if (!domain) return;
+      const clean = cleanDomain(d);
+      if (!clean) { if (String(d).trim()) { ticket++; status = {}; found = new Map(); $('res').innerHTML = '<div class="state error" role="alert"><div class="h3">That is not a domain name</div><p>Enter a domain such as example.com. A pasted URL is reduced to its host.</p></div>'; $('go').removeAttribute('aria-busy'); $('go').disabled = false; } return; }
+      d = clean; $('q').value = clean; try { localStorage.setItem('subdomain-enum.q', clean); } catch {}
+      const my = ++ticket; domain = d;
       if (!picked.size) return toast('Pick at least one source', 'warn');
       history.replaceState(null, '', '?q=' + encodeURIComponent(domain));
       found = new Map(); status = {}; resolved = {}; wildcard = null; filter = new Set(); text = '';
@@ -120,7 +128,7 @@
       const vis = rows.filter(([n, s]) => (!filter.size || [...filter].some(f => s.has(f))) && (!text || n.includes(text)) && (!onlyLive || resolved[n]?.status === 'live'));
       const done = Object.keys(resolved).length, live = Object.values(resolved).filter(x => x.status === 'live').length, dang = Object.values(resolved).filter(x => x.status === 'dangling').length;
       const active = Object.values(status).some(s => s.state === 'run');
-      res.innerHTML = `<section class="card"><div class="card-head"><h3 class="h3">${found.size} names for ${esc(domain)}</h3>
+      res.innerHTML = `<section class="card"><div class="card-head"><h3 class="h3">${found.size} names for ${esc(domain)}</h3><span class="small muted"><a href="../lookup/?q=${encodeURIComponent(domain)}">DNS &amp; registration</a> · <a href="../domain-hygiene/?q=${encodeURIComponent(domain)}">Domain hygiene</a> · <a href="../ip-intel/?q=${encodeURIComponent(domain)}">IP intelligence</a></span>
         <span class="chips">${active ? '<span class="badge"><span class="spin" style="width:10px;height:10px"></span> sources running</span>' : done < found.size ? `<span class="badge">resolving ${done}/${found.size}</span>` : '<span class="badge ok">done</span>'}
         ${live ? `<span class="badge ok">${live} live</span>` : ''}${dang ? `<span class="badge err">${dang} dangling</span>` : ''}${wildcard?.wildcard ? '<span class="badge warn">wildcard DNS</span>' : ''}</span></div>
         ${wildcard?.wildcard ? `<div class="notice warn small" style="margin-bottom:10px"><span>Random names under this domain resolve (${esc((wildcard.ips || []).join(', '))}), so "live" does not prove a host exists.</span></div>` : ''}

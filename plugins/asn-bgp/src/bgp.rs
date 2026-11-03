@@ -433,6 +433,14 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn free_text_is_not_a_prefix() {
+        for bad in ["garbage", "example.com", "", "999.1.1.1", "10.0.0.0/8", "8.8.8.8/99"] {
+            assert_eq!(parse_prefix(bad), None, "{bad}");
+        }
+        assert_eq!(parse_prefix("8.8.8.8").as_deref(), Some("8.8.8.8"));
+    }
+
+    #[test]
     fn asn_parsing() {
         assert_eq!(parse_asn("AS15169"), Some(15169));
         assert_eq!(parse_asn(" as3333 "), Some(3333));

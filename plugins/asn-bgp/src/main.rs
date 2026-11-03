@@ -58,10 +58,16 @@ macro_rules! route {
 
 route!(resolve, |s, q| {
     let input = q.q.clone().or(q.asn.clone()).unwrap_or_default();
+    if bgp::parse_asn(&input).is_none() && bgp::parse_prefix(&input).is_none() {
+        return Err(bad("enter an AS number (AS15169), an IP address or a prefix (193.0.0.0/21)"));
+    }
     Ok(Json(blocking(move || bgp::resolve(&s, &input)).await?))
 });
 route!(overview, |s, q| {
     let input = q.q.clone().or(q.asn.clone()).unwrap_or_default();
+    if bgp::parse_asn(&input).is_none() && bgp::parse_prefix(&input).is_none() {
+        return Err(bad("enter an AS number (AS15169), an IP address or a prefix (193.0.0.0/21)"));
+    }
     Ok(Json(blocking(move || {
         let r = bgp::resolve(&s, &input)?;
         let asn = r["asn"].as_u64().unwrap_or(0) as u32;

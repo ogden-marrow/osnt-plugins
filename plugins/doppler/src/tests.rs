@@ -120,6 +120,19 @@ fn noisy_flyby_with_hum_and_harmonics_is_recovered() {
 }
 
 #[test]
+fn quiet_clip_with_strong_harmonic_does_not_hop_between_lines() {
+    // Almost noise-free, second harmonic nearly as loud as the fundamental: both lines saturate the tracker's contrast.
+    let s = Synth { p: Params { f0: 700.0, v: 100.0, d: 200.0, tca: 15.0 }, fs: 16000, secs: 30.0, harmonics: &[(1.0, 1.0), (2.0, 0.9)], noise: 0.0, hum: false };
+    let wav = wav16(&render(&s, 11), s.fs);
+    let r = analysis::analyze(wav.clone(), wav.len(), &opts()).expect("analysis");
+    // v, d and timing are independent of which harmonic is tracked
+    let (v, d, tca) = (val(&r, "speed_ms"), val(&r, "closest_distance_m"), val(&r, "closest_approach_heard_s"));
+    assert!((v / s.p.v - 1.0).abs() < 0.1, "v {v}");
+    assert!((d / s.p.d - 1.0).abs() < 0.3, "d {d}");
+    assert!((tca - s.p.tca).abs() < 0.5, "tca {tca}");
+}
+
+#[test]
 fn float_wav_decodes_the_same() {
     let s = Synth { p: Params { f0: 1000.0, v: 120.0, d: 150.0, tca: 12.0 }, fs: 22050, secs: 24.0, harmonics: &[(1.0, 1.0)], noise: 0.05, hum: false };
     let wav = wav_f32(&render(&s, 3), s.fs);

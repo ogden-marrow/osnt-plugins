@@ -76,7 +76,7 @@
     let ticket = 0, prefixRows = [];
 
     async function run(q) {
-      q = q.trim(); if (!q) return; const my = ++ticket;
+      q = q.trim(); if (!q) return; const my = ++ticket; try { localStorage.setItem('asn-bgp.q', q); } catch {}
       history.replaceState(null, '', '?q=' + encodeURIComponent(q));
       out.setAttribute('aria-busy', 'true');
       out.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>Resolving…</div>`;
@@ -87,6 +87,7 @@
       out.innerHTML = `<section class="card"><div class="head-asn"><span class="n">AS${asn}</span><span>${esc(o.holder)}</span></div>
         <div class="pills"><span class="badge ${o.announced ? 'ok' : 'warn'}">${o.announced ? 'announcing prefixes' : 'not announcing'}</span>
         ${r.kind && r.kind !== 'asn' ? `<span class="badge">${esc(r.input)} is originated by AS${asn}${r.prefix && r.prefix !== r.input ? ' via ' + esc(r.prefix) : ''}</span>` : ''}
+        ${r.kind === 'ip' ? `<a class="badge" href="../ip-intel/?q=${encodeURIComponent(r.input)}">IP intelligence for ${esc(r.input)}</a><a class="badge" href="../lookup/?q=${encodeURIComponent(r.input)}">DNS &amp; registration</a>` : ''}
         ${(r.all_asns || []).length > 1 ? `<span class="badge warn">multiple origins: ${r.all_asns.map(a => 'AS' + a).join(', ')}</span>` : ''}
         <span class="badge" id="b-pfx"></span><span class="badge" id="b-atlas"></span></div>
         <p class="mini" style="margin-top:10px">${esc(o.block?.name || '')}${o.block?.desc ? ' · ' + esc(o.block.desc) : ''}</p></section>`
@@ -177,7 +178,8 @@
     }
 
     $('f').onsubmit = e => { e.preventDefault(); run($('q').value); };
-    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); }
+    const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); } else { const l = store.get('asn-bgp.q'); if (l) $('q').value = l; }
   </script>
 </body>
 </html>

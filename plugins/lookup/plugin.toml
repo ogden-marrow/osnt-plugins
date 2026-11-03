@@ -3,7 +3,7 @@ name = "Domain & IP lookup"
 description = "DNS, registration (RDAP), reverse DNS and certificate-transparency names."
 grid = "Network & Infrastructure"
 port = 8103
-version = "0.1.1"
+version = "0.1.2"
 
 [service]
 state_dir = false

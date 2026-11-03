@@ -3,7 +3,7 @@ name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback, with honest confidence and caveats."
 grid = "Media & Verification"
 port = 8106
-version = "0.4.1"
+version = "0.4.2"
 
 [service]
 state_dir = false

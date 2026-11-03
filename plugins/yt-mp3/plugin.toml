@@ -3,7 +3,7 @@ name = "YouTube to MP3"
 description = "Paste a YouTube link, optionally trim it, and download an MP3."
 grid = "Media & Verification"
 port = 8122
-version = "0.1.0"
+version = "0.1.1"
 
 # Runs the external tools `yt-dlp` and `ffmpeg` (not bundled). The installer adds them after you approve it (see [system] below);
 # the page shows manual commands if they are missing. All temp and output files live under the state dir (/var/lib/osnt-yt-mp3), because the

@@ -94,7 +94,7 @@
         $('go').disabled = !ready;
         $('limits').textContent = 'Up to ' + s.limits.max_minutes + ' min per video, files kept ' + s.limits.ttl_minutes + ' min. Single videos only.';
         const el = $('tools');
-        const badge = (name, t) => '<span class="badge ' + (t.found ? 'ok' : 'err') + '">' + name + ': ' + (t.found ? esc(t.version || 'found') : 'missing') + '</span>';
+        const badge = (name, t) => '<span class="badge ' + (t.found ? 'ok' : 'err') + '">' + name + ': ' + (t.found ? esc(String(t.version || 'found').replace(/^ffmpeg version (\S+).*/s, '$1').slice(0, 40)) : 'missing') + '</span>';
         el.hidden = false;
         if (s.ready) {
           el.innerHTML = '<div class="row small muted">' + badge('yt-dlp', s.ytdlp) + badge('ffmpeg', s.ffmpeg) +
@@ -122,7 +122,8 @@
       const d = $('jdone');
       if (j.status === 'done') {
         d.hidden = false;
-        d.innerHTML = '<div class="row"><a class="btn primary" href="api/jobs/' + j.id + '/file" download>Download MP3</a> <span class="muted small">' + esc(j.filename) + ' &middot; ' + mb(j.size) + '</span></div>';
+        d.innerHTML = '<div class="row"><a class="btn primary" href="api/jobs/' + j.id + '/file" download>Download MP3</a> <span class="muted small">' + esc(j.filename) + ' &middot; ' + mb(j.size) + '</span></div>' +
+          '<audio controls preload="none" style="width:100%;margin-top:12px" src="api/jobs/' + j.id + '/file" aria-label="Preview of ' + esc(j.filename) + '"></audio>';
       } else d.hidden = true;
     }
 
@@ -156,6 +157,8 @@
 
     $('form').addEventListener('submit', async ev => {
       ev.preventDefault();
+      $('url').value = $('url').value.trim();
+      try { history.replaceState(null, '', '?q=' + encodeURIComponent($('url').value)); } catch {}
       $('go').disabled = true;
       $('jdone').hidden = true;
       try {
@@ -171,7 +174,17 @@
       }
     });
 
-    loadStatus(); loadHistory();
+    // Resume a conversion that was still running when the page was reloaded or opened elsewhere.
+    async function resume() {
+      try { const run = (await api('api/jobs')).find(j => j.status === 'queued' || j.status === 'running'); if (run) { $('go').disabled = true; showJob(run); poll(run.id); } } catch (e) { /* optional */ }
+    }
+    // Deep link: ?q=<youtube url> pre-fills the form and starts the conversion (only when the tools are installed).
+    const dl = new URLSearchParams(location.search);
+    const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+    $('url').type = 'text'; // type=url would reject a pasted link with stray spaces before our own check runs
+    if (dl.get('q')) { $('url').value = dl.get('q'); if (dl.get('start')) $('start').value = dl.get('start'); if (dl.get('end')) $('end').value = dl.get('end'); }
+    loadStatus().then(() => { if (dl.get('q') && ready) $('form').requestSubmit(); else resume(); });
+    loadHistory();
   </script>
 </body>
 </html>

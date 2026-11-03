@@ -3,7 +3,7 @@ name = "ASN & BGP explorer"
 description = "Autonomous systems: holder, announced prefixes, upstream and downstream neighbours, route history and BGP state, PeeringDB and RIPE Atlas counts."
 grid = "Network & Infrastructure"
 port = 8131
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

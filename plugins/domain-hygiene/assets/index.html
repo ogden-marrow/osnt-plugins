@@ -85,7 +85,7 @@
     function draw() {
       const all = GROUPS.flatMap(([id]) => data[id]?.checks || []), s = score(all);
       const pending = GROUPS.filter(([id]) => !data[id]).length, tot = Math.max(1, s.p + s.w + s.f);
-      let h = `<section class="card"><div class="score"><div class="big">${s.score ?? '–'}<small>/100</small></div><div style="flex:1 1 220px"><div class="h3">${esc(domain)}</div>
+      let h = `<section class="card"><div class="score"><div class="big">${s.score ?? '–'}<small>/100</small></div><div style="flex:1 1 220px"><div class="h3">${esc(domain)}</div><div class="small muted" style="margin:2px 0 6px"><a href="../lookup/?q=${encodeURIComponent(domain)}">DNS &amp; registration</a> · <a href="../subdomain-enum/?q=${encodeURIComponent(domain)}">Subdomains</a> · <a href="../ip-intel/?q=${encodeURIComponent(domain)}">IP intelligence</a></div>
         <div class="bar" role="img" aria-label="${s.p} pass, ${s.w} warn, ${s.f} fail"><i class="p" style="width:${100 * s.p / tot}%"></i><i class="w" style="width:${100 * s.w / tot}%"></i><i class="f" style="width:${100 * s.f / tot}%"></i></div>
         <div class="muted small" style="margin-top:6px">${s.p} pass · ${s.w} warn · ${s.f} fail${pending ? ` · <span class="loading"><span class="spin" style="width:12px;height:12px"></span>${pending} section${pending > 1 ? 's' : ''} still running</span>` : ''}</div></div>
         <button class="btn sm" id="copy" type="button">Copy JSON</button></div>
@@ -112,7 +112,7 @@
       } catch (e) { $('recout').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     }
     async function run(d) {
-      d = d.trim(); if (!d) return; const my = ++ticket; data = {}; domain = d;
+      d = d.trim(); if (!d) return; try { localStorage.setItem('domain-hygiene.q', d); } catch {} const my = ++ticket; data = {}; domain = d;
       history.replaceState(null, '', '?q=' + encodeURIComponent(d));
       out.setAttribute('aria-busy', 'true'); draw();
       await Promise.all(GROUPS.map(async ([id]) => {
@@ -127,7 +127,7 @@
       if (my === ticket) out.setAttribute('aria-busy', 'false');
     }
     $('f').onsubmit = e => { e.preventDefault(); run($('q').value); };
-    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); }
+    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); } else { try { const l = localStorage.getItem('domain-hygiene.q'); if (l) $('q').value = l; } catch {} }
   </script>
 </body>
 </html>

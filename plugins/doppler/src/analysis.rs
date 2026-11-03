@@ -56,7 +56,7 @@ fn confidence(fit: &FitResult, c: f64, median_snr: f64, bin_hz: f64) -> (&'stati
         warn.push("Many tracked points disagree with the fitted curve; the line may be a mix of sources or reflections.".into());
     }
     let mut poor = false;
-    if fit.rms_hz > 2.5 * bin_hz {
+    if fit.rms_hz > 1.5 * bin_hz {
         warn.push(format!("The curve fits poorly (rms {:.0} Hz, spectrogram bins are {:.0} Hz): the line does not follow a clean flyby shape.", fit.rms_hz, bin_hz));
         poor = true;
     }
@@ -66,9 +66,9 @@ fn confidence(fit: &FitResult, c: f64, median_snr: f64, bin_hz: f64) -> (&'stati
     }
     let level = if poor {
         "low"
-    } else if fit.coverage >= 0.85 && fit.n_used >= 40 && rel_v < 0.05 && median_snr >= 12.0 {
+    } else if fit.coverage >= 0.85 && fit.n_used >= 40 && rel_v < 0.05 && median_snr >= 12.0 && fit.rms_hz <= 0.75 * bin_hz {
         "high"
-    } else if fit.coverage >= 0.6 && rel_v < 0.15 && fit.n_used >= 20 {
+    } else if fit.coverage >= 0.6 && rel_v < 0.15 && fit.n_used >= 20 && fit.rms_hz <= 1.2 * bin_hz {
         "medium"
     } else {
         "low"

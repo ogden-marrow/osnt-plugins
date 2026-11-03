@@ -3,7 +3,7 @@ name = "Subdomain discovery"
 description = "Passive subdomain discovery from certificate logs, passive DNS and web archives, with DNS liveness and dangling-CNAME flags."
 grid = "Network & Infrastructure"
 port = 8132
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

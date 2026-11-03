@@ -3,7 +3,7 @@ name = "Domain hygiene"
 description = "Scored checklist for a domain: DNS records, SPF/DMARC/DKIM/MTA-STS, DNSSEC, delegation, CAA and security.txt."
 grid = "Network & Infrastructure"
 port = 8133
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

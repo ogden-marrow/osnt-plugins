@@ -14,7 +14,11 @@
     .results { display: grid; gap: 12px; margin-top: 16px; }
     .results:empty { display: none; }
     .names { max-height: 360px; overflow: auto; margin: 8px 0 0; padding: 10px 12px; font: 12.5px/1.7 var(--font-mono); background: var(--surface-2); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
-    .names code { background: none; padding: 0; }
+    td.num { white-space: nowrap; }
+    .names div { padding: 1px 0; }
+    .names a { color: inherit; text-decoration: none; }
+    .names a:hover { text-decoration: underline; color: var(--link); }
+    .names:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   </style>
 </head>
 <body>
@@ -30,47 +34,95 @@
       <div><h2 class="h2" style="font-size:22px;margin:0">Look up a domain or IP</h2>
       <p>DNS records, registration (RDAP) and certificate transparency names.</p></div>
     </div>
-    <form id="f" role="search"><label class="sr-only" for="q">Domain or IP address</label><input id="q" placeholder="example.com or 1.1.1.1" autofocus autocomplete="off" spellcheck="false"><button class="btn primary">Look up</button><button type="button" class="btn" id="ct">Cert names</button></form>
+    <form id="f" role="search"><label class="sr-only" for="q">Domain, IP address or URL</label><input id="q" placeholder="example.com, 1.1.1.1 or a pasted URL" autofocus autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn primary" id="go">Look up</button><button type="button" class="btn" id="ct" title="Search certificate transparency logs for hostnames under this domain">Cert names</button></form>
+    <p class="hint">Records come from Cloudflare DNS-over-HTTPS, registration from RDAP, certificate names from crt.sh. Press Enter to look up; &ldquo;Cert names&rdquo; can take up to 20 s.</p>
     <div id="out" class="results" aria-live="polite" aria-busy="false"></div>
   </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
   <script>
     const $ = id => document.getElementById(id), out = $('out');
-    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const section = (title, html) => out.insertAdjacentHTML('beforeend', `<section class="card"><h3 class="h3" style="margin-bottom:8px">${esc(title)}</h3>${html}</section>`);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+    let last = null, seq = 0;
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 3000); }
+    const section = (title, html, extra = '') => out.insertAdjacentHTML('beforeend', `<section class="card"><div class="card-head"><h3 class="h3">${esc(title)}</h3>${extra}</div>${html}</section>`);
     const busy = msg => { out.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(msg)}</div>`; out.setAttribute('aria-busy', 'true'); };
     const fail = msg => { out.setAttribute('aria-busy', 'false'); out.innerHTML = `<div class="state error" role="alert"><div class="h3">Lookup failed</div><p>${esc(msg)}</p></div>`; };
-    const rows = o => `<table class="kv">${o.filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length)).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(Array.isArray(v) ? v.join(', ') : v)}</td></tr>`).join('')}</table>`;
+    const rows = o => { const r = o.filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length)); return r.length ? `<table class="kv">${r.map(([k, v]) => `<tr><th>${esc(k)}</th><td class="wrap-anywhere">${esc(Array.isArray(v) ? v.join(', ') : v)}</td></tr>`).join('')}</table>` : '<span class="muted small">No data.</span>'; };
+    const note = (e, k) => e && e[k] ? `<div class="notice warn small" style="margin-bottom:8px">${esc(k)}: ${esc(e[k])}</div>` : '';
+    const links = (name, kind) => { const q = encodeURIComponent(name); return kind === 'ip'
+      ? `<a href="../ip-intel/?q=${q}">IP intelligence</a> · <a href="../asn-bgp/?q=${q}">ASN &amp; BGP</a>`
+      : `<a href="../subdomain-enum/?q=${q}">Subdomains</a> · <a href="../domain-hygiene/?q=${q}">Domain hygiene</a> · <a href="../ip-intel/?q=${q}">IP intelligence</a>`; };
     async function api(path) {
       const r = await fetch(path), d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || r.status);
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
       return d;
     }
-    function showRdap(r) {
-      if (!r) return section('Registration (RDAP)', '<span class="muted">Not available for this input.</span>');
-      const ev = Object.fromEntries((r.events || []).map(e => [e.action, e.date]));
+    const csvCell = v => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    function actions(csvFn, label) {
+      return `<span class="head-actions" style="display:flex;gap:8px"><button class="btn sm" type="button" data-copy="json">Copy JSON</button><button class="btn sm" type="button" data-copy="csv">${label || 'Copy CSV'}</button></span>`;
+    }
+    function wire(csvFn) {
+      out.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
+        try { await navigator.clipboard.writeText(b.dataset.copy === 'json' ? JSON.stringify(last, null, 2) : csvFn()); toast('Copied'); }
+        catch { toast('Copy failed: the browser blocked clipboard access', 'err'); }
+      });
+    }
+    function showRdap(r, e) {
+      if (!r) return section('Registration (RDAP)', note(e, 'rdap') + '<span class="muted">No registration record for this input.</span>');
+      const ev = Object.fromEntries((r.events || []).map(x => [x.action, x.date]));
       section('Registration (RDAP)', rows([['name', r.name || r.handle], ['status', r.status], ['registered', ev.registration], ['last changed', ev['last changed']],
         ['expires', ev.expiration], ['nameservers', r.nameservers], ['range', r.start && `${r.start} – ${r.end}`], ['country', r.country], ['type', r.type],
-        ['entities', (r.entities || []).map(e => `${e.name || e.handle} (${(e.roles || []).join('/')})`)]]));
+        ['entities', (r.entities || []).map(x => `${x.name || x.handle} (${(x.roles || []).join('/')})`)]]));
     }
-    $('f').onsubmit = async e => {
-      e.preventDefault(); busy('Looking up…');
+    function setUrl(q, mode) { try { history.replaceState(null, '', '?q=' + encodeURIComponent(q) + (mode ? '&mode=' + mode : '')); } catch {} }
+    async function lookup(q) {
+      q = q.trim(); if (!q) { $('q').focus(); return; }
+      const my = ++seq; store.set('lookup.q', q); setUrl(q); busy('Looking up…');
       try {
-        const d = await api('api/lookup?q=' + encodeURIComponent($('q').value));
-        out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+        const d = await api('api/lookup?q=' + encodeURIComponent(q));
+        if (my !== seq) return;
+        last = d; out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+        const flat = [];
         if (d.kind === 'domain') {
-          section('DNS', rows(Object.entries(d.dns || {}).map(([t, a]) => [t, a.map(x => x.data)])) || '<span class="muted">no data</span>');
-        } else section('Reverse DNS', rows([['PTR', d.ptr]]));
-        showRdap(d.rdap);
-      } catch (err) { fail(err.message); }
-    };
-    $('ct').onclick = async () => {
-      busy('Searching certificate transparency (can take 20 s)…');
+          const nx = d.dns_status && d.dns_status !== 'NOERROR';
+          const recs = d.dns || {}, entries = Object.entries(recs).filter(([, a]) => a.length);
+          entries.forEach(([t, a]) => a.forEach(x => flat.push([t, x.ttl, x.data])));
+          let body = note(d.errors, 'dns');
+          if (nx) body += `<div class="notice warn small" style="margin-bottom:8px">DNS status <b>${esc(d.dns_status)}</b>${d.dns_status === 'NXDOMAIN' ? ': this name does not exist.' : '.'}</div>`;
+          body += entries.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Type</th><th class="num">TTL</th><th>Value</th></tr></thead><tbody>${flat.map(([t, ttl, v]) => `<tr><td><span class="badge">${esc(t)}</span></td><td class="num mono">${esc(ttl)}</td><td class="mono wrap-anywhere">${esc(v)}</td></tr>`).join('')}</tbody></table></div>`
+            : (nx || d.errors?.dns ? '' : '<span class="muted">No A, AAAA, CNAME, MX, NS or TXT records.</span>');
+          section(d.input, body + `<p class="mini muted small" style="margin:10px 0 0">Related: ${links(d.input, 'domain')}</p>`, actions());
+        } else {
+          (d.ptr || []).forEach(x => flat.push(['PTR', '', x]));
+          section(d.input, note(d.errors, 'ptr') + (d.ptr && d.ptr.length ? rows([['Reverse DNS (PTR)', d.ptr]]) : '<span class="muted">No reverse DNS (PTR) record.</span>') +
+            `<p class="mini muted small" style="margin:10px 0 0">Related: ${links(d.input, 'ip')}</p>`, actions());
+        }
+        showRdap(d.rdap, d.errors);
+        wire(() => ['type,ttl,value', ...flat.map(r => r.map(csvCell).join(','))].join('\n'));
+      } catch (err) { if (my === seq) fail(err.message); }
+    }
+    async function certs(q) {
+      q = q.trim(); if (!q) { $('q').focus(); return; }
+      const my = ++seq; store.set('lookup.q', q); setUrl(q, 'certs'); busy('Searching certificate transparency (can take 20 s)…');
       try {
-        const d = await api('api/certs?name=' + encodeURIComponent($('q').value));
-        out.innerHTML = ''; out.setAttribute('aria-busy', 'false'); section(`Certificate names for ${d.domain}`,
-          `<div class="muted small">${d.certificates} certificates, earliest ${esc(d.earliest_seen)}</div><div class="names"><code>${d.names.map(esc).join('<br>')}</code></div>`);
-      } catch (err) { fail(err.message); }
-    };
+        const d = await api('api/certs?name=' + encodeURIComponent(q));
+        if (my !== seq) return;
+        last = d; out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+        const draw = f => { const list = d.names.filter(n => n.includes(f.toLowerCase())); $('names').innerHTML = list.length ? list.map(n => `<div><a href="../lookup/?q=${encodeURIComponent(n.replace(/^\*\./, ''))}">${esc(n)}</a></div>`).join('') : '<span class="muted">No names match.</span>'; $('cnt').textContent = `${list.length} shown`; };
+        section(`Certificate names for ${d.domain}`, `<div class="muted small">${d.certificates} certificates since ${esc((d.earliest_seen || '').slice(0, 10))}; ${d.total_names} distinct names${d.wildcards ? `, ${d.wildcards} wildcard` : ''}${d.truncated ? ` (first ${d.names.length} listed)` : ''}. <span id="cnt"></span></div>
+          <div style="margin-top:8px"><label class="sr-only" for="flt">Filter names</label><input id="flt" class="input" placeholder="Filter names" autocomplete="off"></div>
+          <div class="names" id="names" tabindex="0" aria-label="Certificate names"></div>
+          <p class="mini muted small" style="margin:10px 0 0">Related: ${links(d.domain, 'domain')}</p>`, actions(null, 'Copy names'));
+        draw(''); $('flt').oninput = e => draw(e.target.value);
+        wire(() => d.names.join('\n'));
+      } catch (err) { if (my === seq) fail(err.message); }
+    }
+    $('f').onsubmit = e => { e.preventDefault(); lookup($('q').value); };
+    $('ct').onclick = () => certs($('q').value);
+    const sp = new URLSearchParams(location.search), init = sp.get('q') || store.get('lookup.q');
+    if (init) $('q').value = init;
+    if (sp.get('q')) (sp.get('mode') === 'certs' ? certs : lookup)(sp.get('q'));
   </script>
 </body>
 </html>

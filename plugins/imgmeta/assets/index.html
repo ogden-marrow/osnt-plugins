@@ -26,12 +26,13 @@
   <main class="page">
     <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Inspect an image</h2>
       <p>Analysed in memory on your hub and never stored. Missing metadata is normal for social-media images and is not evidence of manipulation.</p></div></div>
-    <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Choose an image to analyse"><strong>Drop an image here or click to choose</strong><span class="small">JPEG, PNG, WebP and more</span><input id="file" type="file" accept="image/*" hidden></div>
-    <div id="out" aria-live="polite"></div>
+    <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Choose an image to analyse"><strong>Drop an image here, click to choose, or paste one (Ctrl+V)</strong><span class="small">JPEG, PNG, WebP, HEIC and more, up to 25 MB</span><input id="file" type="file" accept="image/*" hidden></div>
+    <div id="out" aria-live="polite" aria-busy="false"></div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
     <section class="card" style="margin-top:12px">
       <h2 class="h3">Reverse image search</h2>
       <p class="muted small" style="margin:2px 0 10px">Opens the search engine in a new tab. Paste a public image URL. To search a local file, upload it to the engine's own page.</p>
-      <div class="row"><label class="sr-only" for="url">Public image URL</label><input id="url" placeholder="https://example.com/photo.jpg" autocomplete="off" spellcheck="false"> <button class="btn" id="go">Build links</button></div>
+      <form class="row" id="uf"><label class="sr-only" for="url">Public image URL</label><input id="url" type="url" inputmode="url" placeholder="https://example.com/photo.jpg" autocomplete="off" spellcheck="false" style="min-height:44px;font-size:16px"> <button class="btn" id="go" style="min-height:44px">Build links</button></form>
       <div id="links" aria-live="polite"></div>
     </section>
   </main>
@@ -41,23 +42,42 @@
     const rows = o => `<table class="kv">${o.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
     const section = (t, h) => out.insertAdjacentHTML('beforeend', `<section class="card"><h2 class="h3" style="margin-bottom:8px">${esc(t)}</h2>${h}</section>`);
 
+    const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+    const MAX = 25 * 1024 * 1024;
+    let objUrl = null, last = null, seq = 0;
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 3000); }
+    const failBox = m => { out.setAttribute('aria-busy', 'false'); out.innerHTML = `<div class="state error" role="alert"><div class="h3">Could not analyse that file</div><p>${esc(m)}</p></div>`; };
+    const copy = async (text, what) => { try { await navigator.clipboard.writeText(text); toast(what + ' copied'); } catch { toast('Copy failed: the browser blocked clipboard access', 'err'); } };
+
     async function analyse(file) {
+      const my = ++seq;
+      if (!file) return;
+      if (file.size > MAX) return failBox(`That file is ${(file.size / 1048576).toFixed(1)} MB; the limit is 25 MB.`);
+      if (file.size === 0) return failBox('That file is empty.');
+      out.setAttribute('aria-busy', 'true');
       out.innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Analysing…</div>';
       let r, d;
-      try { r = await fetch('api/analyze', { method: 'POST', body: file }); d = await r.json(); }
-      catch { out.innerHTML = '<div class="state error" role="alert"><div class="h3">Could not analyse that file</div><p>The hub did not respond.</p></div>'; return; }
-      if (!r.ok) { out.innerHTML = `<div class="state error" role="alert"><div class="h3">Could not analyse that file</div><p>${esc(d.error || r.status)}</p></div>`; return; }
-      out.innerHTML = '';
-      section('Preview', `<img src="${URL.createObjectURL(file)}" alt="uploaded image">`);
+      try { r = await fetch('api/analyze', { method: 'POST', body: file }); d = await r.json().catch(() => ({})); }
+      catch { return failBox('The hub did not respond.'); }
+      if (my !== seq) return;
+      if (!r.ok) return failBox(d.error || ('HTTP ' + r.status));
+      last = Object.assign({ name: file.name }, d);
+      out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+      if (objUrl) URL.revokeObjectURL(objUrl);
+      objUrl = URL.createObjectURL(file);
+      if (d.format !== 'unknown') section('Preview', `<img src="${objUrl}" alt="Preview of ${esc(file.name)}">`);
       section('File', rows([['name', esc(file.name)], ['format', esc(d.format)], ['size', `${d.bytes.toLocaleString()} bytes`],
-        ['dimensions', d.dimensions && `${d.dimensions.width} × ${d.dimensions.height}`], ['SHA-256', `<code>${esc(d.sha256)}</code>`]]));
+        ['dimensions', d.dimensions && `${d.dimensions.width} × ${d.dimensions.height}`], ['SHA-256', `<code class="wrap-anywhere">${esc(d.sha256)}</code> <button class="btn sm" type="button" id="cp-hash">Copy</button>`],
+        ['embedded', (d.markers || []).length ? esc(d.markers.join(', ')) : null]]) + '<p style="margin:10px 0 0"><button class="btn sm" type="button" id="cp-json">Copy JSON</button></p>');
+      $('cp-hash').onclick = () => copy(d.sha256, 'Hash'); $('cp-json').onclick = () => copy(JSON.stringify(last, null, 2), 'JSON');
       if (d.flags.length) section('Worth a closer look', d.flags.map(f => `<div class="notice warn" style="margin:4px 0">${esc(f)}</div>`).join(''));
+      else section('Worth a closer look', '<span class="muted small">Nothing unusual in the metadata. That does not prove the image is authentic.</span>');
       if (d.exif) {
         const e = d.exif, g = e.gps;
-        section('Camera and time', rows([['make', esc(e.make)], ['model', esc(e.model)], ['lens', esc(e.lens)], ['software', esc(e.software)], ['captured', esc(e.captured)], ['modified', esc(e.modified)]]));
+        section('Camera and time', rows([['make', esc(e.make)], ['model', esc(e.model)], ['lens', esc(e.lens)], ['software', esc(e.software)], ['captured', esc(e.captured)], ['modified', esc(e.modified)]]) + '<p class="muted small" style="margin:8px 0 0">Camera clocks are usually local time without a time zone.</p>');
         if (g) section('GPS', rows([['position', `${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}`], ['altitude', esc(g.altitude)],
-          ['map', `<a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${g.lat}&mlon=${g.lon}#map=16/${g.lat}/${g.lon}">OpenStreetMap</a>`]]));
-        section(`All EXIF fields (${e.field_count})`, `<div class="table-wrap"><table class="kv">${e.fields.map(f => `<tr><th>${esc(f.tag)}</th><td>${esc(f.value)}</td></tr>`).join('')}</table></div>`);
+          ['map', `<a target="_blank" rel="noopener noreferrer" href="https://www.openstreetmap.org/?mlat=${g.lat}&mlon=${g.lon}#map=16/${g.lat}/${g.lon}">OpenStreetMap</a>`]]));
+        section(`All EXIF fields (${e.field_count})`, `<div class="table-wrap"><table class="kv">${e.fields.map(f => `<tr><th>${esc(f.tag)}</th><td class="wrap-anywhere">${esc(String(f.value).replace(/^"|"$/g, ''))}</td></tr>`).join('')}</table></div>`);
       }
     }
     $('drop').onclick = () => $('file').click();
@@ -66,14 +86,20 @@
     $('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
     $('drop').ondragleave = () => $('drop').classList.remove('over');
     $('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); e.dataTransfer.files[0] && analyse(e.dataTransfer.files[0]); };
-    $('go').onclick = () => {
-      let u; try { u = new URL($('url').value.trim()); if (!/^https?:$/.test(u.protocol)) throw 0; } catch { $('links').innerHTML = '<p class="err small" role="alert">Enter a valid http(s) URL.</p>'; return; }
+    function buildLinks(v) {
+      let u; try { u = new URL(v.trim()); if (!/^https?:$/.test(u.protocol)) throw 0; } catch { $('links').innerHTML = '<p class="err small" role="alert">Enter a valid http(s) URL.</p>'; return; }
+      store.set('imgmeta.url', u.href);
+      try { history.replaceState(null, '', '?q=' + encodeURIComponent(u.href)); } catch {}
       const enc = encodeURIComponent(u.href);
-      $('links').innerHTML = [['Google Lens', `https://lens.google.com/uploadbyurl?url=${enc}`], ['TinEye', `https://tineye.com/search?url=${enc}`],
+      $('links').innerHTML = '<ul class="list-plain">' + [['Google Lens', `https://lens.google.com/uploadbyurl?url=${enc}`], ['TinEye', `https://tineye.com/search?url=${enc}`],
         ['Yandex Images', `https://yandex.com/images/search?rpt=imageview&url=${enc}`], ['Bing Visual Search', `https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:${enc}`]]
-        .map(([n, h]) => `<li><a target="_blank" rel="noopener noreferrer" href="${h}">${n}</a></li>`).join('');
-      $('links').innerHTML = `<ul class="list-plain">${$('links').innerHTML}</ul>`;
-    };
+        .map(([n, h]) => `<li><a target="_blank" rel="noopener noreferrer" href="${h}">${n}</a></li>`).join('') +
+        `<li><a href="../provenance/?q=${enc}">Find the likely original source (Image source finder)</a> <span class="faint small">if installed</span></li></ul>`;
+    }
+    $('uf').onsubmit = e => { e.preventDefault(); buildLinks($('url').value); };
+    document.addEventListener('paste', e => { const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith('image/')); if (f) { e.preventDefault(); analyse(f); } });
+    const init = new URLSearchParams(location.search).get('q') || store.get('imgmeta.url');
+    if (init) { $('url').value = init; if (new URLSearchParams(location.search).get('q')) buildLinks(init); }
   </script>
 </body>
 </html>

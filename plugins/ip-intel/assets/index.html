@@ -61,7 +61,8 @@
     const $ = id => document.getElementById(id), out = $('out');
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const SRC = { ripe: ['RIPEstat (MaxMind GeoLite)', 'var(--c-ripe)'], ipwho: ['ipwho.is', 'var(--c-ipwho)'], ipapi: ['ipapi.co', 'var(--c-ipapi)'] };
-    let last = null, map = null, mapTried = false;
+    let last = null, map = null, mapTried = false, ticket = 0;
+    const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 
     function toast(msg, kind) {
       const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg;
@@ -81,13 +82,13 @@
     }
 
     async function run(q) {
-      q = q.trim(); if (!q) return;
+      q = q.trim(); if (!q) return; const my = ++ticket; store.set('ip-intel.q', q);
       history.replaceState(null, '', '?q=' + encodeURIComponent(q));
       out.setAttribute('aria-busy', 'true'); $('go').setAttribute('aria-busy', 'true');
       out.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>Asking RIPEstat, InternetDB, ipwho.is, ipapi.co, Tor and Spamhaus (a few seconds)…</div>`;
-      try { last = await api('api/overview?q=' + encodeURIComponent(q)); render(last); }
-      catch (e) { out.innerHTML = `<div class="state error" role="alert"><div class="h3">Lookup failed</div><p>${esc(e.message)}</p></div>`; }
-      out.setAttribute('aria-busy', 'false'); $('go').removeAttribute('aria-busy');
+      try { const d = await api('api/overview?q=' + encodeURIComponent(q)); if (my !== ticket) return; last = d; render(last); }
+      catch (e) { if (my !== ticket) return; out.innerHTML = `<div class="state error" role="alert"><div class="h3">Lookup failed</div><p>${esc(e.message)}</p></div>`; }
+      if (my === ticket) { out.setAttribute('aria-busy', 'false'); $('go').removeAttribute('aria-busy'); }
     }
 
     function render(d) {
@@ -105,6 +106,8 @@
         <span class="head-actions" style="margin-left:auto"><button class="btn sm" id="copy" type="button">Copy JSON</button></span></div>
         <div class="pills" style="margin-top:10px">${badges.join('')}</div>`;
       if (d.host) html += `<div class="chips" aria-label="Addresses of ${esc(d.host.name)}"><span class="muted small" style="align-self:center">${esc(d.host.name)} →</span>${d.host.ips.map(i => `<button type="button" class="btn chip${i === d.ip ? ' on' : ''}" data-ip="${esc(i)}">${esc(i)}</button>`).join('')}</div>`;
+      { const hq = encodeURIComponent(d.host ? d.host.name : d.ip);
+        html += `<p class="mini" style="margin:10px 0 0">Related: <a href="../lookup/?q=${hq}">DNS &amp; registration</a>${d.host ? ` · <a href="../subdomain-enum/?q=${hq}">Subdomains</a> · <a href="../domain-hygiene/?q=${hq}">Domain hygiene</a>` : ''}</p>`; }
       html += '</section><div class="cols">';
 
       // Owner
@@ -191,7 +194,7 @@
     }
 
     $('f').onsubmit = e => { e.preventDefault(); run($('q').value); };
-    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); }
+    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); } else { const l = store.get('ip-intel.q'); if (l) $('q').value = l; }
   </script>
 </body>
 </html>

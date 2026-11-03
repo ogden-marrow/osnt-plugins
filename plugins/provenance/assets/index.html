@@ -46,12 +46,13 @@
     <div style="margin-top:16px">
     <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Choose an image (it is only selected, not sent)"><strong>Choose or drop an image</strong><span class="small">It is only selected here, not sent</span><input id="file" type="file" accept="image/*" hidden></div>
     <div class="or" aria-hidden="true">or</div>
-    <div><label class="sr-only" for="url">Public image URL</label><input id="url" type="text" placeholder="https://example.com/photo.jpg  (public image URL)" autocomplete="off" spellcheck="false"></div>
+    <div><label class="sr-only" for="url">Public image URL</label><input id="url" type="url" inputmode="url" style="min-height:44px;font-size:16px" placeholder="https://example.com/photo.jpg  (public image URL)" autocomplete="off" spellcheck="false"></div>
     <p id="sel" class="muted small" style="margin:10px 0 0"></p>
-    <div class="run"><button id="go" class="btn primary lg">Run investigation</button> <span id="status" class="muted small" role="status" aria-live="polite"></span></div>
+    <div class="run"><button id="go" class="btn primary lg">Run investigation</button> <button id="cancel" class="btn" type="button" hidden>Cancel</button> <button id="cpjson" class="btn" type="button" hidden>Copy JSON</button> <span id="status" class="muted small" role="status" aria-live="polite"></span></div>
     <p class="faint small" style="margin:12px 0 0">Takes up to about 90 seconds. Credentials are managed in <a href="/settings#credentials" target="_top">Settings</a>.</p>
     </div>
-    <div id="out" aria-live="polite"></div>
+    <div id="out" aria-live="polite" aria-busy="false"></div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
   </main>
   <script>
     const $ = id => document.getElementById(id), out = $('out');
@@ -83,22 +84,40 @@
     $('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); pick(e.dataTransfer.files[0]); };
     $('url').oninput = () => { if ($('url').value) { file = null; $('sel').textContent = ''; } };
 
+    const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+    let ctl = null, lastResult = null;
+    function toast(msg, kind) { const t = el('div', { class: 'toast ' + (kind || '') }, msg); $('toasts').append(t); setTimeout(() => t.remove(), 3000); }
+    const failBox = (title, msg) => out.append(el('div', { class: 'state error', role: 'alert' }, el('div', { class: 'h3' }, title), el('p', {}, msg)));
+    $('cancel').onclick = () => ctl && ctl.abort();
+    $('cpjson').onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(lastResult, null, 2)); toast('JSON copied'); } catch { toast('Copy failed: the browser blocked clipboard access', 'err'); } };
+    $('url').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('go').click(); } };
+
     $('go').onclick = async () => {
       const u = $('url').value.trim();
-      if (!file && !u) { $('status').textContent = 'Choose an image or enter a URL first.'; return; }
+      if (!file && !u) { $('status').textContent = 'Choose an image or enter a URL first.'; $('url').focus(); return; }
+      if (!file && !/^https?:\/\//i.test(u)) { $('status').textContent = 'The URL must start with http:// or https://'; $('url').focus(); return; }
       if (file && file.size > 15 * 1024 * 1024) { $('status').textContent = 'Image is larger than 15 MB.'; return; }
-      $('go').disabled = true; $('go').setAttribute('aria-busy', 'true'); $('status').textContent = 'Investigating… (up to ~90 s)'; out.replaceChildren();
+      if (u) { store.set('provenance.url', u); try { history.replaceState(null, '', '?q=' + encodeURIComponent(u)); } catch {} }
+      $('go').disabled = true; $('go').setAttribute('aria-busy', 'true'); $('cancel').hidden = false; $('cpjson').hidden = true; out.setAttribute('aria-busy', 'true');
+      $('status').textContent = 'Investigating… (up to ~90 s)'; out.replaceChildren();
+      ctl = new AbortController(); const t0 = Date.now();
       try {
         const r = file
-          ? await fetch('api/investigate', { method: 'POST', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file })
-          : await fetch('api/investigate?url=' + encodeURIComponent(u));
-        const d = await r.json();
-        if (!r.ok) { out.append(el('div', { class: 'state error', role: 'alert' }, el('div', { class: 'h3' }, 'Investigation failed'), el('p', {}, d.error || ('HTTP ' + r.status)))); }
-        else render(d, file);
-        $('status').textContent = r.ok ? `Done in ${(d.total_ms / 1000).toFixed(1)} s` : '';
-      } catch (e) { out.append(el('div', { class: 'state error', role: 'alert' }, el('div', { class: 'h3' }, 'Request failed'), el('p', {}, String(e)))); $('status').textContent = ''; }
-      $('go').disabled = false; $('go').removeAttribute('aria-busy');
+          ? await fetch('api/investigate', { method: 'POST', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file, signal: ctl.signal })
+          : await fetch('api/investigate?url=' + encodeURIComponent(u), { signal: ctl.signal });
+        const d = await r.json().catch(() => ({ error: 'The hub returned an unreadable answer (HTTP ' + r.status + ').' }));
+        if (!r.ok) failBox('Investigation failed', d.error || ('HTTP ' + r.status));
+        else { lastResult = d; try { render(d, file); } catch (e) { failBox('Could not display the result', String(e)); } $('cpjson').hidden = false; }
+        $('status').textContent = r.ok ? `Done in ${((d.total_ms || (Date.now() - t0)) / 1000).toFixed(1)} s` : '';
+      } catch (e) {
+        if (e.name === 'AbortError') { failBox('Cancelled', 'The request was cancelled. The server may finish the run in the background.'); }
+        else failBox('Request failed', String(e));
+        $('status').textContent = '';
+      }
+      $('go').disabled = false; $('go').removeAttribute('aria-busy'); $('cancel').hidden = true; out.setAttribute('aria-busy', 'false');
     };
+    // Deep link: ?q=<image url> pre-fills the form. It does not auto-run, because a run sends the image to third-party services.
+    { const q = new URLSearchParams(location.search).get('q') || store.get('provenance.url'); if (q) $('url').value = q; if (new URLSearchParams(location.search).get('q')) { $('sel').textContent = 'URL filled in from a link. Nothing has been sent; press Run investigation to start.'; $('go').focus(); } }
 
     function render(d, f) {
       if (f) { if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = URL.createObjectURL(f); section('Image (local preview)', el('img', { src: previewUrl, alt: 'selected image' })); }
@@ -112,14 +131,14 @@
         if (e) status.append(el('p', {}, 'Earliest known appearance: ', el('b', {}, e.date || 'date unknown'), ' ', e.url ? safeLink(e.url) : '',
           e.basis ? el('div', { class: 'muted' }, e.basis) : ''));
         const cs = section('Ranked candidates');
-        if (!rep.candidates.length) cs.append(el('p', { class: 'muted' }, 'No candidates found.'));
-        rep.candidates.forEach((c, i) => cs.append(el('div', { class: 'cand' },
+        if (!(rep.candidates || []).length) cs.append(el('p', { class: 'muted' }, 'No candidates found.'));
+        (rep.candidates || []).forEach((c, i) => cs.append(el('div', { class: 'cand' },
           el('div', {}, `${i + 1}. `, el('b', {}, c.publisher || 'unknown publisher'), '  ', el('span', { class: 'muted' }, c.earliest_date_seen || 'no date')),
-          el('div', {}, safeLink(c.url)), el('div', {}, c.why), c.evidence.length ? list(c.evidence) : '')));
-        section('Caveats', list(rep.caveats));
-        if (rep.checks_not_done.length) section('Checks not done (for you)', list(rep.checks_not_done));
+          el('div', {}, safeLink(c.url)), el('div', {}, c.why), (c.evidence || []).length ? list(c.evidence) : '')));
+        section('Caveats', list(rep.caveats || []));
+        if ((rep.checks_not_done || []).length) section('Checks not done (for you)', list(rep.checks_not_done));
       }
-      (d.notes || []).forEach(n => status.append(el('p', { class: 'warn' }, n)));
+      (d.notes || []).forEach(n => status.append(el('p', { class: 'notice warn small' }, n)));
       const bk = d.backends || {};
       status.append(el('table', { class: 'kv' }, ...Object.entries(bk).map(([k, v]) => el('tr', {}, el('th', {}, k), el('td', {}, String(v))))));
 
