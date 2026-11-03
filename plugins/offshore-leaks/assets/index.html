@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Offshore Leaks · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <style>
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 280px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+    @media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+    #map { height: 340px; border-radius: var(--radius-sm); background: var(--surface-2); }
+    .rows button { all: unset; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; width: 100%; box-sizing: border-box; padding: 10px 14px; border-top: 1px solid var(--edge); cursor: pointer; }
+    .rows button:first-child { border-top: 0; } .rows button:hover { background: var(--surface-2); }
+    .rows button[aria-current="true"] { box-shadow: inset 3px 0 0 var(--accent); background: var(--surface-2); }
+    .rows button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+    .rows .nm { font-weight: 600; overflow-wrap: anywhere; } .rows .sub { color: var(--ink-2); font-size: var(--fs-xs); grid-column: 1; }
+    footer.src { margin-top: 28px; font-size: var(--fs-xs); color: var(--ink-3); max-width: 90ch; }
+    .tabs-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>OSNT</a>
+    <span class="sep" aria-hidden="true">/</span><h1>Offshore Leaks</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Offshore companies, trusts and foundations</h2>
+      <p>Search ICIJ's Offshore Leaks database by entity name. Individuals are not searched.</p></div></div>
+    <div class="notice info" style="margin-bottom:12px"><div><b>Appearing here is not evidence of wrongdoing.</b> Offshore structures have legitimate uses. The database is a set of leaked records; entries can be out of date (the Panama Papers data runs to 2015).</div></div>
+    <form id="f" role="search"><label class="sr-only" for="q">Entity name</label><input id="q" placeholder="Entity name, for example Mossack" autofocus autocomplete="off" spellcheck="false" maxlength="100"><button class="btn primary">Search</button></form>
+    <div class="tabs-inline"><label class="check"><input type="checkbox" id="inter"> Include intermediaries (can be individual professionals; name and source only)</label></div>
+    <div class="layout">
+      <section class="card flush" aria-live="polite" aria-busy="false"><div class="card-head" style="padding:12px 14px 0"><h3 class="h3" id="rt">Results</h3><span class="small faint" id="rn"></span></div><div id="res" class="rows" style="padding-top:8px"><div class="state" style="margin:12px;border-style:dashed"><div class="h3">Search to begin</div><p>Results list the leak each record comes from. Open one for jurisdiction, status and dates.</p></div></div></section>
+      <div class="stack" style="display:grid;gap:16px">
+        <section class="card"><div class="card-head"><h3 class="h3">Jurisdictions</h3><button class="btn sm" id="mapit" disabled>Place results on map</button></div><div id="map" role="img" aria-label="Map of jurisdictions of the entities found"></div><p class="small faint" id="mapnote" style="margin:8px 0 0">Jurisdictions come from each entity's record, fetched politely one per second for the first ten results.</p></section>
+        <section class="card" id="detail"><h3 class="h3">Details</h3><p class="muted small" style="margin:6px 0 0">Select a result.</p></section>
+      </div>
+    </div>
+    <footer class="src">Data: International Consortium of Investigative Journalists (ICIJ), Offshore Leaks Database (Panama, Paradise and Pandora Papers, Bahamas Leaks, Offshore Leaks). ICIJ publishes the database under the Open Database License with contents under Creative Commons Attribution-ShareAlike; see offshoreleaks.icij.org/terms-of-use (terms not verified by this plugin). Only entities and intermediaries are shown. Officer, beneficiary and nominee records, addresses, and the names of connected people are deliberately left out; open the ICIJ page for the full record. Queries and node pages are fetched on demand and cached.</footer>
+  </main>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const toast = (m, k = '') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
+    async function api(p) { const r = await fetch(p), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+    let map, layer, results = [], info = {}, pins = {};
+    (async () => { try { ({ map } = await OSNT.createMap('map')); layer = L.layerGroup().addTo(map); map.setView([20, 0], 1); } catch (e) { $('map').innerHTML = '<div class="state" style="margin:12px"><div class="h3">Map unavailable</div><p>The shared map could not load; the list still works.</p></div>'; } })();
+    function drawPins() {
+      if (!layer) return; layer.clearLayers();
+      const by = {}; Object.values(info).forEach(n => { if (n.lat != null) { const k = n.jurisdiction; (by[k] ||= { lat: n.lat, lon: n.lon, n: 0 }).n++; } });
+      const pts = Object.entries(by).map(([k, v]) => { L.circleMarker([v.lat, v.lon], { radius: 6 + Math.min(14, v.n * 2), color: '#0c7a62', weight: 2, fillOpacity: .45 }).bindTooltip(`${k}: ${v.n}`).addTo(layer); return [v.lat, v.lon]; });
+      if (pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 5 });
+    }
+    function list() {
+      $('res').innerHTML = results.map((r, i) => { const n = info[r.id]; return `<button data-i="${i}"><span class="nm">${esc(r.name)}</span><span>${r.score != null ? `<span class="badge">${r.score.toFixed(0)}</span>` : ''}</span><span class="sub"><span class="badge ${r.kind === 'entity' ? 'ok' : ''}">${r.kind}</span> ${esc(r.leak || 'ICIJ')}${n && n.jurisdiction ? ' · ' + esc(n.jurisdiction) : ''}${n && n.status ? ' · ' + esc(n.status) : ''}</span></button>`; }).join('');
+      $('res').querySelectorAll('button').forEach(b => b.onclick = () => open(+b.dataset.i, b));
+    }
+    async function open(i, btn) {
+      document.querySelectorAll('.rows button').forEach(x => x.removeAttribute('aria-current')); btn && btn.setAttribute('aria-current', 'true');
+      const r = results[i], el = $('detail'); el.innerHTML = '<div class="loading"><span class="spin"></span>Loading record…</div>';
+      try {
+        const d = await api('api/entity?id=' + r.id); info[r.id] = d;
+        const kv = [['Kind', d.kind], ['Source leak', d.source], ['Jurisdiction', d.jurisdiction], ['Status', d.status], ['Incorporated', d.incorporation_date], ['Inactivated', d.inactivation_date], ['Struck off', d.struck_off_date], ['Original name', d.original_name !== d.name ? d.original_name : null], ['Service provider', d.service_provider], ['Countries', d.countries], ['Note', d.note]].filter(x => x[1]);
+        const counts = Object.entries(d.connected_counts || {}).map(([k, v]) => `${v} ${k.toLowerCase()} record${v === 1 ? '' : 's'}`).join(', ');
+        el.innerHTML = `<h3 class="h3" style="margin-bottom:6px;overflow-wrap:anywhere">${esc(d.name)}</h3><table class="kv">${kv.map(([k, v]) => `<tr><th>${k}</th><td>${esc(v)}</td></tr>`).join('')}${counts ? `<tr><th>Connected</th><td>${esc(counts)} <span class="faint">(counts only)</span></td></tr>` : ''}</table>${d.valid_until ? `<p class="small faint" style="margin:8px 0 0">${esc(d.valid_until)}</p>` : ''}<p style="margin:10px 0 0"><a class="btn sm" href="${esc(d.url)}" target="_blank" rel="noopener">Open on ICIJ</a></p>`;
+        list(); document.querySelector(`.rows button[data-i="${i}"]`)?.setAttribute('aria-current', 'true'); drawPins();
+      } catch (e) { el.innerHTML = `<h3 class="h3">${esc(r.name)}</h3><div class="notice err" style="margin-top:8px"><div>${esc(e.message)}</div></div>`; }
+    }
+    $('f').onsubmit = async e => {
+      e.preventDefault(); const q = $('q').value.trim(); if (q.length < 2) return;
+      const box = $('res'); box.parentElement.setAttribute('aria-busy', 'true'); box.innerHTML = '<div class="loading" style="padding:14px"><span class="spin"></span>Searching…</div>'; info = {}; if (layer) layer.clearLayers(); $('mapit').disabled = true;
+      try {
+        const d = await api(`api/search?q=${encodeURIComponent(q)}` + ($('inter').checked ? '&intermediaries=1' : '')); results = d.results; box.parentElement.setAttribute('aria-busy', 'false');
+        $('rn').textContent = `${results.length} found`;
+        if (!results.length) { box.innerHTML = `<div class="state" style="margin:12px"><div class="h3">Nothing found for "${esc(q)}"</div><p>Try a shorter name or another spelling.</p></div>`; return; }
+        list(); $('mapit').disabled = !results.some(r => r.kind === 'entity');
+      } catch (err) { box.parentElement.setAttribute('aria-busy', 'false'); box.innerHTML = `<div class="state error" style="margin:12px" role="alert"><div class="h3">Search failed</div><p>${esc(err.message)}</p></div>`; }
+    };
+    $('mapit').onclick = async () => {
+      const ids = results.filter(r => r.kind === 'entity').slice(0, 10).map(r => r.id); $('mapit').disabled = true;
+      for (let i = 0; i < ids.length; i += 5) {
+        $('mapnote').textContent = `Fetching records ${i + 1}-${Math.min(i + 5, ids.length)} of ${ids.length}…`;
+        try { const d = await api('api/enrich?ids=' + ids.slice(i, i + 5).join(',')); d.nodes.forEach(n => { if (!n.error) info[n.id] = n; }); list(); drawPins(); } catch (e) { toast(e.message, 'err'); break; }
+      }
+      const placed = Object.values(info).filter(n => n.lat != null).length;
+      $('mapnote').textContent = `${placed} of ${Object.keys(info).length} records placed on the map; others have no recognised jurisdiction.`;
+    };
+  </script>
+</body>
+</html>

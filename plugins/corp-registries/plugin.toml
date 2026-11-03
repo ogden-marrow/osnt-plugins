@@ -1,0 +1,31 @@
+id = "corp-registries"
+name = "Company registries"
+description = "Search company registers (GLEIF, Wikidata, Norway, Czechia, Finland, Denmark, optional UK/OpenCorporates/Aleph) and see ownership links. Companies only."
+grid = "Organisations"
+port = 8142
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_CORP_BIND = "127.0.0.1:{port}"
+OSNT_CORP_STATE = "{state_dir}/cache"
+
+[[secret]]
+name = "COMPANIES_HOUSE_API_KEY"
+label = "Companies House API key (UK company search)"
+help_url = "https://developer.company-information.service.gov.uk/"
+required = false
+
+[[secret]]
+name = "OPENCORPORATES_API_TOKEN"
+label = "OpenCorporates API token"
+help_url = "https://opencorporates.com/api_accounts/new"
+required = false
+
+[[secret]]
+name = "ALEPH_API_KEY"
+label = "OCCRP Aleph API key"
+help_url = "https://aleph.occrp.org/"
+required = false

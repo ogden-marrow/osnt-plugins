@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Public funds · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 280px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .tabs { padding: 0; margin-top: 16px; border: 1px solid var(--edge); border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; }
+    .panel { border: 1px solid var(--edge); border-radius: 0 0 var(--radius) var(--radius); background: var(--surface); padding: 16px; min-height: 160px; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 14px; }
+    .tile { border: 1px solid var(--edge); border-radius: var(--radius); padding: 12px; min-width: 0; }
+    .tile .lbl { font-size: var(--fs-xs); color: var(--ink-2); font-weight: 600; } .tile .val { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 2px 0 4px; }
+    .tile svg { display: block; width: 100%; height: 40px; color: var(--accent); } .tile .sub { font-size: var(--fs-xs); color: var(--ink-3); }
+    .bars { display: grid; gap: 6px; margin: 6px 0 14px; } .bar { display: grid; grid-template-columns: minmax(80px, 200px) 1fr auto; gap: 8px; align-items: center; font-size: var(--fs-sm); }
+    .bar .t { overflow-wrap: anywhere; } .bar .b { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; } .bar .b i { display: block; height: 100%; background: var(--accent); }
+    @media (max-width: 520px) { .bar { grid-template-columns: 1fr auto; } .bar .b { grid-column: 1 / -1; } }
+    .seg { margin-bottom: 12px; }
+    h4.lbl { margin: 14px 0 6px; font-size: var(--fs-sm); color: var(--ink-2); }
+    button.lnk { all: unset; cursor: pointer; color: var(--link); } button.lnk:focus-visible { outline: 2px solid var(--focus); }
+    footer.src { margin-top: 28px; font-size: var(--fs-xs); color: var(--ink-3); max-width: 90ch; }
+    .top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>OSNT</a>
+    <span class="sep" aria-hidden="true">/</span><h1>Public funds</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Follow the public money, by organisation</h2>
+      <p>Federal awards, nonprofit finances, lobbying engagements and EU tenders. Organisations only.</p></div></div>
+    <form id="f" role="search"><label class="sr-only" for="q">Organisation name</label><input id="q" placeholder="Organisation, for example Lockheed Martin" autofocus autocomplete="off" spellcheck="false" maxlength="100"><button class="btn primary">Search</button></form>
+    <div class="tabs" role="tablist" aria-label="Data source">
+      <button class="tab" role="tab" aria-selected="true" data-t="awards">Awards</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="nonprofit">Nonprofit</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="lobbying">Lobbying</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="tenders">Tenders</button>
+    </div>
+    <div class="panel" id="panel" role="tabpanel" aria-live="polite" aria-busy="false"><div class="state"><div class="h3">Enter an organisation</div><p>Each tab queries its own public source when opened.</p></div></div>
+    <footer class="src">Sources: USAspending.gov (US Treasury; public domain), ProPublica Nonprofit Explorer (IRS Form 990 data; ProPublica terms apply), US Senate/House Lobbying Disclosure Act database (lda.gov; public), and EU Tenders Electronic Daily via the TED API (Publications Office of the EU; reuse with attribution). Amounts are as reported by each source; award values are obligations, not payments. Name matching is by text, so related companies and unrelated namesakes may appear: check the matched names. Recipients are restricted to business, government, higher-education and nonprofit categories; nonprofit pages omit care-of names and street addresses; lobbying rows omit lobbyist and contact names.</footer>
+  </main>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id), panel = $('panel');
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const safe = u => /^https:\/\//.test(u || '') ? u : '#';
+    const toast = (m, k = '') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
+    async function api(p) { const r = await fetch(p), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+    const money = (v, c = '$') => { if (v == null) return '-'; const a = Math.abs(v), s = v < 0 ? '-' : ''; for (const [n, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (a >= n) return s + c + (a / n).toFixed(a / n >= 100 ? 0 : 1) + u; return s + c + a.toFixed(0); };
+    const spark = (vals, label) => { if (vals.length < 2) return ''; const lo = Math.min(...vals), hi = Math.max(...vals), sp = hi - lo || 1; const pts = vals.map((x, i) => [4 + i * (192 / (vals.length - 1)), 36 - ((x - lo) / sp) * 30]); return `<svg viewBox="0 0 200 40" preserveAspectRatio="none" role="img" aria-label="${esc(label)}"><polyline fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" points="${pts.map(p => p.join(',')).join(' ')}"/></svg>`; };
+    const bars = (rows, fmt) => { const m = Math.max(...rows.map(r => r.v), 1); return `<div class="bars">${rows.map(r => `<div class="bar"><span class="t">${esc(r.t)}</span><span class="b"><i style="width:${Math.max(2, r.v / m * 100)}%"></i></span><span class="mono">${fmt(r.v)}</span></div>`).join('')}</div>`; };
+    const csv = (name, head, rows) => { const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`; const t = [head, ...rows].map(r => r.map(q).join(',')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/csv' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
+    let tab = 'awards', org = '', kind = 'contracts', role = 'buyer', year = null, lastRows = null;
+    const busy = m => { panel.setAttribute('aria-busy', 'true'); panel.innerHTML = `<div class="loading"><span class="spin"></span>${esc(m)}</div>`; };
+    const fail = e => { panel.setAttribute('aria-busy', 'false'); panel.innerHTML = `<div class="state error" role="alert"><div class="h3">Could not load</div><p>${esc(e.message)}</p></div>`; };
+    const empty = (t, p) => `<div class="state"><div class="h3">${esc(t)}</div><p>${esc(p)}</p></div>`;
+    const csvBtn = () => `<button class="btn sm" id="csv">Export CSV</button>`;
+
+    async function awards() {
+      busy('Querying USAspending (can take several seconds)…');
+      const d = await api(`api/awards?org=${encodeURIComponent(org)}&kind=${kind}`); panel.setAttribute('aria-busy', 'false');
+      const yrs = d.by_fiscal_year;
+      let h = `<div class="top"><div class="seg"><button class="btn sm ${kind === 'contracts' ? 'on' : ''}" data-k="contracts">Contracts</button> <button class="btn sm ${kind === 'grants' ? 'on' : ''}" data-k="grants">Grants</button></div>${csvBtn()}</div>`;
+      if (!yrs.length || !d.total) { panel.innerHTML = h + empty('No awards found', `No ${kind} to a recipient matching "${org}" from ${d.period.start} to ${d.period.end}.`); bind(); return; }
+      h += `<div class="tiles"><div class="tile"><div class="lbl">Total ${kind}, ${esc(d.period.start.slice(0, 4))} to ${esc(d.period.end.slice(0, 4))}</div><div class="val">${money(d.total)}</div>${spark(yrs.map(r => r.amount || 0), 'amount by fiscal year')}<div class="sub">${yrs.length} fiscal years, latest ${money(yrs.at(-1).amount)}</div></div></div>`;
+      if (d.matched_recipients.length) h += `<p class="small muted">Recipient names matched: ${d.matched_recipients.map(esc).join('; ')}</p>`;
+      h += `<h4 class="lbl">By fiscal year</h4>${bars(yrs.map(r => ({ t: 'FY ' + r.fiscal_year, v: r.amount || 0 })), v => money(v))}`;
+      if (d.agencies.length) h += `<h4 class="lbl">Top awarding agencies</h4>${bars(d.agencies.map(a => ({ t: a.name, v: a.amount || 0 })), v => money(v))}`;
+      h += `<h4 class="lbl">Largest awards</h4><div class="table-wrap"><table class="data"><thead><tr><th>Award</th><th>Recipient</th><th>Agency</th><th>Start</th><th class="num">Amount</th></tr></thead><tbody>${d.top_awards.map(a => `<tr><td>${a.url ? `<a href="${esc(safe(a.url))}" target="_blank" rel="noopener">${esc(a.award_id)}</a>` : esc(a.award_id)}<div class="small faint">${esc(a.description || '')}</div></td><td>${esc(a.recipient)}</td><td>${esc(a.agency)}</td><td class="mono">${esc(a.start)}</td><td class="num mono">${money(a.amount)}</td></tr>`).join('')}</tbody></table></div><p class="small faint">${esc(d.note)}</p>`;
+      panel.innerHTML = h; bind();
+      lastRows = () => csv(`awards-${org}.csv`, ['Fiscal year', 'Amount'], yrs.map(r => [r.fiscal_year, r.amount]));
+    }
+    async function nonprofit(ein) {
+      busy('Loading nonprofit data…');
+      if (!ein) {
+        const d = await api('api/nonprofit?q=' + encodeURIComponent(org)); panel.setAttribute('aria-busy', 'false');
+        if (!d.organizations.length) { panel.innerHTML = empty('No nonprofit found', `Nothing matched "${org}" in IRS exempt-organisation data.`); return; }
+        panel.innerHTML = `<p class="small muted">${d.total} match${d.total === 1 ? '' : 'es'}; showing ${d.organizations.length}. Pick one for Form 990 totals.</p><div class="table-wrap"><table class="data"><thead><tr><th>Organisation</th><th>Location</th><th>NTEE</th></tr></thead><tbody>${d.organizations.map(o => `<tr><td><button class="lnk" data-ein="${esc(o.ein)}">${esc(o.name)}</button></td><td>${esc([o.city, o.state].filter(Boolean).join(', '))}</td><td class="mono">${esc(o.ntee || '')}</td></tr>`).join('')}</tbody></table></div>`;
+        panel.querySelectorAll('[data-ein]').forEach(b => b.onclick = () => nonprofit(b.dataset.ein).catch(fail)); lastRows = null; return;
+      }
+      const d = await api('api/nonprofit?ein=' + ein); panel.setAttribute('aria-busy', 'false');
+      const f = d.filings, rev = f.map(x => x.revenue || 0), as = f.map(x => x.assets || 0);
+      panel.innerHTML = `<div class="top"><div><b>${esc(d.name)}</b> <span class="muted small">EIN ${esc(d.ein)} · ${esc([d.city, d.state].filter(Boolean).join(', '))} · NTEE ${esc(d.ntee || '-')}</span></div><div class="row"><button class="btn sm" id="back">All matches</button>${csvBtn()}</div></div>
+        <div class="tiles"><div class="tile"><div class="lbl">Revenue (latest filing)</div><div class="val">${f.length ? money(f.at(-1).revenue) : '-'}</div>${spark(rev, 'revenue by year')}<div class="sub">${f.length ? 'tax year ' + esc(f.at(-1).year) : 'no filings with data'}</div></div><div class="tile"><div class="lbl">Total assets</div><div class="val">${f.length ? money(f.at(-1).assets) : '-'}</div>${spark(as, 'assets by year')}<div class="sub">${f.length} filings</div></div></div>
+        ${f.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Year</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Assets</th><th class="num">Liabilities</th><th></th></tr></thead><tbody>${[...f].reverse().map(x => `<tr><td class="mono">${esc(x.year)}</td><td class="num mono">${money(x.revenue)}</td><td class="num mono">${money(x.expenses)}</td><td class="num mono">${money(x.assets)}</td><td class="num mono">${money(x.liabilities)}</td><td>${x.pdf_url ? `<a href="${esc(safe(x.pdf_url))}" target="_blank" rel="noopener">990</a>` : ''}</td></tr>`).join('')}</tbody></table></div>` : empty('No Form 990 data', 'This organisation has no filings with extracted data.')}
+        <p style="margin:12px 0 0"><a class="small" href="${esc(safe(d.url))}" target="_blank" rel="noopener">Open on ProPublica</a></p>`;
+      $('back').onclick = () => nonprofit('').catch(fail); bind();
+      lastRows = () => csv(`nonprofit-${d.ein}.csv`, ['Year', 'Revenue', 'Expenses', 'Assets', 'Liabilities'], f.map(x => [x.year, x.revenue, x.expenses, x.assets, x.liabilities]));
+    }
+    async function lobbying() {
+      busy('Querying lobbying disclosures…');
+      const d = await api(`api/lobbying?org=${encodeURIComponent(org)}` + (year ? '&year=' + year : '')); panel.setAttribute('aria-busy', 'false'); year = d.year;
+      const by = d.by_year;
+      let h = `<div class="top"><div class="seg">${by.map(y => `<button class="btn sm ${y.year === d.year ? 'on' : ''}" data-y="${y.year}">${y.year} (${y.filings})</button>`).join(' ')}</div>${csvBtn()}</div>`;
+      h += `<div class="tiles"><div class="tile"><div class="lbl">Filings naming this client, by year</div><div class="val">${d.count}</div>${spark(by.map(y => y.filings), 'filings by year')}<div class="sub">in ${d.year}${d.partial ? `; showing ${d.shown}` : ''}</div></div><div class="tile"><div class="lbl">Reported income to firms (shown filings)</div><div class="val">${money(d.income_shown)}</div><div class="sub">expenses ${money(d.expenses_shown)}</div></div></div>`;
+      if (!d.filings.length) { panel.innerHTML = h + empty('No filings', `No lobbying filings in ${d.year} with a client matching "${org}".`); bind(); return; }
+      h += `<div class="table-wrap"><table class="data"><thead><tr><th>Report</th><th>Lobbying firm</th><th>Client</th><th>Issues</th><th class="num">Income</th><th class="num">Expenses</th></tr></thead><tbody>${d.filings.map(f => `<tr><td>${f.url ? `<a href="${esc(safe(f.url))}" target="_blank" rel="noopener">${esc(f.type)}</a>` : esc(f.type)}<div class="small faint mono">${esc(f.posted || '')}</div></td><td>${esc(f.registrant)}</td><td>${esc(f.client)}</td><td class="small">${esc((f.issues || []).join(', '))}</td><td class="num mono">${f.income != null ? money(f.income) : ''}</td><td class="num mono">${f.expenses != null ? money(f.expenses) : ''}</td></tr>`).join('')}</tbody></table></div>${d.partial ? `<p class="small faint">Showing the first ${d.shown} of ${d.count} filings. Totals cover only those.</p>` : ''}`;
+      panel.innerHTML = h; bind();
+      lastRows = () => csv(`lobbying-${org}-${d.year}.csv`, ['Report', 'Firm', 'Client', 'Income', 'Expenses', 'Issues'], d.filings.map(f => [f.type, f.registrant, f.client, f.income, f.expenses, (f.issues || []).join('; ')]));
+    }
+    async function tenders() {
+      busy('Querying EU tenders…');
+      const d = await api(`api/tenders?org=${encodeURIComponent(org)}&role=${role}`); panel.setAttribute('aria-busy', 'false');
+      let h = `<div class="top"><div class="seg"><button class="btn sm ${role === 'buyer' ? 'on' : ''}" data-r="buyer">As buyer</button> <button class="btn sm ${role === 'winner' ? 'on' : ''}" data-r="winner">As winner</button></div>${csvBtn()}</div>`;
+      const by = d.by_year || [];
+      if (!d.notices.length) { panel.innerHTML = h + empty('No notices', `No TED notices with a ${role} matching "${org}".`); bind(); return; }
+      h += `<div class="tiles"><div class="tile"><div class="lbl">Notices as ${role}</div><div class="val">${(d.total ?? d.notices.length).toLocaleString()}</div>${spark(by.map(y => y.notices), 'notices by year')}<div class="sub">${by.length ? by[0].year + ' to ' + by.at(-1).year + ': ' + by.map(y => y.notices).join(', ') : ''}</div></div></div>`;
+      h += `<div class="table-wrap"><table class="data"><thead><tr><th>Published</th><th>Notice</th><th>Buyer</th><th>Winner</th></tr></thead><tbody>${d.notices.map(n => `<tr><td class="mono">${esc(n.published || '')}</td><td>${n.url ? `<a href="${esc(safe(n.url))}" target="_blank" rel="noopener">${esc(n.title || n.id)}</a>` : esc(n.title || n.id)}<div class="small faint mono">${esc(n.id)} ${esc(n.type || '')}</div></td><td>${esc(n.buyer || '')}</td><td>${esc(n.winner || '')}</td></tr>`).join('')}</tbody></table></div><p class="small faint">Showing ${d.notices.length} notices in the order TED returns them.</p>`;
+      panel.innerHTML = h; bind();
+      lastRows = () => csv(`tenders-${org}.csv`, ['Published', 'Notice', 'Title', 'Buyer', 'Winner'], d.notices.map(n => [n.published, n.id, n.title, n.buyer, n.winner]));
+    }
+    function bind() {
+      panel.querySelectorAll('[data-k]').forEach(b => b.onclick = () => { kind = b.dataset.k; run(); });
+      panel.querySelectorAll('[data-y]').forEach(b => b.onclick = () => { year = +b.dataset.y; run(); });
+      panel.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { role = b.dataset.r; run(); });
+      const c = $('csv'); if (c) c.onclick = () => lastRows ? lastRows() : toast('Nothing to export', 'warn');
+    }
+    function run() { if (!org) return; lastRows = null; ({ awards, nonprofit: () => nonprofit(''), lobbying, tenders }[tab])().catch(fail); }
+    document.querySelectorAll('.tab').forEach(t => t.onclick = () => { tab = t.dataset.t; document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-selected', x === t)); run(); });
+    $('f').onsubmit = e => { e.preventDefault(); const v = $('q').value.trim(); if (v.length < 2) return; org = v; year = null; run(); };
+  </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+id = "sec-edgar"
+name = "SEC filings"
+description = "US-listed companies at SEC EDGAR: profile, filing timeline, annual XBRL figures and subsidiary-list links."
+grid = "Organisations"
+port = 8139
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_SEC_EDGAR_BIND = "127.0.0.1:{port}"
+OSNT_SEC_EDGAR_STATE = "{state_dir}/cache"
+
+# SEC's fair-access policy requires every automated client to say who it is. This is a declaration (an email address or a
+# URL), not a credential; the plugin sends nothing to SEC until it is set.
+[[secret]]
+name = "SEC_CONTACT"
+label = "Contact for SEC's User-Agent (email address or URL)"
+help_url = "https://www.sec.gov/os/accessing-edgar-data"
+required = true

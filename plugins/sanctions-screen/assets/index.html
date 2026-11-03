@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sanctions screening · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 280px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .opts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 10px 0 0; align-items: center; }
+    .strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 12px; }
+    .chip { border: 1px solid var(--edge); border-radius: var(--radius-sm); padding: 8px 10px; background: var(--surface); font-size: var(--fs-xs); color: var(--ink-2); min-width: 0; }
+    .chip label { display: flex; gap: 6px; align-items: center; color: var(--ink); font-weight: 600; font-size: var(--fs-sm); cursor: pointer; }
+    .chip .meta { margin-top: 2px; overflow-wrap: anywhere; }
+    .why { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; font-size: var(--fs-sm); }
+    .why table { border-collapse: collapse; } .why td, .why th { padding: 2px 14px 2px 0; text-align: left; font-weight: 400; }
+    .nm { font-weight: 600; }
+    button.lnk { all: unset; cursor: pointer; color: var(--link); font-size: var(--fs-xs); } button.lnk:focus-visible { outline: 2px solid var(--focus); }
+    footer.src { margin-top: 28px; font-size: var(--fs-xs); color: var(--ink-3); max-width: 90ch; }
+    .idform { display: flex; flex-wrap: wrap; gap: 8px; }
+    .idform input { flex: 1 1 180px; min-height: 40px; font-size: 16px; }
+    .idform select { min-height: 40px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>OSNT</a>
+    <span class="sep" aria-hidden="true">/</span><h1>Sanctions screening</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Screen a name against sanctions lists</h2>
+      <p>Companies, organisations, vessels and aircraft on official lists, with an explanation of every match. Lists are downloaded when first used.</p></div></div>
+    <form id="f" role="search"><label class="sr-only" for="q">Name to screen</label><input id="q" placeholder="Company, vessel or aircraft name" autofocus autocomplete="off" spellcheck="false" maxlength="120"><button class="btn primary" id="go">Screen</button></form>
+    <div class="opts">
+      <label class="check"><input type="checkbox" id="persons"> Include natural persons (name, list and programme only)</label>
+      <label class="check">Minimum score <select id="min" aria-label="Minimum match score"><option value="0.7">0.70 (broad)</option><option value="0.82" selected>0.82</option><option value="0.92">0.92 (strict)</option><option value="1">1.00 (exact)</option></select></label>
+    </div>
+    <div class="strip" id="strip" aria-label="Lists"></div>
+    <div id="out" style="margin-top:16px" aria-live="polite" aria-busy="false"></div>
+    <section class="card" style="margin-top:16px"><h3 class="h3" style="margin-bottom:8px">Check a vessel or aircraft identifier</h3>
+      <form class="idform" id="idf"><select id="idk" aria-label="Identifier type"><option value="imo">IMO number</option><option value="mmsi">MMSI</option><option value="reg">Aircraft registration</option></select><input id="idv" placeholder="9253325" autocomplete="off" spellcheck="false" aria-label="Identifier"><button class="btn">Check</button></form>
+      <div id="idout" class="small" style="margin-top:10px" aria-live="polite"></div></section>
+    <footer class="src">Data: OpenSanctions (opensanctions.org) redistributes these official lists in a common format; licence CC BY-NC 4.0, non-commercial use only. Lists: US OFAC SDN, EU financial sanctions, UN Security Council, UK sanctions list, US consolidated screening list, Swiss SECO, US BIS denied persons. "First seen" is when OpenSanctions first saw the entry, which can lag the official listing date. Records a list does not classify as company or person are treated like persons. Natural persons are off by default and, when included, shown with name, list, programme and first-seen date only. A match is a lead to verify against the official list, not a finding; no match is not clearance. Interpol notices are not included.</footer>
+  </main>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const toast = (m, k = '') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
+    async function api(path, opt) { const r = await fetch(path, opt), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+    const age = s => s == null ? 'not downloaded yet' : s < 120 ? 'just now' : s < 7200 ? Math.round(s / 60) + ' min old' : s < 172800 ? Math.round(s / 3600) + ' h old' : Math.round(s / 86400) + ' d old';
+    let LISTS = [];
+    function strip() {
+      $('strip').innerHTML = LISTS.map(l => `<div class="chip"><label><input type="checkbox" data-l="${l.id}" checked> ${esc(l.name)}</label><div class="meta">${l.records != null ? `${l.entities} entities, ${l.vessels} vessels, ${l.aircraft} aircraft · ` : ''}${esc(age(l.age_seconds))}</div><button class="lnk" data-r="${l.id}" title="Download a fresh copy">Refresh</button></div>`).join('');
+      $('strip').querySelectorAll('[data-r]').forEach(b => b.onclick = async () => { b.textContent = 'Refreshing…'; try { await api('api/lists/refresh?list=' + b.dataset.r, { method: 'POST' }); toast('List refreshed'); } catch (e) { toast(e.message, 'err'); } loadLists(); });
+    }
+    async function loadLists() { try { const d = await api('api/lists'); LISTS = d.lists; const keep = [...document.querySelectorAll('[data-l]')].filter(x => !x.checked).map(x => x.dataset.l); strip(); keep.forEach(k => { const el = document.querySelector(`[data-l="${k}"]`); if (el) el.checked = false; }); } catch (e) { $('strip').innerHTML = `<div class="notice err">${esc(e.message)}</div>`; } }
+    const kindBadge = k => ({ entity: 'Organisation', vessel: 'Vessel', aircraft: 'Aircraft', person: 'Person', unclassified: 'Unclassified' }[k] || k);
+    const scoreBadge = s => `<span class="badge ${s >= 0.92 ? 'low' : s >= 0.85 ? 'medium' : ''}" title="Higher means a closer match">${s.toFixed(2)}</span>`;
+    function render(d) {
+      out.setAttribute('aria-busy', 'false');
+      const stale = d.lists.filter(l => l.stale).map(l => l.list);
+      let h = stale.length ? `<div class="notice warn" style="margin-bottom:12px">Could not refresh ${esc(stale.join(', '))}; showing the last downloaded copy.</div>` : '';
+      if (!d.results.length) { out.innerHTML = h + `<div class="state"><div class="h3">No match at ${d.min_score.toFixed(2)} or above</div><p>Nothing in the selected lists resembles "${esc(d.query)}". That is not clearance: try variant spellings, a shorter name, or a lower minimum score.</p></div>`; return; }
+      h += `<div class="card flush"><div class="card-head" style="padding:12px 16px 0"><h3 class="h3">${d.total_matches} match${d.total_matches === 1 ? '' : 'es'}${d.total_matches > d.results.length ? ` (top ${d.results.length})` : ''}</h3><span class="small faint">searched as "${esc(d.normalised)}"</span></div><div class="table-wrap" style="padding:0 16px 12px"><table class="data"><thead><tr><th>Score</th><th>Name</th><th>List</th><th>Programme</th><th>First seen</th></tr></thead><tbody>`;
+      d.results.forEach((r, i) => {
+        h += `<tr><td>${scoreBadge(r.score)}</td><td><div class="nm">${esc(r.name)}</div><div class="small muted"><span class="badge">${kindBadge(r.kind)}</span> ${r.matched_on === 'alias' ? 'matched on an alias' : ''} ${r.countries ? ' · ' + esc(r.countries) : ''}</div>${r.aliases && r.aliases.length ? `<div class="small faint">aka ${esc(r.aliases.slice(0, 4).join('; '))}</div>` : ''}${r.identifiers ? `<div class="small mono faint">${esc(r.identifiers.join(' · '))}</div>` : ''}<button class="lnk" data-w="${i}">Why this score?</button> · <a class="small" href="${esc(r.url)}" target="_blank" rel="noopener">Entry</a></td><td>${esc(r.list_name)}</td><td class="small">${esc(r.programme_ids || '')}<div class="faint">${esc((r.programme || '').slice(0, 140))}</div></td><td class="mono">${esc(r.first_seen)}</td></tr><tr hidden id="w${i}"><td></td><td colspan="4"><div class="why"><b>${esc(r.quality)}</b> match. <table>${r.explanation.map(x => `<tr><td>${esc(x.query)}</td><td>${x.candidate ? '&rarr; ' + esc(x.candidate) : '&rarr; no counterpart'}</td><td class="muted">${esc(x.how)}</td><td class="mono">${x.similarity.toFixed(2)}</td></tr>`).join('')}</table></div></td></tr>`;
+      });
+      h += `</tbody></table></div><p class="small faint" style="padding:0 16px 12px;margin:0">${esc(d.how_scoring_works)}</p></div>`;
+      out.innerHTML = h;
+      out.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { const r = $('w' + b.dataset.w); r.hidden = !r.hidden; });
+    }
+    $('f').onsubmit = async e => {
+      e.preventDefault(); const q = $('q').value.trim(); if (q.length < 2) return;
+      const lists = [...document.querySelectorAll('[data-l]:checked')].map(x => x.dataset.l);
+      if (!lists.length) { toast('Select at least one list', 'warn'); return; }
+      out.setAttribute('aria-busy', 'true'); out.innerHTML = `<div class="loading"><span class="spin"></span>Screening (lists not yet downloaded can take a minute)…</div>`;
+      try { render(await api(`api/search?q=${encodeURIComponent(q)}&lists=${lists.join(',')}&min=${$('min').value}` + ($('persons').checked ? '&persons=1' : ''))); }
+      catch (err) { out.setAttribute('aria-busy', 'false'); out.innerHTML = `<div class="state error" role="alert"><div class="h3">Screening failed</div><p>${esc(err.message)}</p></div>`; }
+      loadLists();
+    };
+    $('idk').onchange = () => { $('idv').placeholder = { imo: '9253325', mmsi: '352002470', reg: 'EX-301' }[$('idk').value]; };
+    $('idf').onsubmit = async e => {
+      e.preventDefault(); const el = $('idout'); el.innerHTML = '<span class="loading"><span class="spin"></span>Checking…</span>';
+      try { const d = await api(`api/identifier?${$('idk').value}=${encodeURIComponent($('idv').value)}`);
+        el.innerHTML = d.listed ? `<div class="notice warn"><div><b>Listed.</b> ${d.matches.map(m => `${esc(m.name)} (${esc(m.list_name)}, ${esc(m.programme_ids)})`).join('; ')}</div></div>` : `<div class="notice ok"><div>No exact match for ${esc(d.value)} in ${d.lists_checked.length} lists. ${esc(d.note)}</div></div>`; }
+      catch (err) { el.innerHTML = `<div class="notice err"><div>${esc(err.message)}</div></div>`; }
+    };
+    loadLists();
+  </script>
+</body>
+</html>

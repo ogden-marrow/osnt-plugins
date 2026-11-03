@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Company registries · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 280px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .srcs { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; }
+    .cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 16px; align-items: start; }
+    .co { padding: 10px 0; border-top: 1px solid var(--edge); } .co:first-of-type { border-top: 0; }
+    .co .nm { font-weight: 600; overflow-wrap: anywhere; } .co .sub { color: var(--ink-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+    .co .acts { display: flex; gap: 10px; margin-top: 4px; font-size: var(--fs-sm); }
+    button.lnk { all: unset; cursor: pointer; color: var(--link); } button.lnk:focus-visible { outline: 2px solid var(--focus); }
+    .tree { list-style: none; margin: 0; padding: 0; } .tree ul { list-style: none; margin: 0 0 0 14px; padding: 0 0 0 14px; border-left: 2px solid var(--edge); }
+    .tree li { padding: 4px 0; overflow-wrap: anywhere; } .tree .me { font-weight: 700; } .tree .me::before { content: ""; display: inline-block; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; margin-right: 8px; }
+    .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    footer.src { margin-top: 28px; font-size: var(--fs-xs); color: var(--ink-3); max-width: 90ch; }
+    h4.lbl { margin: 12px 0 4px; font-size: var(--fs-sm); color: var(--ink-2); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>OSNT</a>
+    <span class="sep" aria-hidden="true">/</span><h1>Company registries</h1>
+  </header>
+  <main class="page wide">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Companies and who owns them</h2>
+      <p>One search across open company registers. Company-level facts only; officers and shareholders who are individuals are not shown.</p></div></div>
+    <form id="f" role="search"><label class="sr-only" for="q">Company name or registry number</label><input id="q" placeholder="Company name or registry number" autofocus autocomplete="off" spellcheck="false" maxlength="100"><button class="btn primary">Search</button></form>
+    <div class="srcs" id="srcs" role="group" aria-label="Registers to search"></div>
+    <div id="own" style="margin-top:16px"></div>
+    <div id="out" class="cols" aria-live="polite" aria-busy="false"></div>
+    <footer class="src">Sources: GLEIF (api.gleif.org, CC0), Wikidata (CC0), Norway Brønnøysund Register Centre (NLOD), Czech ARES (Ministry of Finance open data), Finnish PRH/YTJ open data (CC BY 4.0), Danish CVR via cvrapi.dk (non-commercial use), and, when you add keys on the Credentials page, UK Companies House, OpenCorporates and OCCRP Aleph under their own terms. Licences are as stated by each provider and were not independently verified here. Sole proprietors, sole traders and protected records are filtered out; owners, directors and shareholders are never requested. Registers differ in coverage and can be out of date; check the registry link before relying on a record.</footer>
+  </main>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    async function api(p) { const r = await fetch(p), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }
+    const safeUrl = u => /^https:\/\//.test(u || '') ? u : '#';
+    api('api/status').then(d => {
+      $('srcs').innerHTML = d.sources.map(s => `<label class="check"><input type="checkbox" data-s="${esc(s.id)}" ${s.needs_key && !s.key_set ? 'disabled' : 'checked'}> ${esc(s.label.replace(/ \((key|token)\)/, ''))}${s.needs_key && !s.key_set ? ' <span class="badge">no key</span>' : ''}</label>`).join('');
+    }).catch(() => { $('srcs').innerHTML = '<span class="muted small">Could not read source status.</span>'; });
+    const card = c => `<div class="co"><div class="nm">${esc(c.name)}</div><div class="sub">${[c.status && `<span class="badge ${/activ|aktivn|issued/i.test(c.status) ? 'ok' : 'warn'}">${esc(c.status)}</span>`, esc(c.form), esc(c.country)].filter(Boolean).join(' ')}</div>
+      ${c.address ? `<div class="sub">${esc(c.address)}</div>` : ''}${c.industry ? `<div class="sub">${esc(c.industry)}</div>` : ''}${c.founded ? `<div class="sub faint">Founded ${esc(c.founded)}</div>` : ''}${c.parent ? `<div class="sub faint">Parent unit: ${esc(c.parent)}</div>` : ''}
+      <div class="acts"><a href="${esc(safeUrl(c.url))}" target="_blank" rel="noopener">Registry</a>${c.source === 'gleif' ? `<button class="lnk" data-lei="${esc(c.id)}">Ownership</button>` : ''}${c.source === 'wikidata' ? `<button class="lnk" data-qid="${esc(c.id)}">Ownership</button>` : ''}<span class="faint mono">${esc(c.id)}</span></div></div>`;
+    $('f').onsubmit = async e => {
+      e.preventDefault(); const q = $('q').value.trim(); if (q.length < 2) return;
+      const s = [...document.querySelectorAll('[data-s]:checked')].map(x => x.dataset.s); if (!s.length) return;
+      const out = $('out'); out.setAttribute('aria-busy', 'true'); out.innerHTML = '<div class="loading"><span class="spin"></span>Asking the registers…</div>'; $('own').innerHTML = '';
+      try {
+        const d = await api(`api/search?q=${encodeURIComponent(q)}&sources=${s.join(',')}`); out.setAttribute('aria-busy', 'false');
+        out.innerHTML = d.sources.map(r => `<section class="card"><div class="card-head"><h3 class="h3">${esc(r.label)}</h3><span class="badge ${r.ok ? '' : 'warn'}">${r.ok ? r.items.length + ' found' : (r.skipped ? 'skipped' : 'unavailable')}</span></div>${r.ok ? (r.items.length ? r.items.map(card).join('') : '<p class="muted small" style="margin:0">No company matched.</p>') : `<p class="muted small" style="margin:0">${esc(r.error || r.skipped)}</p>`}${r.hidden_individuals ? `<p class="faint small" style="margin:8px 0 0">${r.hidden_individuals} individual or protected record${r.hidden_individuals > 1 ? 's' : ''} hidden.</p>` : ''}</section>`).join('');
+        out.querySelectorAll('[data-lei]').forEach(b => b.onclick = () => own('lei=' + b.dataset.lei));
+        out.querySelectorAll('[data-qid]').forEach(b => b.onclick = () => own('qid=' + b.dataset.qid));
+      } catch (err) { out.setAttribute('aria-busy', 'false'); out.innerHTML = `<div class="state error" role="alert" style="grid-column:1/-1"><div class="h3">Search failed</div><p>${esc(err.message)}</p></div>`; }
+    };
+    const li = (x, cls = '') => `<li class="${cls}">${x.lei ? `<a href="${esc(safeUrl(x.url))}" target="_blank" rel="noopener">${esc(x.name)}</a>` : esc(x.name)} <span class="faint small">${esc(x.country || '')}</span></li>`;
+    async function own(param) {
+      const el = $('own'); el.innerHTML = '<section class="card"><div class="loading"><span class="spin"></span>Loading ownership links…</div></section>'; el.scrollIntoView({ block: 'nearest' });
+      try {
+        const d = await api('api/ownership?' + param), g = d.gleif, w = d.wikidata;
+        let tree = '';
+        if (g) {
+          const side = (p, label) => p.parent ? `<li>${label}: <a href="${esc(safeUrl(p.parent.url))}" target="_blank" rel="noopener">${esc(p.parent.name)}</a> <span class="faint small">${esc(p.parent.country || '')}</span>` : `<li class="muted">${label}: none reported${p.reason ? ` <span class="faint small">(${esc(p.reason)})</span>` : ''}</li>`;
+          const same = g.direct_parent.parent && g.ultimate_parent.parent && g.direct_parent.parent.lei === g.ultimate_parent.parent.lei;
+          tree = `<ul class="tree">${side(g.ultimate_parent, same ? 'Direct and ultimate parent' : 'Ultimate parent')}<ul>${same ? '' : side(g.direct_parent, 'Direct parent') + '<ul>'}<li class="me">${esc(g.entity.name)} <span class="faint small">${esc(g.entity.lei)}</span></li>${g.children.length ? `<ul>${g.children.map(c => li(c)).join('')}</ul>` : ''}${same ? '' : '</ul>'}</ul></ul>${g.children_total > g.children.length ? `<p class="small faint">Showing ${g.children.length} of ${g.children_total} direct subsidiaries with an LEI.</p>` : ''}`;
+        }
+        const wl = (t, a) => a.length ? `<h4 class="lbl">${t}</h4><ul class="tree">${a.map(x => `<li><a href="${esc(safeUrl(x.url))}" target="_blank" rel="noopener">${esc(x.name)}</a></li>`).join('')}</ul>` : '';
+        el.innerHTML = `<section class="card"><div class="card-head"><h3 class="h3">Ownership links</h3><button class="btn sm ghost" id="x">Close</button></div>${d.warnings.length ? `<div class="notice warn" style="margin-bottom:10px"><div>${d.warnings.map(esc).join('<br>')}</div></div>` : ''}
+          <div class="two">${g ? `<div><h4 class="lbl" style="margin-top:0">GLEIF (reported by the companies themselves)</h4>${tree}</div>` : ''}
+          ${w ? `<div><h4 class="lbl" style="margin-top:0">Wikidata <a class="small" href="${esc(safeUrl(w.url))}" target="_blank" rel="noopener">${esc(w.qid)}</a></h4><div class="small muted">${[w.headquarters && 'HQ ' + esc(w.headquarters), w.inception && 'founded ' + esc(w.inception)].filter(Boolean).join(' · ')}${w.website ? ` · <a href="${esc(safeUrl(w.website))}" target="_blank" rel="noopener noreferrer">website</a>` : ''}</div>${wl('Parent organisations', w.parent_organisations)}${wl('Owned by (organisations)', w.owned_by)}${wl('Subsidiaries', w.subsidiaries)}${!w.parent_organisations.length && !w.owned_by.length && !w.subsidiaries.length ? '<p class="muted small">No organisation links recorded.</p>' : ''}<p class="faint small">${esc(w.note)}</p></div>` : ''}</div>
+          ${!g && !w ? '<p class="muted">No ownership data found.</p>' : ''}</section>`;
+        $('x').onclick = () => el.innerHTML = '';
+      } catch (err) { el.innerHTML = `<div class="state error" role="alert"><div class="h3">Ownership lookup failed</div><p>${esc(err.message)}</p></div>`; }
+    }
+  </script>
+</body>
+</html>
