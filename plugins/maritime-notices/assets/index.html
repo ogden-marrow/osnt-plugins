@@ -54,6 +54,8 @@
         </div>
         <label class="row small muted"><input type="checkbox" id="mapped"> Only warnings with a position on the map</label>
         <div id="count" class="small muted" role="status"></div>
+        <div id="feedNote" class="notice warn small" hidden role="status"></div>
+        <div class="row" style="gap:6px;flex-wrap:wrap"><button id="expGeo" class="btn sm" disabled>GeoJSON</button><button id="expCsv" class="btn sm" disabled>CSV</button><button id="share" class="btn sm">Copy link</button></div>
       </div>
       <div id="list" aria-live="polite"></div>
       <div class="attr">Source: NGA Maritime Safety Information (msi.nga.mil), U.S. Government work. Shapes are read automatically from the warning text and can be wrong; the text is authoritative. Advisory only, not for navigation.</div>
@@ -65,7 +67,7 @@
   <script>
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    let map, layer, mode = 'w', items = [], selId = null, timer;
+    let map, layer, mode = 'w', items = [], selId = null, timer, feed = null;
     const shapeLayers = new Map();
 
     async function api(p) {
@@ -101,7 +103,7 @@
     function select(id, scroll) {
       selId = id; render(); redraw();
       const w = items.find(x => x.id === id), g = shapeLayers.get(id);
-      if (g && g.getLayers().length) { const b = g.getBounds(); map.fitBounds(b.pad(.4), { maxZoom: 8 }); }
+      if (g && g.getLayers().length) { const b = g.getBounds(); map.fitBounds(b.pad(.4), { maxZoom: 8, animate: false }); }
       if (scroll) document.querySelector('.w.sel')?.scrollIntoView({ block: 'nearest' });
     }
     function render() {
@@ -112,8 +114,8 @@
         return;
       }
       el.innerHTML = items.map(w => `<div class="w${w.id === selId ? ' sel' : ''}" data-id="${esc(w.id)}"><button aria-expanded="${w.id === selId}">
-        <div class="t"><b>${esc(w.area_label)} ${w.number}/${String(w.year).slice(-2)}</b>${w.subregion && w.subregion !== 'GEN' ? `<span>sub ${esc(w.subregion)}</span>` : ''}<span>${esc(w.issued)}</span>${w.shapes.length ? `<span class="badge ok">${w.shapes.length} on map</span>` : ''}</div>
-        <div class="s">${esc(w.text.replace(/\s+/g, ' '))}</div></button>${w.id === selId ? `<pre>${esc(w.text)}\n\n${esc(w.authority)}</pre>` : ''}</div>`).join('');
+        <div class="t"><b>${esc(w.area_label)} ${w.number}/${String(w.year).slice(-2)}</b>${w.subregion && w.subregion !== 'GEN' ? `<span>sub ${esc(w.subregion)}</span>` : ''}<span>${esc(w.issued)}${w.age_days != null ? ' · ' + (w.age_days === 0 ? 'today' : w.age_days + ' d ago') : ''}</span>${w.shapes.length ? `<span class="badge ok">${w.shapes.length} on map</span>` : ''}</div>
+        <div class="s">${esc(w.text.replace(/\s+/g, ' '))}</div></button>${w.id === selId ? `<pre>${esc(w.text)}\n\n${esc(w.authority)}</pre>${w.bbox ? `<div class="row small" style="padding:6px 11px;gap:10px"><a href="/p/satellite/?lat=${((w.bbox[0] + w.bbox[2]) / 2).toFixed(4)}&lon=${((w.bbox[1] + w.bbox[3]) / 2).toFixed(4)}&zoom=8">Satellite here</a><a href="/p/wayback/?lat=${((w.bbox[0] + w.bbox[2]) / 2).toFixed(4)}&lon=${((w.bbox[1] + w.bbox[3]) / 2).toFixed(4)}&zoom=10">Before/after</a></div>` : ''}` : ''}</div>`).join('');
       el.querySelectorAll('.w').forEach(d => d.querySelector('button').onclick = () => select(d.dataset.id === selId ? null : d.dataset.id));
     }
     async function load() {
@@ -125,12 +127,12 @@
         } else {
           const p = new URLSearchParams({ area: $('area').value, q: $('q').value, mapped: $('mapped').checked });
           const d = await api('api/warnings?' + p);
-          items = d.warnings; $('count').textContent = `${d.count} of ${d.total} active warnings${d.stale ? ' (cached copy: NGA did not answer)' : ''}`;
+          items = d.warnings; feed = d.feed; $('count').textContent = `${d.count} of ${d.total} active warnings${d.stale ? ' (cached copy: NGA did not answer)' : ''}`;
           if (!items.some(w => w.id === selId)) selId = null;
         }
-        $('status').textContent = 'NGA MSI';
+        $('status').textContent = 'NGA MSI'; showFeed(); $('expGeo').disabled = $('expCsv').disabled = !items.length; save();
         render(); redraw();
-        if (!selId && layer.getLayers().length) { try { map.fitBounds(layer.getBounds().pad(.1), { maxZoom: 6 }); } catch {} }
+        if (!selId && layer.getLayers().length) { try { map.fitBounds(layer.getBounds().pad(.1), { maxZoom: 6, animate: false }); } catch {} }
       } catch (e) {
         items = []; $('count').textContent = ''; $('status').textContent = 'error'; redraw();
         $('list').innerHTML = `<div class="state error" role="alert"><div class="h3">${mode === 'a' ? 'Piracy reports unavailable' : 'Could not load warnings'}</div><p>${esc(e.message)}</p><button class="btn sm" id="retry">Retry</button></div>`;
@@ -145,12 +147,44 @@
     $('tabW').onclick = () => setMode('w'); $('tabA').onclick = () => setMode('a');
     $('area').onchange = $('mapped').onchange = load;
     $('q').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 350); };
+
+    // ---- feed freshness, remembered filters, deep links (?area=&q=&w=A-979-2024&lat=&lon=&zoom=), export ----
+    function showFeed() {
+      const n = $('feedNote'); n.hidden = mode !== 'w' || !feed?.feed_note; if (!n.hidden) n.textContent = feed.feed_note;
+      if (mode === 'w' && feed?.newest_issued) $('status').textContent = 'newest ' + feed.newest_issued.slice(0, 10);
+    }
+    const KEY = 'osnt.msi';
+    function save() { try { const c = map.getCenter(); localStorage.setItem(KEY, JSON.stringify({ area: $('area').value, q: $('q').value, mapped: $('mapped').checked, view: [+c.lat.toFixed(2), +c.lng.toFixed(2), map.getZoom()] })); } catch { /* storage unavailable */ } }
+    const dl = (name, mime, text) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: mime })); a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+    const cell = v => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    $('expGeo').onclick = () => dl('maritime-warnings.geojson', 'application/geo+json', JSON.stringify({ type: 'FeatureCollection', features: items.flatMap(w => (w.shapes || []).map(sh => {
+      const geometry = sh.kind === 'point' || sh.kind === 'circle' ? { type: 'Point', coordinates: [sh.lon, sh.lat] } : sh.kind === 'line' ? { type: 'LineString', coordinates: sh.pts.map(p => [p[1], p[0]]) } : { type: 'Polygon', coordinates: [[...sh.pts, sh.pts[0]].map(p => [p[1], p[0]])] };
+      return { type: 'Feature', geometry, properties: { id: w.id, area: w.area_label, number: w.number, year: w.year, issued: w.issued, text: w.text, ...(sh.radius_m ? { radius_m: sh.radius_m } : {}) } };
+    })) }));
+    $('expCsv').onclick = () => dl('maritime-warnings.csv', 'text/csv', ['id,area,number,year,issued,age_days,positions,text', ...items.map(w => [w.id, w.area_label, w.number, w.year, w.issued, w.age_days, w.shapes.length, w.text.replace(/\s+/g, ' ')].map(cell).join(','))].join('\n'));
+    $('share').onclick = async () => {
+      const u = new URL(location.href.split('?')[0], location.href);
+      if ($('area').value) u.searchParams.set('area', $('area').value); if ($('q').value.trim()) u.searchParams.set('q', $('q').value.trim()); if (selId) u.searchParams.set('w', selId);
+      try { await navigator.clipboard.writeText(u.href); $('count').textContent = 'Link copied.'; } catch { $('count').textContent = u.href; }
+    };
+    $('area').addEventListener('change', save); $('mapped').addEventListener('change', save); $('q').addEventListener('input', save);
     $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
-      layer = L.featureGroup().addTo(map); map.setView([25, -40], 3);
+      layer = L.featureGroup().addTo(map);
       try { const d = await api('api/areas'); $('area').insertAdjacentHTML('beforeend', d.areas.map(a => `<option value="${esc(a.code)}">${esc(a.label)} (${a.count})</option>`).join('')); } catch {}
-      load();
+      let o = {}; try { o = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* ignore */ }
+      const P = new URLSearchParams(location.search);
+      const area = P.get('area') ?? o.area; if (area) $('area').value = area;
+      const q = P.get('q') ?? o.q; if (q) $('q').value = q;
+      if (o.mapped && !P.has('q')) $('mapped').checked = true;
+      const lat = parseFloat(P.get('lat')), lon = parseFloat(P.get('lon')), w = P.get('w');
+      const view = Number.isFinite(lat) && Number.isFinite(lon) ? [lat, lon, parseInt(P.get('zoom')) || 6] : null;
+      if (view) map.setView([view[0], view[1]], view[2], { animate: false }); else map.setView([25, -40], 3, { animate: false });
+      await load();
+      if (w) { if (items.some(x => x.id === w)) select(w, true); else { $('q').value = w; await load(); if (items.length) select(items[0].id, true); } }
+      else if (view) map.setView([view[0], view[1]], view[2], { animate: false });
+      map.on('moveend', save);
     })();
   </script>
 </body>

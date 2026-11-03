@@ -53,7 +53,8 @@
         <div class="row"><label class="row"><input type="checkbox" id="orm"> Railway tracks (OpenRailwayMap)</label></div>
         <div class="row"><label class="row"><input type="checkbox" id="stn" checked> Stations</label></div>
         <div class="legend" style="margin-top:8px"><span><i style="background:#2e9d6f"></i>moving</span><span><i style="background:#8a97a0"></i>stopped</span><span><i style="background:#e8a317"></i>late 5+ min</span><span><i style="background:#d9473f"></i>late 15+ min</span></div>
-        <div id="count" class="muted" style="margin-top:6px"></div>
+        <div id="count" class="muted" style="margin-top:6px" aria-live="polite"></div>
+        <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button id="geo" class="btn sm" disabled>GeoJSON</button><button id="share" class="btn sm">Copy link</button></div>
       </div>
       <div id="detail"><div class="state"><div class="h3">Pick a train or station</div><p>Click a dot for the train, or a station square for its departures and arrivals.</p></div></div>
       <div class="notice small"><div>Finland: <a href="https://www.digitraffic.fi/en/railway-traffic/" target="_blank" rel="noopener">Fintraffic / digitraffic.fi</a>, CC BY 4.0 (train GPS has no heading, so Finnish trains are plain dots). Norway: <a href="https://developer.entur.org" target="_blank" rel="noopener">Entur</a> real-time vehicles, NLOD licence (arrows show heading). Tracks: &copy; <a href="https://www.openrailwaymap.org" target="_blank" rel="noopener">OpenRailwayMap</a> and OpenStreetMap contributors (ODbL / CC BY-SA). Trains only, never passengers.</div></div>
@@ -65,9 +66,10 @@
   <script>
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    let map, trainLayer, stnLayer, orm, canvas, timer, selected = null, stationsLoaded = false;
+    let map, trainLayer, stnLayer, orm, canvas, timer, selected = null, stationsLoaded = false, lastTrains = [], boardTimer = null, boardCode = null;
     const markers = new Map();
-    const hhmm = t => t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    // Finnish boards are shown in Finnish time (the timetable's own clock), whatever the browser's zone.
+    const hhmm = t => t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Helsinki' }) : '';
     async function api(p) {
       const r = await fetch(p), d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || r.status);
@@ -83,16 +85,19 @@
       if (t.bearing == null) return null;
       return L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: `<svg width="18" height="18" viewBox="0 0 24 24" style="transform:rotate(${t.bearing}deg)"><path d="M12 2l7 18-7-4-7 4z" fill="${c}" stroke="#0b0f14" stroke-width="1.2"/></svg>` });
     }
-    const info = t => `<b>${esc(t.name)}</b> ${t.country}<br>${t.speed_kmh != null ? Math.round(t.speed_kmh) + ' km/h' : 'speed n/a'}${t.delay_min != null ? ' · ' + (t.delay_min > 0 ? t.delay_min + ' min late' : 'on time') : ''}`;
+    const ageTxt = s => s == null ? '' : s < 90 ? s + ' s ago' : Math.round(s / 60) + ' min ago';
+    const info = t => `<b>${esc(t.name)}</b> ${t.country}<br>${t.speed_kmh != null ? Math.round(t.speed_kmh) + ' km/h' : 'speed n/a'}${t.delay_min != null ? ' · ' + (t.delay_min > 0 ? t.delay_min + ' min late' : 'on time') : ''}${t.age_s != null ? '<br>last report ' + ageTxt(t.age_s) + (t.age_s > 300 ? ' (stale)' : '') : ''}`;
     function drawTrains(list) {
       const keep = new Set();
       for (const t of list) {
         keep.add(t.id);
         let m = markers.get(t.id);
         const ic = icon(t);
+        // A train can gain or lose its heading between reports: marker kind (arrow vs dot) must follow.
+        if (m && !!ic !== !!m._arrow) { trainLayer.removeLayer(m); markers.delete(t.id); m = null; }
         if (!m) {
-          m = ic ? L.marker([t.lat, t.lon], { icon: ic }) : L.circleMarker([t.lat, t.lon], { renderer: canvas, radius: 6, weight: 1.5, color: '#0b0f14', fillOpacity: .95, fillColor: colour(t) });
-          m.addTo(trainLayer).on('click', () => pick(m._t)); markers.set(t.id, m);
+          m = ic ? L.marker([t.lat, t.lon], { icon: ic }) : L.circleMarker([t.lat, t.lon], { renderer: canvas, radius: 6, weight: 1.5, color: '#0b0f14', fillOpacity: (t.age_s ?? 0) > 300 ? .4 : .95, fillColor: colour(t) });
+          m._arrow = !!ic; m.addTo(trainLayer).on('click', () => pick(m._t)); markers.set(t.id, m);
         } else {
           m.setLatLng([t.lat, t.lon]);
           if (ic) m.setIcon(ic); else m.setStyle({ fillColor: colour(t) });
@@ -103,9 +108,9 @@
     }
     async function refresh() {
       try {
-        const b = map.getBounds().pad(.2);
-        const d = await api(`api/trains?bbox=${[b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(v => v.toFixed(3))}`);
-        drawTrains(d.trains);
+        const b = map.getBounds().pad(.2), cl = (v, lim) => Math.max(-lim, Math.min(lim, v));
+        const d = await api(`api/trains?bbox=${[cl(b.getWest(), 540), cl(b.getSouth(), 90), cl(b.getEast(), 540), cl(b.getNorth(), 90)].map(v => v.toFixed(3))}`);
+        drawTrains(d.trains); lastTrains = d.trains; $('geo').disabled = !d.trains.length; saveView();
         const bad = Object.entries(d.sources).filter(([, s]) => !s.ok).map(([k]) => k);
         $('count').textContent = `${d.count} trains in view${d.truncated ? ' (first 1500)' : ''}${bad.length ? ' · ' + bad.join(', ') + ' feed unavailable' : ''}`;
         $('status').textContent = 'live · ' + new Date().toLocaleTimeString();
@@ -126,13 +131,14 @@
           <div class="table-wrap" style="max-height:260px;margin-top:8px"><table class="data"><tbody>${stops}</tbody></table></div></section>`;
       } catch (e) { el.innerHTML = `<div class="state error"><div class="h3">Train details unavailable</div><p>${esc(e.message)}</p></div>`; }
     }
-    async function board(code) {
-      const el = $('detail'); el.innerHTML = '<div class="loading"><span class="spin"></span>Loading board…</div>';
+    async function board(code, quiet) {
+      boardCode = code; clearInterval(boardTimer); boardTimer = setInterval(() => boardCode === code && board(code, true), 30000);
+      const el = $('detail'); if (!quiet) el.innerHTML = '<div class="loading"><span class="spin"></span>Loading board…</div>';
       try {
         const d = await api('api/station/' + encodeURIComponent(code) + '?n=12');
         const rows = (list, who) => list.length ? list.map(r => `<tr class="${r.cancelled ? 'canc' : ''}"><td>${hhmm(r.scheduled)}</td><td>${esc(r.label)}</td><td>${esc(r[who])}</td><td>${esc(r.track)}</td><td class="${r.delay_min > 4 ? 'late' : ''}">${r.delay_min ? '+' + r.delay_min : ''}</td></tr>`).join('') : '<tr><td colspan="5" class="muted">None listed</td></tr>';
         const head = w => `<thead><tr><th>Time</th><th>Train</th><th>${w}</th><th>Trk</th><th></th></tr></thead>`;
-        el.innerHTML = `<section class="card"><h3 class="h3">${esc(d.station.name)}</h3><h2 style="margin-top:8px">Departures</h2><div class="table-wrap"><table class="data">${head('To')}<tbody>${rows(d.departures, 'to')}</tbody></table></div><h2 style="margin-top:10px">Arrivals</h2><div class="table-wrap"><table class="data">${head('From')}<tbody>${rows(d.arrivals, 'from')}</tbody></table></div></section>`;
+        el.innerHTML = `<section class="card"><h3 class="h3">${esc(d.station.name)}</h3><div class="muted small">Times are Finnish local time.</div><h2 style="margin-top:8px">Departures</h2><div class="table-wrap"><table class="data">${head('To')}<tbody>${rows(d.departures, 'to')}</tbody></table></div><h2 style="margin-top:10px">Arrivals</h2><div class="table-wrap"><table class="data">${head('From')}<tbody>${rows(d.arrivals, 'from')}</tbody></table></div></section>`;
         if ($('panel') && matchMedia('(max-width:700px)').matches) $('panel').classList.add('open');
       } catch (e) { el.innerHTML = `<div class="state error" role="alert"><div class="h3">Board unavailable</div><p>${esc(e.message)}</p></div>`; }
     }
@@ -154,13 +160,40 @@
     };
     $('orm').onchange = e => e.target.checked ? orm.addTo(map) : map.removeLayer(orm);
     $('stn').onchange = e => e.target.checked ? stnLayer.addTo(map) : map.removeLayer(stnLayer);
+
+    // ---- remembered view and layers, deep links (?lat=&lon=&zoom=, ?station=HKI, ?q=Helsinki, ?train=1), export ----
+    const KEY = 'osnt.rail';
+    function saveView() { try { const c = map.getCenter(); localStorage.setItem(KEY, JSON.stringify({ view: [+c.lat.toFixed(3), +c.lng.toFixed(3), map.getZoom()], orm: $('orm').checked, stn: $('stn').checked })); } catch { /* storage unavailable */ } }
+    $('orm').addEventListener('change', saveView); $('stn').addEventListener('change', saveView);
+    $('geo').onclick = () => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify({ type: 'FeatureCollection', features: lastTrains.map(t => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [t.lon, t.lat] }, properties: t })) })], { type: 'application/geo+json' }));
+      a.download = 'trains.geojson'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    };
+    $('share').onclick = async () => {
+      const c = map.getCenter(), u = new URL(location.href.split('?')[0], location.href);
+      u.searchParams.set('lat', c.lat.toFixed(3)); u.searchParams.set('lon', (((c.lng + 540) % 360) - 180).toFixed(3)); u.searchParams.set('zoom', map.getZoom());
+      if (boardCode) u.searchParams.set('station', boardCode);
+      try { await navigator.clipboard.writeText(u.href); $('count').textContent = 'Link copied.'; } catch { $('count').textContent = u.href; }
+    };
+    $('sq').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); const b = $('sres').querySelector('button'); if (b) b.click(); } };
+    async function trainByNumber(n) {
+      try { const d = await api('api/train/' + n); const t = lastTrains.find(x => x.number === +n); pick(t || { id: 'fi-' + n, country: 'FI', number: +n, name: 'Train ' + n }); } catch (e) { $('detail').innerHTML = `<div class="state error" role="alert"><div class="h3">Train not found</div><p>${esc(e.message)}</p></div>`; }
+    }
     $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
       canvas = L.canvas({ padding: .3 });
       trainLayer = L.layerGroup().addTo(map); stnLayer = L.layerGroup().addTo(map);
       orm = L.tileLayer('https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', { maxZoom: 19, subdomains: 'abc', opacity: .85, attribution: '&copy; <a href="https://www.openrailwaymap.org">OpenRailwayMap</a>, OpenStreetMap contributors' });
-      map.setView([62.5, 18], 5);
+      const q = new URLSearchParams(location.search); let saved = {}; try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* ignore */ }
+      if (saved.orm) { $('orm').checked = true; orm.addTo(map); }
+      if (saved.stn === false) { $('stn').checked = false; map.removeLayer(stnLayer); }
+      const lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
+      if (Number.isFinite(lat) && Number.isFinite(lon)) map.setView([lat, lon], parseInt(q.get('zoom')) || 10, { animate: false }); else if (saved.view) map.setView([saved.view[0], saved.view[1]], saved.view[2], { animate: false }); else map.setView([62.5, 18], 5, { animate: false });
+      if (q.get('station')) board(q.get('station').toUpperCase());
+      else if (q.get('q')) { $('sq').value = q.get('q'); api('api/stations?q=' + encodeURIComponent(q.get('q'))).then(d => { const s = d.stations[0]; if (s) { map.setView([s.lat, s.lon], 12); board(s.code); } else $('sres').innerHTML = '<div class="muted small">No passenger station by that name.</div>'; }).catch(() => {}); }
+      else if (/^\d{1,5}$/.test(q.get('train') || '')) trainByNumber(q.get('train'));
       map.on('moveend', refresh);
       refresh(); loadStations();
       setInterval(refresh, 10000);

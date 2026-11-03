@@ -428,6 +428,10 @@ async fn tools() -> Json<Value> {
           "method": "GET", "path": "api/callsign/{callsign}", "parameters": p("callsign", "ICAO callsign, e.g. UAL1") },
         { "name": "aircraft_airport", "description": "Airport details by ICAO (4 letters) or IATA (3 letters) code.",
           "method": "GET", "path": "api/airport/{code}", "parameters": p("code", "KSFO or SFO") },
+        { "name": "aircraft_type", "description": "Type designator (for example B738): name and class from the built-in list of common types, plus how many aircraft of that type adsb.lol sees airborne right now with a few example registrations.",
+          "method": "GET", "path": "api/type/{code}", "parameters": p("code", "ICAO type designator, e.g. B738") },
+        { "name": "aircraft_airline", "description": "Airline by ICAO (3 letters) or IATA (2 letters) designator: name, radio callsign, country.",
+          "method": "GET", "path": "api/airline/{code}", "parameters": p("code", "DAL or DL") },
         { "name": "aircraft_position_check", "description": "Where two independent open feeds (adsb.lol, OpenSky) currently see this ICAO hex, and how far apart they are.",
           "method": "GET", "path": "api/position/{hex}", "parameters": p("hex", "ICAO hex") }
     ]))
@@ -506,6 +510,17 @@ mod tests {
         let st = res.status();
         let b = res.into_body().collect().await.unwrap().to_bytes();
         (st, serde_json::from_slice(&b).unwrap_or(Value::Null))
+    }
+
+    #[tokio::test]
+    async fn tools_cover_every_agent_safe_route() {
+        let a = app(new_state("http://127.0.0.1:1".into(), "http://127.0.0.1:1".into(), "http://127.0.0.1:1".into(), "http://127.0.0.1:1".into()));
+        let (_, t) = get_json(&a, "/tools").await;
+        let names: Vec<&str> = t.as_array().unwrap().iter().filter_map(|x| x["name"].as_str()).collect();
+        for n in ["aircraft_by_hex", "aircraft_by_registration", "aircraft_route", "aircraft_airport", "aircraft_type", "aircraft_airline", "aircraft_position_check"] {
+            assert!(names.contains(&n), "{n} missing");
+        }
+        assert!(t.as_array().unwrap().iter().all(|x| x["method"] == "GET" && x["path"].as_str().unwrap().starts_with("api/")));
     }
 
     #[test]

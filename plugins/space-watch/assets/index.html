@@ -57,13 +57,14 @@
       <section id="s-launch">
         <label class="sr-only" for="lq">Search launches</label>
         <input id="lq" type="search" placeholder="Filter by rocket, provider, pad or mission" style="width:100%">
-        <div id="lcount" class="muted small" style="margin:6px 0"></div>
+        <div id="lcount" class="muted small" style="margin:6px 0" aria-live="polite"></div>
+        <div class="row" style="gap:6px;margin-bottom:6px"><button id="lcsv" class="btn sm" disabled>CSV</button><button id="lshare" class="btn sm">Copy link</button></div>
         <div id="llist"></div>
       </section>
 
       <section id="s-obj" hidden>
         <form id="of" class="grid2" role="search">
-          <label class="field" style="grid-column:1/3"><span class="label">NORAD ID, name or international designator</span><input id="oq" placeholder="25544, ISS, 1998-067A" autocomplete="off" spellcheck="false"></label>
+          <label class="field" style="grid-column:1/3"><span class="label">NORAD ID, name or international designator</span><input id="oq" name="q" placeholder="25544, ISS, 1998-067A" autocomplete="off" spellcheck="false"></label>
           <label class="field" style="grid-column:1/3"><span class="label">or a group</span><select id="og"><option value="">Choose a group…</option></select></label>
           <div style="grid-column:1/3"><button class="btn primary sm">Search</button></div>
         </form>
@@ -121,7 +122,7 @@
       $('status').textContent = 'Loading…'; $('llist').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Loading launches…</div>';
       try {
         const d = await api('api/launches?limit=40&which=' + which);
-        launches = d.launches; renderLaunches();
+        launches = d.launches; renderLaunches(); $('lcsv').disabled = !launches.length;
         $('status').textContent = (d.stale ? 'cached · ' : '') + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         if (d.stale) toast('Launch Library is unreachable or rate limited; showing a cached copy.', 'warn');
       } catch (e) { $('status').textContent = 'Error'; $('lcount').textContent = ''; $('llist').innerHTML = `<div class="state error" role="alert"><div class="h3">Could not load launches</div><p>${esc(e.message)}</p><button class="btn sm" id="retry">Retry</button></div>`; $('retry').onclick = loadLaunches; }
@@ -130,7 +131,7 @@
       try {
         const d = await api('api/pads'); padLayer.clearLayers();
         for (const p of d.pads) L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', iconSize: [14, 14], iconAnchor: [7, 7], html: '<div class="pin"></div>' }) })
-          .bindPopup(`<b>${esc(p.pad)}</b><br>${esc(p.location || '')}<br>${p.launches} upcoming<br>Next: ${esc(p.next.name)}<br>${esc(fmtT(p.next.net))}`).addTo(padLayer);
+          .bindPopup(`<b>${esc(p.pad)}</b><br>${esc(p.location || '')}<br>${p.launches} upcoming<br>Next: ${esc(p.next.name)}<br>${esc(fmtT(p.next.net))}<br><a href="/p/satellite/?lat=${p.lat}&lon=${p.lon}&zoom=13">Satellite view of the pad</a>`).addTo(padLayer);
       } catch { /* the list shows the error */ }
     }
     function objCard(o) {
@@ -145,7 +146,7 @@
       $('olist').innerHTML = '<div class="loading"><span class="spin" aria-hidden="true"></span>Searching…</div>';
       try {
         const d = await api('api/object?' + qs);
-        $('olist').innerHTML = (d.count ? `<div class="muted small">${d.count}${d.total > d.count ? ' of ' + d.total : ''} objects</div>` : '') + (d.objects.map(objCard).join('') || '<div class="state"><div class="h3">Nothing found</div></div>');
+        $('olist').innerHTML = (d.count ? `<div class="muted small">${d.count}${d.total > d.count ? ' of ' + d.total : ''} objects</div>` : '') + (d.objects.map(objCard).join('') || '<div class="state"><div class="h3">Nothing found</div><p>Try a shorter name, the NORAD number, or a group.</p></div>');
       } catch (e) { $('olist').innerHTML = `<div class="state error" role="alert"><div class="h3">Search failed</div><p>${esc(e.message)}</p></div>`; }
     }
     $('of').onsubmit = e => {
@@ -172,6 +173,7 @@
     function tab(id) {
       for (const [t, s] of [['t-up', 's-launch'], ['t-prev', 's-launch'], ['t-obj', 's-obj'], ['t-rec', 's-rec']]) { $(t).setAttribute('aria-selected', String(t === id)); }
       $('s-launch').hidden = !(id === 't-up' || id === 't-prev'); $('s-obj').hidden = id !== 't-obj'; $('s-rec').hidden = id !== 't-rec';
+      curTab = id; if (typeof map !== 'undefined' && map) saveSt();
       if (id === 't-up' || id === 't-prev') { which = id === 't-up' ? 'upcoming' : 'previous'; loadLaunches(); }
       if (id === 't-rec') loadRec();
     }
@@ -179,11 +181,32 @@
     $('lq').oninput = renderLaunches;
     function toggle(f) { const o = $('panel').classList.toggle('open', f); $('panelBtn').setAttribute('aria-expanded', String(o)); }
     $('panelBtn').onclick = () => toggle();
+
+    // ---- remembered tab/query, deep links (?q=ISS, ?catnr=25544, ?tab=launches|past|objects|recent, ?lat=&lon=&zoom=), export ----
+    const KEY = 'osnt.space';
+    const saveSt = () => { try { const c = map.getCenter(); localStorage.setItem(KEY, JSON.stringify({ tab: curTab, oq: $('oq').value, og: $('og').value, lq: $('lq').value, view: [+c.lat.toFixed(2), +c.lng.toFixed(2), map.getZoom()] })); } catch { /* storage unavailable */ } };
+    let curTab = 't-up';
+    const dl = (name, mime, text) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: mime })); a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+    const cell = v => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    $('lcsv').onclick = () => { const cols = ['name', 'status', 'net', 'provider', 'rocket', 'mission', 'orbit', 'pad', 'location', 'pad_lat', 'pad_lon']; dl('launches.csv', 'text/csv', [cols.join(','), ...launches.map(l => cols.map(c => cell(l[c])).join(','))].join('\n')); };
+    $('lshare').onclick = async () => { const u = new URL(location.href.split('?')[0], location.href); u.searchParams.set('tab', which === 'upcoming' ? 'launches' : 'past'); if ($('lq').value.trim()) u.searchParams.set('lq', $('lq').value.trim()); try { await navigator.clipboard.writeText(u.href); toast('Link copied.'); } catch { toast(u.href); } };
+    $('lq').addEventListener('input', saveSt);
     setInterval(() => document.querySelectorAll('.cd[data-net]').forEach(e => { e.textContent = countdown(Math.round((Date.parse(e.dataset.net) - Date.now()) / 1000)); }), 1000);
     (async () => {
-      ({ map } = await OSNT.createMap('map')); padLayer = L.layerGroup().addTo(map); map.setView([25, 0], 2);
-      api('api/sources').then(s => { for (const g of s.groups) $('og').insertAdjacentHTML('beforeend', `<option>${esc(g)}</option>`); }).catch(() => {});
-      loadLaunches(); loadPads();
+      ({ map } = await OSNT.createMap('map')); padLayer = L.layerGroup().addTo(map);
+      await api('api/sources').then(s => { for (const g of s.groups) $('og').insertAdjacentHTML('beforeend', `<option>${esc(g)}</option>`); }).catch(() => {});
+      let o = {}; try { o = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* ignore */ }
+      const q = new URLSearchParams(location.search);
+      const lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
+      if (Number.isFinite(lat) && Number.isFinite(lon)) map.setView([lat, lon], parseInt(q.get('zoom')) || 6, { animate: false }); else if (o.view) map.setView([o.view[0], o.view[1]], o.view[2], { animate: false }); else map.setView([25, 0], 2, { animate: false });
+      map.on('moveend', saveSt);
+      const lq = q.get('lq') ?? o.lq; if (lq) $('lq').value = lq;
+      const obj = q.get('q') || q.get('catnr') || q.get('intl') || q.get('name') || '';
+      const tabName = { launches: 't-up', past: 't-prev', objects: 't-obj', recent: 't-rec' }[q.get('tab')];
+      if (obj) { $('oq').value = obj; tab('t-obj'); $('of').requestSubmit(); }
+      else if (q.get('group')) { $('og').value = q.get('group'); tab('t-obj'); $('of').requestSubmit(); }
+      else { if (tabName) tab(tabName); else loadLaunches(); if (!tabName && o.oq) $('oq').value = o.oq; }
+      loadPads();
     })();
   </script>
 </body>

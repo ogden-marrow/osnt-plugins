@@ -3,7 +3,7 @@ name = "Trains (live)"
 description = "Live train positions and station boards from Finland (Digitraffic) and Norway (Entur), with an OpenRailwayMap track overlay. Trains as objects only."
 grid = "Air & Sea"
 port = 8158
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

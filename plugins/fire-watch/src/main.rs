@@ -92,8 +92,9 @@ pub fn parse_query(q: &HashMap<String, String>) -> Result<Query_, ApiError> {
         None => [-180.0, -90.0, 180.0, 90.0],
     };
     let sensor = match p(q, "sensor") {
-        None => "snpp",
-        Some(s) => firms::sensor(s).ok_or_else(|| bad("sensor must be snpp, noaa20 or noaa21"))?.id,
+        // All three VIIRS satellites by default: Suomi NPP's feed can lag a day behind while NOAA-20/21 stay current.
+        None | Some("all") => "all",
+        Some(s) => firms::sensor(s).ok_or_else(|| bad("sensor must be all, snpp, noaa20 or noaa21"))?.id,
     };
     let window = match p(q, "window").unwrap_or("24h") {
         "24h" => "24h",
@@ -135,30 +136,57 @@ fn map_key(app: &App) -> Option<String> {
     app.cfg.map_key.clone().or_else(|| osnt_common::secret("FIRMS_MAP_KEY"))
 }
 
-/// Blocking: fetch (cached) and filter detections for a query.
+/// Blocking: fetch (cached) and filter detections for a query. `sensor=all` merges the three VIIRS satellites; one
+/// failing satellite is tolerated as long as another answers.
 pub fn load(app: &App, q: &Query_) -> Result<Loaded, ApiError> {
-    let sensor = firms::sensor(q.sensor).expect("validated");
     let key = if q.days.is_some() { map_key(app) } else { None };
     if q.days.is_some() && key.is_none() {
         return Err(bad("days needs a FIRMS MAP_KEY; add FIRMS_MAP_KEY on the Credentials page, or use window=24h|48h|7d which needs no key"));
     }
-    let (cache_key, url, source) = if let (Some(k), Some(d)) = (&key, q.days) {
+    if q.days.is_none() && firms::region_for(&q.bbox) == "Global" && q.window == "7d" {
+        return Err(bad("the 7-day file is not offered worldwide: zoom to one region (for example Europe) or add a FIRMS MAP_KEY and use days"));
+    }
+    let sensors: Vec<&firms::Sensor> = if q.sensor == "all" { SENSORS.iter().collect() } else { vec![firms::sensor(q.sensor).expect("validated")] };
+    let (mut points, mut truncated, mut stale) = (Vec::new(), false, false);
+    let (mut sources, mut errors) = (Vec::new(), Vec::new());
+    for sensor in sensors {
+        match load_sensor(app, q, sensor, key.as_deref()) {
+            Ok((pts, tr, st, src)) => {
+                points.extend(pts);
+                truncated |= tr;
+                stale |= st;
+                sources.push(src);
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+    if sources.is_empty() {
+        return Err(errors.into_iter().next().unwrap_or_else(|| upstream_err("no fire data")));
+    }
+    let now = now_secs();
+    points.retain(|h| h.frp >= q.min_frp && h.conf >= q.min_conf && q.hours.is_none_or(|hrs| (now - h.t) as f64 <= hrs * 3600.0 + 900.0));
+    let mut source = sources.join(" + ");
+    if !errors.is_empty() {
+        source.push_str(&format!(" (partial: {} satellite file(s) unavailable)", errors.len()));
+    }
+    Ok(Loaded { points, source, stale, truncated })
+}
+
+type SensorLoad = (Vec<Hotspot>, bool, bool, String);
+
+fn load_sensor(app: &App, q: &Query_, sensor: &firms::Sensor, key: Option<&str>) -> Result<SensorLoad, ApiError> {
+    let (cache_key, url, source) = if let (Some(k), Some(d)) = (key, q.days) {
         let area = q.bbox.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(",");
-        (format!("api|{}|{area}|{d}", sensor.api), format!("{}/{}/{}/{area}/{d}", app.cfg.api, enc(k), sensor.api), format!("FIRMS area API, {} days", d))
+        (format!("api|{}|{area}|{d}", sensor.api), format!("{}/{}/{}/{area}/{d}", app.cfg.api, enc(k), sensor.api), format!("FIRMS area API {}, {} days", sensor.id, d))
     } else {
         let region = firms::region_for(&q.bbox);
-        if region == "Global" && q.window == "7d" {
-            return Err(bad("the 7-day file is not offered worldwide: zoom to one region (for example Europe) or add a FIRMS MAP_KEY and use days"));
-        }
         let name = format!("{}_{}_{}.csv", sensor.prefix, region, q.window);
-        (format!("file|{name}|{}", sensor.dir), format!("{}/{}/csv/{name}", app.cfg.files, sensor.dir), format!("FIRMS {} file, {}", region.replace('_', " "), q.window))
+        (format!("file|{name}|{}", sensor.dir), format!("{}/{}/csv/{name}", app.cfg.files, sensor.dir), format!("FIRMS {} {} file, {}", sensor.id, region.replace('_', " "), q.window))
     };
     let f = app.up.get_as(&cache_key, &url, FILE_TTL).map_err(upstream_err)?;
     let text = String::from_utf8_lossy(&f.body);
-    let (mut points, truncated) = firms::parse_csv(&text, &q.bbox, MAX_POINTS).map_err(upstream_err)?;
-    let now = now_secs();
-    points.retain(|h| h.frp >= q.min_frp && h.conf >= q.min_conf && q.hours.is_none_or(|hrs| (now - h.t) as f64 <= hrs * 3600.0 + 900.0));
-    Ok(Loaded { points, source, stale: f.stale, truncated })
+    let (points, truncated) = firms::parse_csv(&text, &q.bbox, MAX_POINTS).map_err(upstream_err)?;
+    Ok((points, truncated, f.stale, source))
 }
 
 async fn load_async(app: &Shared, q: Query_) -> Result<Loaded, ApiError> {
@@ -174,7 +202,9 @@ fn limit(q: &HashMap<String, String>, d: usize, max: usize) -> Result<usize, Api
 }
 
 fn meta(l: &Loaded, q: &Query_) -> Value {
-    json!({ "source": l.source, "stale": l.stale, "truncated": l.truncated, "sensor": q.sensor, "window": q.window, "bbox": q.bbox, "eps_km": q.eps_km,
+    let newest = l.points.iter().map(|h| h.t).max();
+    json!({ "newest_detection": newest.map(util::iso), "newest_age_hours": newest.map(|t| firms::round((now_secs() - t) as f64 / 3600.0, 1)),
+            "source": l.source, "stale": l.stale, "truncated": l.truncated, "sensor": q.sensor, "window": q.window, "bbox": q.bbox, "eps_km": q.eps_km,
             "attribution": "Fire detections: NASA FIRMS (LANCE/FIRMS), VIIRS 375 m active fire, public domain; acknowledge NASA FIRMS. Detections include industrial heat sources such as gas flares and are not confirmed wildfires." })
 }
 
@@ -303,7 +333,7 @@ async fn tools() -> Json<Value> {
     let common = json!({
         "bbox": { "type": "string", "description": "west,south,east,north in degrees (default: whole world, 24h only)" },
         "window": { "type": "string", "enum": ["24h", "48h", "7d"], "description": "7d needs a regional bbox (it must fit inside one FIRMS region such as Europe)" },
-        "sensor": { "type": "string", "enum": ["snpp", "noaa20", "noaa21"] },
+        "sensor": { "type": "string", "enum": ["all", "snpp", "noaa20", "noaa21"], "description": "default all (the three VIIRS satellites merged)" },
         "hours": { "type": "number", "description": "only detections from the last N hours" },
         "min_frp": { "type": "number", "description": "minimum fire radiative power in MW" },
         "confidence": { "type": "string", "enum": ["low", "nominal", "high"], "description": "minimum detection confidence" },

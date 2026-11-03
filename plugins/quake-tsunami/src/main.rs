@@ -103,9 +103,23 @@ pub fn emsc_event(f: &Value) -> Option<Value> {
         "mag": p.get("mag").and_then(f64_of), "mag_type": p.get("magtype").and_then(Value::as_str),
         "place": p.get("flynn_region").and_then(Value::as_str), "lat": lat, "lon": lon,
         "depth_km": p.get("depth").and_then(f64_of), "felt": Value::Null, "mmi": Value::Null, "cdi": Value::Null,
-        "alert": Value::Null, "tsunami": false, "sig": Value::Null, "status": p.get("evtype").and_then(Value::as_str),
+        "alert": Value::Null, "tsunami": false, "sig": Value::Null, "status": p.get("evtype").and_then(Value::as_str).map(emsc_evtype),
         "url": link,
     }))
+}
+
+/// EMSC event-type codes (ke = known earthquake, ki = induced, kr = rockburst, ...) as words.
+pub fn emsc_evtype(code: &str) -> &str {
+    match code {
+        "ke" => "earthquake",
+        "se" => "suspected earthquake",
+        "ki" => "induced event",
+        "sm" => "suspected mine blast",
+        "km" => "mine blast",
+        "kr" => "rockburst",
+        "kx" => "explosion",
+        other => other,
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]

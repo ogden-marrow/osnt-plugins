@@ -51,6 +51,7 @@ async fn fake(rate_limited: Arc<AtomicUsize>) -> (String, Arc<AtomicUsize>) {
         .route("/gp", aget(move |RawQuery(q): RawQuery| async move {
             let q = q.unwrap_or_default();
             rec(Some(q.clone()));
+            if q.starts_with("NAME=GONE") { return (StatusCode::NOT_FOUND, "No GP data found").into_response(); }
             if q.starts_with("CATNR=25544") || q.starts_with("INTDES=1998-067A") { return Json(json!([iss_gp()])).into_response(); }
             if q.starts_with("GROUP=active") { return Json(json!([iss_gp(), low_sat(1, "LOW-A", 16.20), low_sat(2, "LOW-B", 16.05), low_sat(3, "TOOLOW", 17.5), low_sat(4, "HIGHER", 14.0)])).into_response(); }
             if q.starts_with("GROUP=stations") { return Json(json!([iss_gp(), low_sat(5, "CSS (TIANHE)", 15.6)])).into_response(); }
@@ -59,6 +60,11 @@ async fn fake(rate_limited: Arc<AtomicUsize>) -> (String, Arc<AtomicUsize>) {
         .route("/satcat", aget(move |RawQuery(q): RawQuery| async move {
             let q = q.unwrap_or_default();
             rec(Some(format!("sc:{q}")));
+            if q.starts_with("NAME=GONE") { return (StatusCode::NOT_FOUND, "").into_response(); }
+            if q.contains("INTDES=1998-067A") {
+                let mut deb = iss_sc(); deb["OBJECT_NAME"] = json!("ISS DEB"); deb["OBJECT_ID"] = json!("1998-067AA"); deb["NORAD_CAT_ID"] = json!(26000); deb["DECAY_DATE"] = json!("2004-10-12");
+                return Json(json!([iss_sc(), deb])).into_response();
+            }
             if q.contains("25544") || q.contains("1998-067A") || q.starts_with("GROUP=stations") { return Json(json!([iss_sc()])).into_response(); }
             if q.starts_with("GROUP=last-30-days") {
                 return Json(json!([
@@ -212,9 +218,9 @@ async fn object_merges_elements_and_catalog() {
     let (_, g) = getj(format!("{base}/api/object?group=stations")).await;
     assert_eq!(g["total"], 2);
     assert!(g["objects"][0]["catalog"].is_null(), "no catalog row for the second station in this fixture");
-    // A query with no data on either side reports the refusal instead of crashing.
+    // A query with no data on either side is an empty result (CelesTrak answers 404 / plain text), not a crash.
     let (code, v) = getj(format!("{base}/api/object?name=NOSUCHTHING")).await;
-    assert_eq!(code, 502, "{v}");
+    assert_eq!((code, v["count"].as_u64()), (200, Some(0)), "{v}");
     for q in ["", "catnr=abc", "group=nope", "name=x"] {
         assert_eq!(getj(format!("{base}/api/object?{q}")).await.0, 400, "{q}");
     }
@@ -259,4 +265,17 @@ fn disk_cache_expires_and_evicts() {
     c.put("b", &[2u8; 60]);
     c.evict();
     assert!(c.get("a", Duration::from_secs(60)).is_none() && c.get("b", Duration::from_secs(60)).is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn intl_designator_is_exact_and_no_match_is_an_empty_result() {
+    let (up, _) = fake(Arc::new(AtomicUsize::new(0))).await;
+    let base = serve(cfg(&up)).await;
+    let (code, v) = getj(format!("{base}/api/object?intl=1998-067A")).await;
+    assert_eq!(code, 200, "{v}");
+    assert_eq!(v["count"], 1, "SATCAT prefix matches (debris) are dropped: {v}");
+    assert_eq!(v["objects"][0]["norad_id"], 25544);
+    let (code, v) = getj(format!("{base}/api/object?name=gone")).await;
+    assert_eq!(code, 200, "{v}");
+    assert_eq!(v["count"], 0);
 }

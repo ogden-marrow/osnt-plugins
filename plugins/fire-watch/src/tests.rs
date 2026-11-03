@@ -32,6 +32,7 @@ fn fixture() -> String {
     s
 }
 
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static HITS: AtomicUsize = AtomicUsize::new(0);
 static URLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -176,6 +177,7 @@ fn query_validation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn fires_endpoint_summarises_and_caches_the_file() {
+    let _g = SERIAL.lock().await;
     let up = fake(fixture()).await;
     let (base, _) = serve(cfg(&up, None)).await;
     let url = format!("{base}/api/fires?bbox=-121,39,-118,42&hours=24&points=1&sensor=noaa20");
@@ -185,10 +187,11 @@ async fn fires_endpoint_summarises_and_caches_the_file() {
     assert_eq!(v["clusters"][0]["count"], 3);
     assert_eq!(v["points"][0]["frp"], 20.0, "strongest first");
     assert!(v["meta"]["source"].as_str().unwrap().contains("USA contiguous and Hawaii"));
+    let count = || URLS.lock().unwrap().iter().filter(|n| n.starts_with("J1_VIIRS_C2_USA_contiguous_and_Hawaii_24h")).count();
+    let before = count();
     let (_, v2) = getj(url).await;
     assert_eq!(v, v2);
-    let n = URLS.lock().unwrap().iter().filter(|n| n.starts_with("J1_VIIRS_C2_USA_contiguous_and_Hawaii_24h")).count();
-    assert_eq!(n, 1, "second call served from the cache");
+    assert_eq!(count(), before, "second call served from the cache");
     let (_, w) = getj(format!("{base}/api/fires?bbox=-121,39,-118,42&min_frp=15&confidence=nominal&sensor=noaa20")).await;
     assert_eq!(w["stats"]["detections"], 1);
 }
@@ -247,7 +250,7 @@ async fn export_formats() {
     assert_eq!(g["type"], "FeatureCollection");
     assert_eq!(g["features"].as_array().unwrap().len(), 2);
     assert_eq!(g["features"][0]["geometry"]["type"], "Point");
-    let url = format!("{base}/api/export?bbox=-121,39,-118,42&hours=24&format=csv&what=points");
+    let url = format!("{base}/api/export?bbox=-121,39,-118,42&hours=24&format=csv&what=points&sensor=snpp");
     let (ct, text) = tokio::task::spawn_blocking(move || {
         let mut r = ureq::get(&url).call().unwrap();
         (r.headers().get("content-type").unwrap().to_str().unwrap().to_string(), r.body_mut().read_to_string().unwrap())
@@ -281,6 +284,7 @@ fn watch_diff_flags_only_new_fires() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn watches_require_gateway_and_flag_new_clusters() {
+    let _g = SERIAL.lock().await;
     let up = fake(fixture()).await;
     let (base, st) = serve(cfg(&up, None)).await;
     // No signature: refused on every watch route.
@@ -340,4 +344,31 @@ async fn tools_and_page() {
     assert!(i["overlap"].as_str().unwrap().contains("Imagery"));
     let page = tokio::task::spawn_blocking(move || ureq::get(&format!("{base}/")).call().unwrap().body_mut().read_to_string().unwrap()).await.unwrap();
     assert!(page.contains("osnt-ui.css") && page.contains("embedded"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn default_sensor_merges_all_satellites_and_reports_newest_detection() {
+    let _g = SERIAL.lock().await;
+    let up = fake(fixture()).await;
+    let (base, _) = serve(cfg(&up, None)).await;
+    let (code, v) = getj(format!("{base}/api/fires?bbox=-121,39,-118,42&hours=24")).await;
+    assert_eq!(code, 200, "{v}");
+    assert_eq!(v["meta"]["sensor"], "all");
+    // The same fixture answers for each of the three satellites: 4 detections each.
+    assert_eq!(v["stats"]["detections"], 12);
+    let src = v["meta"]["source"].as_str().unwrap();
+    assert!(src.contains("snpp") && src.contains("noaa20") && src.contains("noaa21"), "{src}");
+    assert!(v["meta"]["newest_age_hours"].as_f64().unwrap() < 48.0);
+    assert_eq!(v["stats"]["frp_total_mw"].as_f64().unwrap().is_sign_negative(), false);
+}
+
+#[test]
+fn csv_header_variants_and_text_replies() {
+    let body = "country_id,latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_ti5,frp,daynight\nUSA,40.1,-120.2,330,0.4,0.4,2026-11-02,0215,N,VIIRS,n,2.0NRT,290,12.5,N\n";
+    let (pts, _) = firms::parse_csv(body, &[-180.0, -90.0, 180.0, 90.0], 10).unwrap();
+    assert_eq!(pts.len(), 1);
+    assert_eq!(pts[0].frp, 12.5);
+    assert!(firms::parse_csv("\u{feff}latitude,longitude,acq_date,acq_time,frp\n", &[-180.0, -90.0, 180.0, 90.0], 10).is_ok());
+    assert!(firms::parse_csv("Invalid MAP_KEY.", &[-180.0, -90.0, 180.0, 90.0], 10).is_err());
+    assert_eq!(firms::stats(&[], &[])["frp_total_mw"].as_f64().unwrap().to_string(), "0");
 }

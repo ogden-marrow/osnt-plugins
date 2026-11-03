@@ -45,6 +45,8 @@ struct Handle {
 
 /// After a rejection (for example a bad API key) the stream is not retried for this long.
 pub const RETRY_AFTER_FATAL: Duration = Duration::from_secs(5 * 60);
+/// Sessions in a row that end without a single message before the stream gives up (then retried after RETRY_AFTER_FATAL).
+pub const EMPTY_SESSIONS_FATAL: u32 = 3;
 
 pub struct Stream {
     url: String,
@@ -166,7 +168,8 @@ impl std::io::Write for Conn {
 }
 
 fn run(url: String, key: String, bbox: [f64; 4], store: Arc<Mutex<Store>>, stop: Arc<AtomicBool>, wanted: Arc<Mutex<Instant>>, status: Arc<Mutex<Status>>, fatal: Arc<AtomicBool>) {
-    let mut backoff = 3u64;
+    let mut backoff: u64 = if cfg!(test) { 0 } else { 3 };
+    let mut empty_sessions = 0u32;
     while !stop.load(Ordering::SeqCst) {
         match connect(&url) {
             Ok(mut ws) => {
@@ -190,7 +193,17 @@ fn run(url: String, key: String, bbox: [f64; 4], store: Arc<Mutex<Store>>, stop:
                     }
                     // A session that delivered nothing is treated like a failure (a rejected key often just resets the socket).
                     if status.lock().unwrap().messages > before {
-                        backoff = 3;
+                        backoff = if cfg!(test) { 0 } else { 3 };
+                        empty_sessions = 0;
+                    } else {
+                        empty_sessions += 1;
+                        if empty_sessions >= EMPTY_SESSIONS_FATAL {
+                            // AISStream resets the socket without a message for a rejected key; stop hammering it.
+                            set_error(&status, "AISStream closed the connection without sending data several times in a row; the API key (AISSTREAM_API_KEY) may be invalid or revoked, or the service is down. Check the Credentials page.".into());
+                            fatal.store(true, Ordering::SeqCst);
+                            stop.store(true, Ordering::SeqCst);
+                            return;
+                        }
                     }
                 }
             }
@@ -203,6 +216,7 @@ fn run(url: String, key: String, bbox: [f64; 4], store: Arc<Mutex<Store>>, stop:
             }
             thread::sleep(Duration::from_millis(250));
         }
+        thread::sleep(Duration::from_millis(20));
         backoff = (backoff * 2).min(60);
     }
 }
@@ -262,7 +276,7 @@ fn pump(ws: &mut WebSocket<Conn>, store: &Arc<Mutex<Store>>, stop: &AtomicBool, 
             Ok(_) => {}
             Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
             Err(e) => {
-                set_error(status, format!("stream ended: {e}"));
+                set_error(status, format!("stream ended: {}", if matches!(e, tungstenite::Error::Protocol(_)) { "the server dropped the connection".to_string() } else { e.to_string() }));
                 return false;
             }
         }
@@ -354,6 +368,26 @@ mod tests {
         // and is not restarted by the next request
         s.ensure(Arc::new(Mutex::new(Store::default())), "bad".into(), [0.0, 0.0, 1.0, 1.0]);
         assert!(s.inner.lock().unwrap().as_ref().unwrap().fatal.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn repeated_empty_sessions_are_fatal_with_a_helpful_message() {
+        // A server that accepts, reads the subscription and drops the socket (what AISStream does for a bad key).
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("ws://{}/v0/stream", l.local_addr().unwrap());
+        thread::spawn(move || {
+            for s in l.incoming().flatten() {
+                if let Ok(mut ws) = tungstenite::accept(s) {
+                    let _ = ws.read();
+                }
+            }
+        });
+        let s = Stream::new(url);
+        s.ensure(Arc::new(Mutex::new(Store::default())), "SECRET-KEY".into(), [0.0, 0.0, 1.0, 1.0]);
+        assert!(wait_for(|| s.inner.lock().unwrap().as_ref().is_some_and(|h| h.fatal.load(Ordering::SeqCst))), "gives up after repeated empty sessions");
+        let st = s.status().expect("keeps reporting why");
+        let err = st.error.unwrap();
+        assert!(err.contains("AISSTREAM_API_KEY") && !err.contains("SECRET-KEY"), "{err}");
     }
 
     #[test]

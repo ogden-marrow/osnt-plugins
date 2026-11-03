@@ -3,7 +3,7 @@ name = "Hazard events"
 description = "One map of active disasters: GDACS alerts, NASA EONET, NWS alerts, volcano reports, active storms."
 grid = "Hazards"
 port = 8154
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

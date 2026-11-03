@@ -97,7 +97,10 @@
       <div class="muted small" style="margin-top:4px">Circle size grows with magnitude.</div>
 
       <h2 id="listTitle">Events</h2>
-      <div id="count" class="muted" style="margin-bottom:4px"></div>
+      <div id="count" class="muted" style="margin-bottom:4px" aria-live="polite"></div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px">
+        <button id="expCsv" class="btn sm" disabled>CSV</button><button id="expGeo" class="btn sm" disabled>GeoJSON</button><button id="share" class="btn sm">Copy link</button>
+      </div>
       <div id="list"></div>
 
       <h2>Tsunami bulletins</h2>
@@ -147,6 +150,8 @@
       if (e.alert) bits.push(`PAGER alert: ${esc(e.alert)}`);
       if (e.tsunami) bits.push('<b>Tsunami flag set by USGS</b>');
       if (e.url) bits.push(`<a href="${esc(e.url)}" target="_blank" rel="noopener">Event page</a>`);
+      const ll = `lat=${e.lat.toFixed(4)}&lon=${e.lon.toFixed(4)}`;
+      bits.push(`<a href="/p/satellite/?${ll}&zoom=9">Satellite here</a> · <a href="/p/wayback/?${ll}&zoom=12">Before/after</a>`);
       return bits.join('<br>');
     }
 
@@ -199,7 +204,7 @@
         }
         if (my !== seq) return;
         events = d.events;
-        render();
+        render(); $('expCsv').disabled = $('expGeo').disabled = !events.length;
         $('count').textContent = mode === 'recent' ? `${d.count} shown of ${d.total_in_feed} in the feed` : `${d.count} events${d.largest_mag != null ? ', largest M' + d.largest_mag.toFixed(1) : ''}`;
         $('status').textContent = (d.stale ? 'cached (upstream unreachable) · ' : '') + `${d.source.toUpperCase()} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
         if (d.stale) toast('The data service is unreachable; showing a recent cached copy.', 'warn');
@@ -230,7 +235,7 @@
     }
 
     function setMode(m) {
-      mode = m;
+      mode = m; saveState();
       $('mRecent').classList.toggle('on', m === 'recent'); $('mArea').classList.toggle('on', m === 'area');
       $('recentBox').hidden = m !== 'recent'; $('areaBox').hidden = m !== 'area';
       if (m === 'recent') load(true);
@@ -245,11 +250,58 @@
     $('source').onchange = () => { $('levelF').hidden = $('source').value !== 'usgs'; if ($('source').value === 'emsc' && $('period').value === 'month') $('period').value = 'week'; $('period').querySelector('[value=month]').disabled = $('source').value === 'emsc'; load(true); };
     for (const id of ['period', 'level']) $(id).onchange = () => load(true);
 
+
+    // ---- remembered inputs, deep links, export ----
+    const FIELDS = ['source', 'period', 'level', 'minmag', 'maxmag', 'mindepth', 'maxdepth', 'rad', 'days', 'asource'];
+    const store = {
+      get() { try { return JSON.parse(localStorage.getItem('osnt.quake') || '{}'); } catch { return {}; } },
+      set(o) { try { localStorage.setItem('osnt.quake', JSON.stringify(o)); } catch { /* storage unavailable */ } },
+    };
+    function saveState() {
+      const o = { mode }; for (const k of FIELDS) o[k] = $(k).value;
+      if (map) { const c = map.getCenter(); o.view = [+c.lat.toFixed(3), +c.lng.toFixed(3), map.getZoom()]; }
+      store.set(o);
+    }
+    function restoreState() {
+      const o = store.get(), q = new URLSearchParams(location.search);
+      for (const k of FIELDS) { const v = q.get(k) ?? o[k]; if (v != null && v !== '') $(k).value = v; }
+      if (q.get('asource')) $('asource').value = q.get('asource');
+      $('levelF').hidden = $('source').value !== 'usgs';
+      $('period').querySelector('[value=month]').disabled = $('source').value === 'emsc';
+      const lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        $('lat').value = lat; $('lon').value = lon;
+        return { mode: 'area', view: [lat, lon, parseInt(q.get('zoom')) || 7] };
+      }
+      return { mode: o.mode === 'area' ? 'recent' : 'recent', view: o.view };
+    }
+    function download(name, mime, text) {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: mime })); a.download = name;
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+    const csvCell = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    $('expCsv').onclick = () => {
+      const cols = ['time', 'mag', 'mag_type', 'depth_km', 'lat', 'lon', 'place', 'source', 'felt', 'alert', 'tsunami', 'url'];
+      download('earthquakes.csv', 'text/csv', [cols.join(','), ...events.map(e => cols.map(c => csvCell(e[c])).join(','))].join('\n'));
+    };
+    $('expGeo').onclick = () => download('earthquakes.geojson', 'application/geo+json', JSON.stringify({ type: 'FeatureCollection',
+      features: events.map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat, e.depth_km == null ? 0 : -e.depth_km * 1000] }, properties: e })) }));
+    $('share').onclick = async () => {
+      const c = map.getCenter(), u = new URL(location.href.split('?')[0], location.href);
+      u.searchParams.set('lat', c.lat.toFixed(3)); u.searchParams.set('lon', (((c.lng + 540) % 360) - 180).toFixed(3)); u.searchParams.set('zoom', map.getZoom());
+      for (const k of ['minmag', 'maxmag', 'mindepth', 'maxdepth']) if (num(k) !== '') u.searchParams.set(k, num(k));
+      try { await navigator.clipboard.writeText(u.href); toast('Link copied.'); } catch { toast(u.href); }
+    };
+    for (const id of FIELDS) $(id).addEventListener('change', saveState);
+
     (async () => {
       ({ map } = await OSNT.createMap('map'));
       layer = L.layerGroup().addTo(map);
-      map.setView([20, 10], 2);
-      load(true); loadTsunami();
+      const st = restoreState();
+      if (st.view) map.setView([st.view[0], st.view[1]], st.view[2] ?? 4, { animate: false }); else map.setView([20, 10], 2, { animate: false });
+      map.on('moveend', saveState);
+      if (st.mode === 'area') { setMode('area'); load(false); } else load(!st.view);
+      loadTsunami();
       setInterval(() => mode === 'recent' && load(false), 120000);
       setInterval(loadTsunami, 180000);
     })();

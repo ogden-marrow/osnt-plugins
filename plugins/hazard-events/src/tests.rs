@@ -95,7 +95,7 @@ async fn fake_counted(storms: bool, down: &'static [&'static str]) -> (String, A
 }
 
 fn cfg(up: &str, appname: Option<&str>) -> Config {
-    Config { gdacs: format!("{up}/gdacs"), eonet: format!("{up}/eonet"), nws: format!("{up}/nws"), gvp: format!("{up}/gvp"), hans: format!("{up}/hans"), nhc: format!("{up}/nhc"),
+    Config { now: Some(1_793_700_000), gdacs: format!("{up}/gdacs"), eonet: format!("{up}/eonet"), nws: format!("{up}/nws"), gvp: format!("{up}/gvp"), hans: format!("{up}/hans"), nhc: format!("{up}/nhc"),
              reliefweb: format!("{up}/rw"), reliefweb_appname: appname.map(str::to_string) }
 }
 
@@ -298,4 +298,24 @@ async fn tools_and_page() {
     assert_eq!(s["sources"].as_array().unwrap().len(), 7);
     let page = tokio::task::spawn_blocking(move || ureq::get(&format!("{base}/")).call().unwrap().body_mut().read_to_string().unwrap()).await.unwrap();
     assert!(page.contains("osnt-ui.css") && page.contains("embedded"));
+}
+
+#[test]
+fn gdacs_window_keeps_current_and_recent_only() {
+    let now = 1_793_700_000; // 2026-11-03
+    let cur = json!({ "source": "gdacs", "current": true, "time": "2025-05-21T00:00:00Z" });
+    let recent = json!({ "source": "gdacs", "current": false, "time": "2026-10-26T00:00:00Z", "updated": "2026-10-29T08:02:06Z" });
+    let old = json!({ "source": "gdacs", "current": false, "time": "2025-05-21T00:00:00Z", "updated": null });
+    assert!(sources::is_recent(&cur, now, 30) && sources::is_recent(&recent, now, 30));
+    assert!(!sources::is_recent(&old, now, 30));
+    assert!(sources::is_recent(&old, now, 730));
+    assert!(sources::is_recent(&json!({ "source": "eonet", "time": "2020-01-01T00:00:00Z" }), now, 30));
+}
+
+#[test]
+fn days_param_is_validated() {
+    let q = |s: &str| -> HashMap<String, String> { s.split('&').filter_map(|p| p.split_once('=')).map(|(a, b)| (a.to_string(), b.to_string())).collect() };
+    assert_eq!(parse_params(&q("days=7")).unwrap().days, Some(7));
+    assert!(parse_params(&q("days=0")).is_err());
+    assert!(parse_params(&q("days=abc")).is_err());
 }

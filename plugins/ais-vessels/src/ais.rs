@@ -240,7 +240,7 @@ pub fn parse_digitraffic_vessel(v: &Value) -> Option<(u32, Info)> {
             name: nonempty(&v["name"]),
             call_sign: nonempty(&v["callSign"]),
             imo: v["imo"].as_u64().filter(|i| *i > 0).map(|i| i as u32),
-            ship_type: v["shipType"].as_u64().map(|t| t as u8),
+            ship_type: v["shipType"].as_u64().filter(|t| *t > 0 && *t < 100).map(|t| t as u8), // 0 = "not available"
             destination: nonempty(&v["destination"]),
             eta: v["eta"].as_u64().and_then(|e| unpack_eta(e as u32)),
             draught_m: v["draught"].as_f64().filter(|d| *d > 0.0).map(|d| d / 10.0),
@@ -339,7 +339,7 @@ pub fn decode_aisstream(v: &Value) -> Option<Decoded> {
                     name: nonempty(&m["Name"]).or_else(|| nonempty(&meta["ShipName"])),
                     call_sign: nonempty(&m["CallSign"]),
                     imo: m["ImoNumber"].as_u64().filter(|i| *i > 0).map(|i| i as u32),
-                    ship_type: m["Type"].as_u64().map(|t| t as u8),
+                    ship_type: m["Type"].as_u64().filter(|t| *t > 0 && *t < 100).map(|t| t as u8),
                     destination: nonempty(&m["Destination"]),
                     eta,
                     draught_m: m["MaximumStaticDraught"].as_f64().filter(|d| *d > 0.0),

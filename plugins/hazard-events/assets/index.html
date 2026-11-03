@@ -56,6 +56,9 @@
       <label class="sr-only" for="level">Minimum alert level</label>
       <select id="level" style="width:100%"><option value="">All levels</option><option value="yellow">Yellow and up</option><option value="orange">Orange and up</option><option value="red">Red only</option></select>
       <label class="check" style="margin-top:8px;display:flex;gap:8px;align-items:center"><input id="green" type="checkbox"> Include GDACS green alerts</label>
+      <h2>Recency of GDACS events</h2>
+      <label class="sr-only" for="days">Show GDACS events updated within</label>
+      <select id="days" style="width:100%"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select>
       <h2>US weather alerts (NWS)</h2>
       <div class="grid2">
         <label class="field"><span class="label">State code</span><input id="area" maxlength="2" placeholder="CA" autocapitalize="characters" spellcheck="false"></label>
@@ -66,7 +69,8 @@
       <h2>Sources</h2>
       <div id="srcs" class="srcs muted">Loading…</div>
       <h2 id="listTitle">Events</h2>
-      <div id="count" class="muted" style="margin-bottom:4px"></div>
+      <div id="count" class="muted" style="margin-bottom:4px" aria-live="polite"></div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px"><button id="expCsv" class="btn sm" disabled>CSV</button><button id="expGeo" class="btn sm" disabled>GeoJSON</button><button id="share" class="btn sm">Copy link</button></div>
       <div id="list"></div>
       <p class="src">Data: GDACS (EC JRC / UN OCHA), NASA EONET, NOAA/NWS, Smithsonian Global Volcanism Program with USGS (weekly report), USGS Volcano Hazards Program, NOAA National Hurricane Center, and ReliefWeb (OCHA) when configured. Informational only; not an official warning channel. Follow your local authorities.</p>
     </aside>
@@ -91,6 +95,7 @@
       if (e.countries?.length) b.push(esc(e.countries.join(', ')));
       if (e.summary) b.push(esc(e.summary));
       if (e.url) b.push(`<a href="${esc(e.url)}" target="_blank" rel="noopener">Source page</a>`);
+      if (e.lat != null) { const ll = `lat=${(+e.lat).toFixed(4)}&lon=${(+e.lon).toFixed(4)}`; b.push(`<a href="/p/satellite/?${ll}&zoom=8">Satellite here</a> · <a href="/p/wayback/?${ll}&zoom=12">Before/after</a>`); }
       return b.join('<br>');
     }
     function render() {
@@ -117,18 +122,18 @@
       const counts = {}; for (const e of events) counts[e.hazard] = (counts[e.hazard] || 0) + 1;
       $('types').innerHTML = Object.entries(TYPES).filter(([k]) => counts[k] || !events.length).map(([k, [n, c]]) =>
         `<label class="chip"><input type="checkbox" data-k="${k}" ${enabled.has(k) ? 'checked' : ''}><i style="background:${c}"></i>${n} <span class="muted">${counts[k] || 0}</span></label>`).join('');
-      $('types').querySelectorAll('input').forEach(i => i.onchange = () => { i.checked ? enabled.add(i.dataset.k) : enabled.delete(i.dataset.k); render(); });
+      $('types').querySelectorAll('input').forEach(i => i.onchange = () => { i.checked ? enabled.add(i.dataset.k) : enabled.delete(i.dataset.k); render(); save(); });
     }
     async function load() {
       const my = ++seq; $('status').textContent = 'Loading…';
       try {
         const p = new URLSearchParams({ limit: '1000' });
         let srcs = 'gdacs,eonet,gvp,hans,nhc'; if (nws) srcs += ',nws';
-        p.set('sources', srcs); if ($('level').value) p.set('level', $('level').value); if ($('green').checked) p.set('gdacs_green', '1');
+        p.set('sources', srcs); if ($('level').value) p.set('level', $('level').value); if ($('green').checked) p.set('gdacs_green', '1'); p.set('days', $('days').value);
         if (nws) for (const [k, v] of Object.entries(nws)) p.set(k, v);
         const d = await api('api/active?' + p);
         if (my !== seq) return;
-        events = d.events; typeChips(); render();
+        events = d.events; typeChips(); render(); $('expCsv').disabled = $('expGeo').disabled = !events.length; save();
         $('srcs').innerHTML = d.sources.map(s => `<div><span>${esc(s.source)}</span><span class="${s.ok ? '' : 'warn-text'}">${s.ok ? s.count + ' events' + (s.stale ? ' (cached)' : '') : esc(s.error)}</span></div>`).join('');
         $('status').textContent = `${d.count} events · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
         const bad = d.sources.filter(s => !s.ok); if (bad.length) toast(bad.length + ' source(s) did not answer; see Sources.', 'warn');
@@ -143,8 +148,44 @@
     $('refresh').onclick = () => { const a = $('area').value.trim().toUpperCase(); if (a) { if (!/^[A-Z]{2}$/.test(a)) return toast('State code must be two letters.', 'err'); nws = { area: a }; } load(); };
     $('here').onclick = () => { const c = map.getCenter(); nws = { lat: c.lat.toFixed(3), lon: (((c.lng + 540) % 360) - 180).toFixed(3) }; $('area').value = ''; load(); };
     $('clearNws').onclick = () => { nws = null; $('area').value = ''; load(); };
-    $('level').onchange = load; $('green').onchange = load;
-    (async () => { ({ map } = await OSNT.createMap('map')); layer = L.layerGroup().addTo(map); map.setView([20, 10], 2); typeChips(); load(); setInterval(load, 300000); })();
+    $('level').onchange = load; $('green').onchange = load; $('days').onchange = load;
+    // ---- remembered inputs, deep links (?lat=&lon=&zoom=&hazard=&level=&area=), export ----
+    const KEY = 'osnt.hazard';
+    function save() {
+      try {
+        const c = map.getCenter();
+        localStorage.setItem(KEY, JSON.stringify({ level: $('level').value, green: $('green').checked, days: $('days').value, off: Object.keys(TYPES).filter(k => !enabled.has(k)), nws, area: $('area').value, view: [+c.lat.toFixed(3), +c.lng.toFixed(3), map.getZoom()] }));
+      } catch { /* storage unavailable */ }
+    }
+    function restore() {
+      let o = {}; try { o = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* ignore */ }
+      const q = new URLSearchParams(location.search);
+      if (o.level) $('level').value = o.level; if (o.green) $('green').checked = true; if (o.days) $('days').value = o.days;
+      if (Array.isArray(o.off)) o.off.forEach(k => enabled.delete(k));
+      if (o.nws) { nws = o.nws; $('area').value = o.area || ''; }
+      let view = o.view;
+      if (q.get('level')) $('level').value = q.get('level');
+      if (q.get('days')) $('days').value = q.get('days');
+      if (q.get('hazard')) { enabled = new Set(q.get('hazard').split(',').filter(k => TYPES[k])); }
+      const a = (q.get('area') || '').toUpperCase();
+      if (/^[A-Z]{2}$/.test(a)) { nws = { area: a }; $('area').value = a; }
+      const lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
+      if (Number.isFinite(lat) && Number.isFinite(lon)) { view = [lat, lon, parseInt(q.get('zoom')) || 6]; }
+      return view;
+    }
+    const dl = (name, mime, text) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: mime })); a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+    const cell = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const shownEvents = () => events.filter(e => enabled.has(e.hazard));
+    $('expCsv').onclick = () => { const cols = ['title', 'hazard', 'level', 'source', 'time', 'lat', 'lon', 'url']; dl('hazard-events.csv', 'text/csv', [cols.join(','), ...shownEvents().map(e => cols.map(c => cell(e[c])).join(','))].join('\n')); };
+    $('expGeo').onclick = () => dl('hazard-events.geojson', 'application/geo+json', JSON.stringify({ type: 'FeatureCollection', features: shownEvents().filter(e => e.lat != null).map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat] }, properties: e })) }));
+    $('share').onclick = async () => {
+      const c = map.getCenter(), u = new URL(location.href.split('?')[0], location.href);
+      u.searchParams.set('lat', c.lat.toFixed(3)); u.searchParams.set('lon', (((c.lng + 540) % 360) - 180).toFixed(3)); u.searchParams.set('zoom', map.getZoom());
+      if ($('level').value) u.searchParams.set('level', $('level').value);
+      const on = Object.keys(TYPES).filter(k => enabled.has(k)); if (on.length < Object.keys(TYPES).length) u.searchParams.set('hazard', on.join(','));
+      try { await navigator.clipboard.writeText(u.href); toast('Link copied.'); } catch { toast(u.href); }
+    };
+    (async () => { ({ map } = await OSNT.createMap('map')); layer = L.layerGroup().addTo(map); const v = restore(); if (v) map.setView([v[0], v[1]], v[2] ?? 4, { animate: false }); else map.setView([20, 10], 2, { animate: false }); map.on('moveend', save); typeChips(); load(); setInterval(load, 300000); })();
   </script>
 </body>
 </html>

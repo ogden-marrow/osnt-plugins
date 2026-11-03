@@ -132,6 +132,12 @@ fn has(text: &str, words: &[&str]) -> bool {
 /// Shapes found in `text`. Heuristic: polygon when the text says "bounded by"/"area" and has 3+ points, a line when it says
 /// "along"/"cable"/"between" with 2+, circles for "within N NM of <position>", otherwise individual points.
 pub fn extract(text: &str) -> Vec<Shape> {
+    // NGA text occasionally has a typo such as `143.46.0E` for `143-46.0E`: a number with two dots is never a valid
+    // decimal, and dropping that position would silently shorten a line or polygon.
+    static TYPO: OnceLock<Regex> = OnceLock::new();
+    let typo = TYPO.get_or_init(|| Regex::new(r"(\d)\.(\d{2}\.\d)").unwrap());
+    let fixed = typo.replace_all(text, "$1-$2");
+    let text: &str = &fixed;
     let mut shapes = Vec::new();
     let mut total = 0usize;
     for block in blocks(text) {
@@ -236,6 +242,19 @@ mod tests {
         assert!(matches!(&s[0], Shape::Polygon { pts } if pts.len() == 4));
         let b = bbox(&s).unwrap();
         assert!(b[0] < 28.4 && b[2] > 28.8);
+    }
+
+    #[test]
+    fn dot_typo_in_degrees_minutes_is_repaired() {
+        // Real NGA text (HYDROPAC 1519/24): `143.46.0E` stands for 143-46.0E.
+        let sh = extract("ALONG TRACKLINE JOINING\n13-47.5N 143.46.0E, 13-34.2N 144-27.3E,\n13-29.9N 144-45.5E.");
+        match &sh[0] {
+            Shape::Line { pts } => {
+                assert_eq!(pts.len(), 3, "{pts:?}");
+                assert!((pts[0][1] - 143.76667).abs() < 1e-4);
+            }
+            o => panic!("{o:?}"),
+        }
     }
 
     #[test]

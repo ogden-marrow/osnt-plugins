@@ -58,7 +58,7 @@
       <p class="muted small" style="margin:0 0 8px">Pan and zoom the map, then analyse the current view. Regional boxes allow 7 days; the whole world is 24 or 48 h.</p>
       <div class="grid2">
         <label class="field"><span class="label">Window</span><select id="window"><option value="24h">Last 24 h</option><option value="48h">Last 48 h</option><option value="7d">Last 7 days (regional)</option></select></label>
-        <label class="field"><span class="label">Satellite</span><select id="sensor"><option value="snpp">Suomi NPP</option><option value="noaa20">NOAA-20</option><option value="noaa21">NOAA-21</option></select></label>
+        <label class="field"><span class="label">Satellite</span><select id="sensor"><option value="all">All three</option><option value="snpp">Suomi NPP</option><option value="noaa20">NOAA-20</option><option value="noaa21">NOAA-21</option></select></label>
         <label class="field"><span class="label">Min FRP (MW)</span><input id="minfrp" type="number" min="0" step="0.5" value="0" inputmode="decimal"></label>
         <label class="field"><span class="label">Min confidence</span><select id="conf"><option value="">Any</option><option value="nominal">Nominal+</option><option value="high">High</option></select></label>
         <label class="field"><span class="label">Link within (km)</span><input id="eps" type="number" min="0.5" max="20" step="0.5" value="2"></label>
@@ -114,9 +114,10 @@
         <h2>Detections per day (UTC)</h2>
         ${tl.length ? `<div class="bars" role="img" aria-label="Detections per day">${tl.map(t => `<div title="${esc(t.date)}: ${t.detections} detections, ${t.frp_mw} MW" style="height:${Math.max(4, 100 * t.detections / max)}%"></div>`).join('')}</div><div class="bars-l">${tl.map(t => `<span>${esc(t.date.slice(5))}</span>`).join('')}</div>` : '<div class="muted">No detections in this window.</div>'}
         <h2>Largest clusters</h2><div id="clist"></div>
-        <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><a class="btn sm" id="xg" href="#">GeoJSON</a><a class="btn sm" id="xc" href="#">CSV</a></div>
-        <p class="muted small" style="margin:8px 0 0">${esc(d.meta.source)}${d.meta.stale ? ' (cached copy: the data service is unreachable)' : ''}${d.meta.truncated ? ' · result truncated at the row cap' : ''}</p>`;
-      const p = qs(); $('xg').href = 'api/export?' + p + '&format=geojson'; $('xc').href = 'api/export?' + p + '&format=csv';
+        <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><a class="btn sm" id="xg" href="#">GeoJSON</a><a class="btn sm" id="xc" href="#">CSV</a><button class="btn sm" id="share" type="button">Copy link</button></div>
+        <p class="${d.meta.newest_age_hours > 6 ? 'warn-text' : 'muted'} small" style="margin:8px 0 0">${d.meta.newest_detection ? 'Newest detection ' + esc(d.meta.newest_detection.replace('T', ' ').replace('Z', ' UTC')) + ' (' + ago(d.meta.newest_detection) + ')' + (d.meta.newest_age_hours > 6 ? ': older than usual, the satellite feed may be delayed' : '') : 'No detections in this window'}</p>
+        <p class="muted small" style="margin:4px 0 0">${esc(d.meta.source)}${d.meta.stale ? ' (cached copy: the data service is unreachable)' : ''}${d.meta.truncated ? ' · result truncated at the row cap' : ''}</p>`;
+      $('share').onclick = shareLink; const p = qs(); $('xg').href = 'api/export?' + p + '&format=geojson'; $('xc').href = 'api/export?' + p + '&format=csv';
       const list = $('clist');
       if (!d.clusters.length) list.innerHTML = '<div class="state"><div class="h3">No fires detected</div><p>Nothing in this view and window, or clouds and filters hid it.</p></div>';
       d.clusters.slice(0, 40).forEach(c => {
@@ -130,7 +131,7 @@
     function drawMap(d) {
       layer.clearLayers(); ptsLayer.clearLayers();
       for (const c of d.clusters) L.circleMarker([c.lat, c.lon], { radius: Math.max(5, Math.min(26, 3 + 1.6 * Math.sqrt(c.frp_total))), color: '#10151a', weight: 1, fillColor: frpColour(c.frp_total), fillOpacity: .72 })
-        .bindPopup(`<b>${c.count} detections</b><br>${Math.round(c.frp_total)} MW total, peak ${c.frp_max} MW<br>${c.day} day / ${c.night} night · ${c.high_confidence} high confidence<br>First ${esc(c.first.replace('T', ' ').replace('Z', ' UTC'))}<br>Last ${esc(c.last.replace('T', ' ').replace('Z', ' UTC'))} (${ago(c.last)})<br>Radius ${c.radius_km} km`).addTo(layer);
+        .bindPopup(`<b>${c.count} detections</b><br>${Math.round(c.frp_total)} MW total, peak ${c.frp_max} MW<br>${c.day} day / ${c.night} night · ${c.high_confidence} high confidence<br>First ${esc(c.first.replace('T', ' ').replace('Z', ' UTC'))}<br>Last ${esc(c.last.replace('T', ' ').replace('Z', ' UTC'))} (${ago(c.last)})<br>Radius ${c.radius_km} km<br><a href="/p/satellite/?lat=${c.lat}&lon=${c.lon}&zoom=11">Satellite here</a> · <a href="/p/wayback/?lat=${c.lat}&lon=${c.lon}&zoom=13">Before/after</a>`).addTo(layer);
       for (const h of d.points || []) L.circleMarker([h.lat, h.lon], { radius: 2.5, color: frpColour(h.frp), weight: 1, fillOpacity: .9 }).bindPopup(`${h.frp} MW · ${esc(h.confidence)} · ${h.night ? 'night' : 'day'}<br>${esc(h.time.replace('T', ' ').replace('Z', ' UTC'))}`).addTo(ptsLayer);
     }
     async function analyse() {
@@ -174,9 +175,31 @@
     $('pts').onclick = () => { showPts = !showPts; $('pts').setAttribute('aria-pressed', String(showPts)); $('pts').classList.toggle('primary', showPts); analyse(); };
     function toggle(f) { const o = $('panel').classList.toggle('open', f); $('panelBtn').setAttribute('aria-expanded', String(o)); }
     $('panelBtn').onclick = () => toggle();
+
+    // ---- remembered inputs and deep links (?lat=&lon=&zoom=&window=&sensor=&min_frp=&confidence=) ----
+    const KEY = 'osnt.fire', FIELDS = { window: 'window', sensor: 'sensor', minfrp: 'min_frp', conf: 'confidence', eps: 'eps_km' };
+    function saveState() {
+      try { const c = map.getCenter(), o = { view: [+c.lat.toFixed(3), +c.lng.toFixed(3), map.getZoom()] }; for (const id of Object.keys(FIELDS)) o[id] = $(id).value; localStorage.setItem(KEY, JSON.stringify(o)); } catch { /* storage unavailable */ }
+    }
+    function restoreState() {
+      let o = {}; try { o = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* ignore */ }
+      const q = new URLSearchParams(location.search);
+      for (const [id, name] of Object.entries(FIELDS)) { const v = q.get(name) ?? o[id]; if (v != null && v !== '') $(id).value = v; }
+      const lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
+      if (Number.isFinite(lat) && Number.isFinite(lon)) return [lat, lon, parseInt(q.get('zoom')) || 8];
+      return o.view;
+    }
+    async function shareLink() {
+      const c = map.getCenter(), u = new URL(location.href.split('?')[0], location.href);
+      u.searchParams.set('lat', c.lat.toFixed(3)); u.searchParams.set('lon', (((c.lng + 540) % 360) - 180).toFixed(3)); u.searchParams.set('zoom', map.getZoom());
+      for (const [id, name] of Object.entries(FIELDS)) if ($(id).value && !(id === 'minfrp' && $(id).value === '0')) u.searchParams.set(name, $(id).value);
+      try { await navigator.clipboard.writeText(u.href); toast('Link copied.'); } catch { toast(u.href); }
+    }
     (async () => {
       ({ map } = await OSNT.createMap('map')); layer = L.layerGroup().addTo(map); ptsLayer = L.layerGroup().addTo(map);
       map.setView([39, -100], 4);
+      const v = restoreState(); if (v) map.setView([v[0], v[1]], v[2] ?? 5, { animate: false });
+      map.on('moveend', saveState); for (const id of Object.keys(FIELDS)) $(id).addEventListener('change', saveState);
       try { const i = await api('api/info'); $('daysF').hidden = !i.map_key_configured; } catch {}
       watches(); analyse(); setInterval(watches, 120000);
     })();

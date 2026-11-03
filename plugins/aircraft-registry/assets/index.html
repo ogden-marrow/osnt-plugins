@@ -89,7 +89,7 @@
         kv([['Registration', esc(a.registration)], ['ICAO hex', a.hex ? `<code>${esc(a.hex.toUpperCase())}</code>` : ''], ['Type code', a.type_code ? `<code>${esc(a.type_code)}</code>${a.type_info ? ' · ' + esc(a.type_info.class) : ''}` : ''],
           ['Manufacturer', esc(a.manufacturer)], ['Registered in', esc(a.country?.name)], ['Owner / operator', ownerHtml(a.owner)], ['Operator code', esc(a.operator_flag)]]) +
         (a.notes?.length ? `<div class="notice warn small" style="margin-top:8px">${a.notes.map(esc).join(' ')}</div>` : '') +
-        `<div class="links">${a.hex ? `<button class="btn sm" id="pos" data-hex="${esc(a.hex)}">Check position now</button>` : ''}<a class="btn sm" href="/p/adsb/">Live map (ADS-B)</a></div>` +
+        `<div class="links">${a.hex ? `<button class="btn sm" id="pos" data-hex="${esc(a.hex)}">Check position now</button>` : ''}<a class="btn sm" href="${a.hex ? '/p/adsb/?hex=' + encodeURIComponent(a.hex) : '/p/adsb/'}">Live map (ADS-B)</a>${a.hex ? `<a class="btn sm" href="/p/adsb-history/?hex=${encodeURIComponent(a.hex)}">Flight history</a>` : ''}<button class="btn sm" id="cpj" type="button">Copy JSON</button><button class="btn sm" id="cpl" type="button">Copy link</button></div>` +
         `<div class="src" style="margin-top:6px">Sources: ${esc((a.sources || []).join(', '))}${a.photo ? ' · photo: ' + esc(a.photo.credit) : ''}</div><div id="posout"></div>`);
     }
     function apHtml(a) {
@@ -99,7 +99,7 @@
       return card(`${r.callsign} route`, `${r.airline ? `<div class="big">${esc(r.airline.name || r.airline.icao)}</div><div class="muted small">${esc([r.airline.country, r.airline.radio && `radio "${r.airline.radio}"`].filter(Boolean).join(' · '))}</div>` : ''}
         <div class="route">${apHtml(r.origin)}<span aria-hidden="true">→</span>${apHtml(r.destination)}</div>
         ${r.distance_km ? `<div class="small">Great-circle distance about ${Math.round(r.distance_km).toLocaleString()} km</div>` : ''}
-        <div class="notice small" style="margin-top:8px"><div>${esc(r.caveat)}</div></div><div class="src" style="margin-top:6px">Source: ${esc(r.source)}</div>`);
+        <div class="notice small" style="margin-top:8px"><div>${esc(r.caveat)}</div></div><div class="links"><a class="btn sm" href="/p/adsb/?q=${encodeURIComponent(r.callsign)}">Find this callsign live (ADS-B)</a><button class="btn sm" id="cpj" type="button">Copy JSON</button><button class="btn sm" id="cpl" type="button">Copy link</button></div><div class="src" style="margin-top:6px">Source: ${esc(r.source)}</div>`);
     }
     function drawRoute(r) {
       layer.clearLayers();
@@ -142,25 +142,32 @@
       return card(t.info?.name || t.type, kv([['Designator', `<code>${esc(t.type)}</code>`], ['Class', esc(t.info?.class)], ['Airborne now (adsb.lol)', t.airborne_now ?? '—']]) +
         (t.sample.length ? `<div class="small muted" style="margin-top:6px">Examples: ${t.sample.map(s => `<a href="#" data-ex="${esc(s.hex)}">${esc(s.registration || s.hex)}</a>`).join(' ')}</div>` : '') + `<div class="small muted" style="margin-top:6px">${esc(t.note)}</div>`);
     }
+    let lastData = null;
+    const wireCopy = () => {
+      const j = $('cpj'), l = $('cpl');
+      if (j) j.onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(lastData, null, 2)); $('status').textContent = 'JSON copied'; } catch { $('status').textContent = 'Copy failed'; } };
+      if (l) l.onclick = async () => { try { await navigator.clipboard.writeText(location.href); $('status').textContent = 'Link copied'; } catch { $('status').textContent = location.href; } };
+    };
     async function run(text) {
       text = text.trim(); if (!text) return;
-      $('q').value = text; busy('Looking up…'); $('status').textContent = '';
+      $('q').value = text; busy('Looking up…'); $('status').textContent = ''; lastData = null;
+      try { history.replaceState(null, '', '?q=' + encodeURIComponent(text)); localStorage.setItem('osnt.acreg', text); } catch { /* storage or history unavailable */ }
       const up = text.toUpperCase();
       try {
         if (/^[A-Z]{4}$/.test(up) || /^[A-Z]{3}$/.test(up) && !/\d/.test(up)) {   // airport (ICAO/IATA) first, then aircraft type
-          try { out.innerHTML = airportCard(await api('api/airport/' + up)); return; } catch (e) { if (e.status !== 404) throw e; }
-          try { out.innerHTML = typeCard(await api('api/type/' + up)); return; } catch (e) { if (e.status !== 404) throw e; }
+          try { const a = await api('api/airport/' + up); lastData = a; out.innerHTML = airportCard(a); wireCopy(); return; } catch (e) { if (e.status !== 404) throw e; }
+          try { const t = await api('api/type/' + up); lastData = t; out.innerHTML = typeCard(t); return; } catch (e) { if (e.status !== 404) throw e; }
         }
         if (!/^[A-Z]{3}\d/.test(up) && (/^[A-Z]\d{1,3}[A-Z]?$/.test(up) || /^[A-Z0-9]{4}$/.test(up) && /\d/.test(up))) {
-          try { out.innerHTML = typeCard(await api('api/type/' + up)); return; } catch (e) { if (e.status !== 404 && e.status !== 400) throw e; }
+          try { const t = await api('api/type/' + up); lastData = t; out.innerHTML = typeCard(t); return; } catch (e) { if (e.status !== 404 && e.status !== 400) throw e; }
         }
         const d = await api('api/lookup?q=' + encodeURIComponent(text));
         if (d.kind === 'callsign') {
           if (!d.route) throw Object.assign(new Error('no route known for ' + d.query), { status: 404 });
-          out.innerHTML = routeCard(d.route); drawRoute(d.route);
+          lastData = d.route; out.innerHTML = routeCard(d.route); drawRoute(d.route); wireCopy();
         } else {
           if (!d.aircraft) throw Object.assign(new Error('no registry entry for ' + d.query), { status: 404 });
-          out.innerHTML = aircraftCard(d.aircraft);
+          lastData = d.aircraft; out.innerHTML = aircraftCard(d.aircraft); wireCopy();
           if (d.aircraft.hex) $('pos').onclick = () => checkPosition(d.aircraft.hex);
         }
       } catch (e) { fail(e, text); }
@@ -171,7 +178,9 @@
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
       layer = L.featureGroup().addTo(map); map.setView([30, -30], 3);
-      const q = new URLSearchParams(location.search).get('q'); if (q) run(q);
+      const P = new URLSearchParams(location.search);
+      const q = P.get('q') || P.get('hex') || P.get('reg') || P.get('callsign'); if (q) run(q);
+      else { try { const last = localStorage.getItem('osnt.acreg'); if (last) $('q').value = last; } catch { /* ignore */ } }
     })();
   </script>
 </body>

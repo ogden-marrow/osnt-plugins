@@ -52,7 +52,8 @@
       <div>
         <h2>In view</h2>
         <div class="legend"><span><i style="background:#2e9d6f"></i>cargo</span><span><i style="background:#d9473f"></i>tanker</span><span><i style="background:#2f7bd9"></i>passenger</span><span><i style="background:#e8a317"></i>fishing</span><span><i style="background:#8a5ad9"></i>service</span><span><i style="background:#8a97a0"></i>other</span></div>
-        <div id="count" class="muted" style="margin-top:6px"></div>
+        <div id="count" class="muted" style="margin-top:6px" aria-live="polite"></div>
+        <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button id="geo" class="btn sm" disabled>GeoJSON</button><button id="share" class="btn sm">Copy link</button></div>
         <div id="notes" class="small muted"></div>
       </div>
       <div id="detail"><div class="state"><div class="h3">Pick a vessel</div><p>Click a ship on the map, or search above. The Baltic is covered without a key; other seas need an AISStream key on the Credentials page.</p></div></div>
@@ -66,7 +67,7 @@
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const COL = { cargo: '#2e9d6f', tanker: '#d9473f', passenger: '#2f7bd9', fishing: '#e8a317', service: '#8a5ad9', pleasure: '#14a3b8', other: '#8a97a0', unknown: '#8a97a0' };
-    let map, layer, trackLine, canvas, selected = null, hasFly = false, busyView = false;
+    let map, layer, trackLine, canvas, selected = null, hasFly = false, busyView = false, lastList = [];
     const markers = new Map();
     async function api(p) {
       const r = await fetch(p), d = await r.json().catch(() => ({}));
@@ -74,7 +75,8 @@
       return d;
     }
     const nm = v => v.name || 'MMSI ' + v.mmsi;
-    const info = v => `<b>${esc(nm(v))}</b>${v.flag ? ' · ' + v.flag : ''}<br>${esc(v.type_label || 'type unknown')} · ${v.sog != null ? v.sog.toFixed(1) + ' kn' : 'speed n/a'}`;
+    const ageTxt = s => s < 90 ? s + ' s ago' : Math.round(s / 60) + ' min ago';
+    const info = v => `<b>${esc(nm(v))}</b>${v.flag ? ' · ' + v.flag : ''}<br>${esc(v.type_label || 'type unknown')} · ${v.sog != null ? v.sog.toFixed(1) + ' kn' : 'speed n/a'}<br>last report ${ageTxt(v.age_s)}${v.age_s > 600 ? ' (stale)' : ''}`;
     function icon(v) {
       const c = COL[v.class] || COL.other;
       const rot = v.heading ?? v.cog;
@@ -88,7 +90,7 @@
         let m = markers.get(v.mmsi);
         if (m && m._moving !== moving) { layer.removeLayer(m); m = null; markers.delete(v.mmsi); }
         if (!m) {
-          m = moving ? L.marker([v.lat, v.lon], { icon: icon(v) }) : L.circleMarker([v.lat, v.lon], { renderer: canvas, radius: 5, weight: 1.5, color: '#0b0f14', fillOpacity: .95, fillColor: COL[v.class] || COL.other });
+          m = moving ? L.marker([v.lat, v.lon], { icon: icon(v) }) : L.circleMarker([v.lat, v.lon], { renderer: canvas, radius: 5, weight: 1.5, color: '#0b0f14', fillOpacity: v.age_s > 600 ? .4 : .95, fillColor: COL[v.class] || COL.other });
           m._moving = moving; m.addTo(layer).on('click', () => pick(m._v.mmsi));
           markers.set(v.mmsi, m);
         } else { m.setLatLng([v.lat, v.lon]); if (moving) m.setIcon(icon(v)); }
@@ -102,7 +104,7 @@
         const c = map.getCenter(), b = map.getBounds();
         const km = Math.min(250, Math.max(2, c.distanceTo(b.getNorthEast()) / 1000));
         const d = await api(`api/near?lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}&radius=${Math.ceil(km)}`);
-        draw(d.vessels);
+        draw(d.vessels); lastList = d.vessels; $('geo').disabled = !d.vessels.length; saveView();
         $('count').textContent = `${d.count} vessels within ${Math.round(d.radius_km)} km${c.distanceTo(b.getNorthEast()) / 1000 > 250 ? ' (zoom in to see more)' : ''}`;
         $('notes').innerHTML = d.notes.map(esc).join('<br>');
         const s = d.stream; $('status').textContent = typeof s === 'object' ? (s.connected ? 'live · AISStream' : 'AISStream connecting…') : 'live · ' + new Date().toLocaleTimeString();
@@ -124,8 +126,9 @@
       if (matchMedia('(max-width:700px)').matches) { $('panel').classList.add('open'); $('panelBtn').setAttribute('aria-expanded', 'true'); }
       try {
         const d = await api('api/vessel/' + mmsi), p = d.particulars, pos = d.position;
+        selected = p.mmsi;
         if (fly && pos) map.setView([pos.lat, pos.lon], Math.max(map.getZoom(), 11));
-        showTrack(mmsi);
+        showTrack(p.mmsi);
         const imoOrName = p.imo || p.name || '';
         el.innerHTML = `<section class="card"><div class="big">${esc(p.name || 'MMSI ' + p.mmsi)}</div><div class="muted">${esc(p.type_label || 'Type unknown')}${p.flag ? ' · flag ' + p.flag : ''}</div>
           ${kv([['MMSI', `<code>${p.mmsi}</code> <span class="muted">${esc(p.mmsi_kind)}</span>`], ['IMO', p.imo && `<code>${p.imo}</code>`], ['Call sign', esc(p.call_sign)], ['Size', p.length_m ? `${p.length_m} × ${p.beam_m || '?'} m` : ''], ['Draught', p.draught_m ? p.draught_m + ' m' : ''],
@@ -171,12 +174,36 @@
         } catch (err) { el.innerHTML = `<div class="muted small">${esc(err.message)}</div>`; }
       }, 300);
     };
+
+    // ---- remembered view, deep links (?mmsi= | ?q= | ?lat=&lon=&zoom=), export ----
+    const KEY = 'osnt.ais';
+    function saveView() { try { const c = map.getCenter(); localStorage.setItem(KEY, JSON.stringify([+c.lat.toFixed(3), +c.lng.toFixed(3), map.getZoom()])); } catch { /* storage unavailable */ } }
+    $('geo').onclick = () => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify({ type: 'FeatureCollection', features: lastList.map(v => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [v.lon, v.lat] }, properties: v })) })], { type: 'application/geo+json' }));
+      a.download = 'vessels.geojson'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    };
+    $('share').onclick = async () => {
+      const c = map.getCenter(), u = new URL(location.href.split('?')[0], location.href);
+      if (selected) u.searchParams.set('mmsi', selected); else { u.searchParams.set('lat', c.lat.toFixed(3)); u.searchParams.set('lon', (((c.lng + 540) % 360) - 180).toFixed(3)); u.searchParams.set('zoom', map.getZoom()); }
+      try { await navigator.clipboard.writeText(u.href); $('count').textContent = 'Link copied.'; } catch { $('count').textContent = u.href; }
+    };
+    $('sq').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); const b = $('sres').querySelector('button'); if (b) b.click(); } };
+    async function runSearchNow(v) {
+      const d = await api('api/search?q=' + encodeURIComponent(v));
+      if (d.count) pick(d.results[0].mmsi, true); else $('sres').innerHTML = '<div class="muted small">No match in the Finnish vessel list.</div>';
+    }
     $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
       canvas = L.canvas({ padding: .3 }); layer = L.layerGroup().addTo(map);
       map.setView([60.1, 24.9], 9);
+      const q = new URLSearchParams(location.search); let saved = null; try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { /* ignore */ }
+      const lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
+      if (Number.isFinite(lat) && Number.isFinite(lon)) map.setView([lat, lon], parseInt(q.get('zoom')) || 10, { animate: false }); else if (Array.isArray(saved)) map.setView([saved[0], saved[1]], saved[2], { animate: false });
       map.on('moveend', refresh); refresh(); setInterval(refresh, 10000);
+      if (/^\d{7,9}$/.test(q.get('mmsi') || q.get('imo') || '')) { const id = q.get('mmsi') || q.get('imo'); $('sq').value = id; pick(id, true); }
+      else if (q.get('q')) { $('sq').value = q.get('q'); runSearchNow(q.get('q')).catch(e => { $('sres').innerHTML = `<div class="muted small">${esc(e.message)}</div>`; }); }
     })();
   </script>
 </body>

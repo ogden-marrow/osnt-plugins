@@ -90,7 +90,9 @@ pub fn conf_name(c: u8) -> &'static str {
 pub fn parse_csv(body: &str, bbox: &[f64; 4], max_rows: usize) -> Result<(Vec<Hotspot>, bool), String> {
     let mut lines = body.lines();
     let head = lines.next().unwrap_or("");
-    if !head.starts_with("latitude,") {
+    let head = head.trim_start_matches('\u{feff}');
+    // The area API's CSV may carry a leading country_id column; the invalid-key / rate-limit replies are plain text.
+    if !(head.contains("latitude,") && head.contains("longitude,") && head.contains("acq_date")) {
         return Err("the fire data service did not return a data file (it may be rejecting the request or the key)".into());
     }
     let cols: HashMap<&str, usize> = head.split(',').enumerate().map(|(i, c)| (c.trim(), i)).collect();
@@ -157,7 +159,8 @@ impl Cluster {
 
 pub fn round(x: f64, d: i32) -> f64 {
     let m = 10f64.powi(d);
-    (x * m).round() / m
+    let r = (x * m).round() / m;
+    if r == 0.0 { 0.0 } else { r } // never -0.0
 }
 
 fn find(p: &mut [usize], mut x: usize) -> usize {

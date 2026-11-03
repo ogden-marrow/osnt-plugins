@@ -201,6 +201,9 @@ async fn object(State(app): State<Shared>, Query(q): Query<HashMap<String, Strin
     let sc_url = format!("{}?{}&FORMAT=json", app.cfg.satcat, sel.query);
     let gp = fetch_json(&app, gp_url, GP_TTL).await;
     let sc = fetch_json(&app, sc_url, SATCAT_TTL).await;
+    // CelesTrak answers HTTP 404 / plain text when nothing matches: that is an empty result, not a failure.
+    let nothing = |e: &ApiError| e.1.contains("HTTP 404") || e.1.contains("refused or could not parse");
+    let (gp, sc) = (gp.or_else(|e| if nothing(&e) { Ok((json!([]), false)) } else { Err(e) }), sc.or_else(|e| if nothing(&e) { Ok((json!([]), false)) } else { Err(e) }));
     // GP can legitimately be empty for decayed objects while SATCAT still knows them, and vice versa.
     if gp.is_err() && sc.is_err() {
         return Err(gp.err().unwrap());
@@ -212,6 +215,12 @@ async fn object(State(app): State<Shared>, Query(q): Query<HashMap<String, Strin
         e["catalog"] = cat.remove(&e["norad_id"].as_u64().unwrap_or(0)).unwrap_or(Value::Null);
         e
     }).collect();
+    // SATCAT matches an international designator as a prefix (1998-067A also returns 1998-067AA, the ISS debris):
+    // when one exact object was asked for, drop the neighbours.
+    if let Some(want) = param(&q, "intl").map(str::to_ascii_uppercase) {
+        cat.retain(|_, c| c["intl_designator"].as_str() == Some(want.as_str()));
+        out.retain(|o| o["intl_designator"].as_str() == Some(want.as_str()));
+    }
     // Catalog-only hits (no current element set, typically decayed objects).
     for (_, c) in cat {
         out.push(json!({ "norad_id": c["norad_id"], "name": c["name"], "intl_designator": c["intl_designator"], "catalog": c, "no_elements": true }));

@@ -132,7 +132,7 @@ pub fn diff(seen: &[(f64, f64, i64)], clusters: &[firms::Cluster], now: i64) -> 
 /// Blocking. `baseline` records what exists without reporting it as new.
 pub fn check_one(app: &Shared, id: &str, baseline: bool) {
     let Some(w) = app.watches.get(id) else { return };
-    let q = crate::Query_ { bbox: w.bbox, sensor: "snpp", window: "24h", days: None, hours: None, min_frp: w.min_frp, min_conf: 0, eps_km: 2.0 };
+    let q = crate::Query_ { bbox: w.bbox, sensor: "all", window: "24h", days: None, hours: None, min_frp: w.min_frp, min_conf: 0, eps_km: 2.0 };
     // A box inside one region still uses the (smaller) regional file automatically.
     match crate::load(app, &q) {
         Ok(l) => {

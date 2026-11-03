@@ -3,7 +3,7 @@ name = "Launches & orbital objects"
 description = "Upcoming and past rocket launches with a pad map, and CelesTrak orbital elements and catalog data by name, NORAD ID or group."
 grid = "Hazards"
 port = 8156
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

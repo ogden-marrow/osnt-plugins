@@ -3,7 +3,7 @@ name = "Maritime warnings"
 description = "Active navigational and broadcast warnings (NGA MSI) by NAVAREA, with the positions in each warning drawn on the map: rocket debris areas, naval exercises, hazards. Piracy reports where NGA serves them."
 grid = "Air & Sea"
 port = 8160
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = false

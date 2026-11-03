@@ -38,6 +38,15 @@ fn valid_pos(lat: f64, lon: f64) -> bool {
     (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon)
 }
 
+/// Is this event current, or (when GDACS) updated / started within `days` of `now`? Non-GDACS events always pass.
+pub fn is_recent(e: &Value, now: i64, days: i64) -> bool {
+    if e["source"] != "gdacs" || e["current"] == true {
+        return true;
+    }
+    let t = [&e["updated"], &e["time"]].iter().filter_map(|v| v.as_str().and_then(parse_iso)).max();
+    t.is_some_and(|t| now - t <= days * 86_400)
+}
+
 // ---- GDACS ------------------------------------------------------------------------------------------------------------
 
 pub fn gdacs_hazard(code: &str) -> &'static str {

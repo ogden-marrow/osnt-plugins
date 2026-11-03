@@ -267,7 +267,9 @@ async fn near_handler(State(s): State<Shared>, method: Method, uri: Uri, headers
                 notes.push("Sign in to the hub to start the AISStream worldwide feed.".into());
             }
             Some(key) => {
-                s.stream.ensure(s.store.clone(), key, bbox);
+                // Subscribe to a box 1.5x the view so small pans do not restart the connection.
+                let (cy, cx, hy, hx) = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0, (bbox[2] - bbox[0]) * 0.75, (bbox[3] - bbox[1]) * 0.75);
+                s.stream.ensure(s.store.clone(), key, [(cy - hy).max(-90.0), (cx - hx).max(-180.0), (cy + hy).min(90.0), (cx + hx).min(180.0)]);
                 stream_state = match s.stream.status() {
                     Some(st) if st.connected => json!({ "connected": true, "messages": st.messages }),
                     Some(st) => json!({ "connected": false, "error": st.error }),
@@ -420,9 +422,10 @@ fn gfw_get(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value> {
 pub fn gfw_vessel_ids(v: &Value) -> Vec<String> {
     let mut ids = vec![];
     for e in v["entries"].as_array().map(Vec::as_slice).unwrap_or_default() {
-        for k in ["selfReportedInfo", "registryInfo"] {
+        // combinedSourcesInfo carries the ids GFW itself recommends for event queries; then the self-reported and registry identities.
+        for k in ["combinedSourcesInfo", "selfReportedInfo", "registryInfo"] {
             for i in e[k].as_array().map(Vec::as_slice).unwrap_or_default() {
-                if let Some(id) = i["id"].as_str().or_else(|| i["vesselId"].as_str()) {
+                if let Some(id) = i["vesselId"].as_str().or_else(|| i["id"].as_str()) {
                     if id.len() <= 80 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') && !ids.contains(&id.to_string()) {
                         ids.push(id.to_string());
                     }
@@ -468,7 +471,8 @@ async fn gfw_handler(State(s): State<Shared>, method: Method, uri: Uri, headers:
         let mut events = vec![];
         let mut errors = vec![];
         for (label, dataset) in [("fishing", "public-global-fishing-events:latest"), ("port visit", "public-global-port-visits-events:latest"), ("AIS gap", "public-global-gaps-events:latest"), ("loitering", "public-global-loitering-events:latest")] {
-            let url = format!("{base}/v3/events?vessels%5B0%5D={}&datasets%5B0%5D={dataset}&start-date={start}&end-date={end}&limit=30&offset=0", ids[0]);
+            let vessels: String = ids.iter().enumerate().map(|(i, id)| format!("vessels%5B{i}%5D={id}&")).collect();
+            let url = format!("{base}/v3/events?{vessels}datasets%5B0%5D={dataset}&start-date={start}&end-date={end}&limit=30&offset=0");
             match gfw_get(&agent, &url, &token) {
                 Ok(v) => events.extend(gfw_events(&v).into_iter().map(|mut e| {
                     e["kind"] = json!(label);
@@ -679,6 +683,13 @@ mod tests {
         assert_eq!(get_json(&a, "/api/vessel/999999999").await.0, StatusCode::NOT_FOUND);
     }
 
+    #[test]
+    fn ship_type_zero_is_unknown() {
+        let (_, i) = parse_digitraffic_vessel(&json!({"mmsi":230998670u64,"name":"ASTRID","shipType":0})).unwrap();
+        assert_eq!(i.ship_type, None);
+        assert_eq!(ship_class(i.ship_type), "unknown");
+    }
+
     #[tokio::test]
     async fn search_ranks_and_validates() {
         let (base, _) = fake(vec![("/api/ais/v1/vessels", 200, vessels())]);
@@ -739,6 +750,8 @@ mod tests {
     fn gfw_parsers() {
         let s = json!({"entries":[{"selfReportedInfo":[{"id":"abc-123","shipname":"X"},{"id":"bad id!"}],"registryInfo":[{"id":"def_456"}]}]});
         assert_eq!(gfw_vessel_ids(&s), vec!["abc-123", "def_456"]);
+        let s = json!({"entries":[{"combinedSourcesInfo":[{"vesselId":"comb-1"}],"selfReportedInfo":[{"id":"abc-123"}]}]});
+        assert_eq!(gfw_vessel_ids(&s), vec!["comb-1", "abc-123"], "combined-sources id first");
         let e = gfw_events(&json!({"entries":[{"type":"fishing","start":"2026-01-01T00:00:00Z","end":"2026-01-01T05:00:00Z","position":{"lat":1.5,"lon":2.5},"id":"e1"}]}));
         assert_eq!(e[0]["lat"], 1.5);
         assert!(gfw_events(&json!({})).is_empty());

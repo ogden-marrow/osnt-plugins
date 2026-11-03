@@ -277,3 +277,9 @@ fn parse_iso_applies_offsets_and_fractions() {
     assert_eq!(parse_iso("2026-11-03T04:19:24.0Z"), parse_iso("2026-11-03T04:19:24Z"));
     assert_eq!(parse_iso("2026-11-03T04:19:24.123+01:00"), parse_iso("2026-11-03T03:19:24Z"));
 }
+
+#[test]
+fn emsc_event_type_codes_are_words() {
+    assert_eq!(crate::emsc_evtype("ke"), "earthquake");
+    assert_eq!(crate::emsc_evtype("zz"), "zz");
+}

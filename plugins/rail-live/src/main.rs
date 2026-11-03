@@ -145,11 +145,39 @@ pub fn parse_entur(v: &Value) -> Vec<Value> {
                     let id = x["vehicleId"].as_str()?;
                     Some(json!({ "id": format!("no-{id}"), "country": "NO", "number": Value::Null, "name": x["line"]["lineName"].as_str().unwrap_or("Train"), "line": x["line"]["lineRef"],
                         "operator": x["codespace"]["codespaceId"], "lat": lat, "lon": lon, "speed_kmh": x["speed"].as_f64().map(|m| m * 3.6), "bearing": x["bearing"].as_f64(),
-                        "delay_min": x["delay"].as_f64().map(|s| (s / 60.0).round()), "updated": x["lastUpdated"] }))
+                        "delay_min": x["delay"].as_f64().map(|s| (s / 60.0).round() + 0.0), "updated": x["lastUpdated"] }))
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// `2026-11-03T18:33:05.000Z` (or with microseconds) to unix seconds; None for anything else.
+pub fn iso_secs(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, m, d, hh, mm, ss) = (n(0..4)?, n(5..7)?, n(8..10)?, n(11..13)?, n(14..16)?, n(17..19)?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 60 {
+        return None;
+    }
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    Some(days * 86_400 + hh * 3600 + mm * 60 + ss)
+}
+
+/// Adds `age_s` (seconds since the vehicle's last report) to each train that has a parsable timestamp.
+pub fn add_ages(trains: &mut [Value], now: i64) {
+    for t in trains {
+        if let Some(ts) = t["updated"].as_str().and_then(iso_secs) {
+            t["age_s"] = json!((now - ts).max(0));
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -165,7 +193,8 @@ pub fn parse_bbox(s: &str) -> Option<Bbox> {
     if p.len() != 4 || p.iter().any(|v| !v.is_finite()) {
         return None;
     }
-    let b = Bbox { min_lon: p[0], min_lat: p[1], max_lon: p[2], max_lat: p[3] };
+    // A padded map view can reach past the poles; clamp latitude instead of refusing it.
+    let b = Bbox { min_lon: p[0], min_lat: p[1].max(-90.0), max_lon: p[2], max_lat: p[3].min(90.0) };
     (b.min_lat >= -90.0 && b.max_lat <= 90.0 && b.min_lat < b.max_lat && b.min_lon < b.max_lon && b.min_lon >= -540.0 && b.max_lon <= 540.0).then_some(b)
 }
 
@@ -273,6 +302,8 @@ async fn trains_handler(State(s): State<Shared>, Query(q): Query<TrainsQuery>) -
     }
     let truncated = trains.len() > MAX_TRAINS;
     trains.truncate(MAX_TRAINS);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    add_ages(&mut trains, now);
     Ok(Json(json!({ "count": trains.len(), "truncated": truncated, "sources": sources, "trains": trains })))
 }
 
@@ -489,7 +520,8 @@ mod tests {
         assert!(parse_bbox("10,59,11,60").is_some());
         assert!(parse_bbox("10,59,11").is_none());
         assert!(parse_bbox("11,59,10,60").is_none());
-        assert!(parse_bbox("10,59,11,95").is_none());
+        assert_eq!(parse_bbox("10,59,11,95").unwrap().max_lat, 90.0, "a padded view past the pole is clamped, not refused");
+        assert!(parse_bbox("10,95,11,99").is_none());
         assert!(parse_bbox("a,b,c,d").is_none());
         assert!(parse_bbox("NaN,59,11,60").is_none());
     }

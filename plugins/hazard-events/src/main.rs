@@ -31,6 +31,8 @@ const HAZARDS: [&str; 12] = ["earthquake", "cyclone", "flood", "volcano", "droug
 #[derive(Clone)]
 pub struct Config {
     pub gdacs: String,
+    /// Test hook: fixed "now" (unix seconds) for the recency window.
+    pub now: Option<i64>,
     pub eonet: String,
     pub nws: String,
     pub gvp: String,
@@ -45,6 +47,7 @@ impl Config {
     fn from_env() -> Self {
         let get = |k: &str, d: &str| env::var(k).unwrap_or_else(|_| d.to_string());
         Config {
+            now: None,
             gdacs: get("OSNT_HAZARD_GDACS", "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH"),
             eonet: get("OSNT_HAZARD_EONET", "https://eonet.gsfc.nasa.gov/api/v3/events"),
             nws: get("OSNT_HAZARD_NWS", "https://api.weather.gov/alerts/active"),
@@ -71,6 +74,8 @@ pub struct Params {
     pub gdacs_all: bool,
     pub nws_area: Option<String>,
     pub nws_point: Option<(f64, f64)>,
+    /// Keep GDACS events that are flagged current or were updated/started within this many days (default 30).
+    pub days: Option<i64>,
 }
 
 fn param<'a>(q: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
@@ -128,6 +133,10 @@ pub fn parse_params(q: &HashMap<String, String>) -> Result<Params, ApiError> {
         p.nws_area = Some(a.to_ascii_uppercase());
     }
     p.nws_point = point_of(q)?;
+    p.days = match param(q, "days") {
+        None => None,
+        Some(d) => Some(d.parse::<i64>().ok().filter(|n| (1..=730).contains(n)).ok_or_else(|| bad("days must be 1-730"))?),
+    };
     Ok(p)
 }
 
@@ -146,10 +155,21 @@ fn load_source(app: &App, name: &str, p: &Params) -> Fetch {
     let json_of = |url: String, ttl: u64| app.up.get_json(&url, Duration::from_secs(ttl));
     match name {
         "gdacs" => {
-            let levels = if p.gdacs_all { "Green;Orange;Red" } else { "Orange;Red" };
-            // GDACS expects literal semicolons.
-            let (v, st) = json_of(format!("{}?eventlist=EQ;TC;FL;VO;WF;DR&alertlevel={levels}", cfg.gdacs), 600)?;
-            Ok((sources::gdacs(&v), st))
+            // GDACS expects literal semicolons. Its search returns one 100-event page of the newest matches, so green
+            // alerts (hundreds of small quakes and fires) are fetched separately and never push orange/red ones out.
+            let (v, mut st) = json_of(format!("{}?eventlist=EQ;TC;FL;VO;WF;DR&alertlevel=Orange;Red", cfg.gdacs), 600)?;
+            let mut evs = sources::gdacs(&v);
+            if p.gdacs_all {
+                if let Ok((g, st2)) = json_of(format!("{}?eventlist=EQ;TC;FL;VO;WF;DR&alertlevel=Green", cfg.gdacs), 600) {
+                    evs.extend(sources::gdacs(&g));
+                    st |= st2;
+                }
+            }
+            // The search also returns ended events back to 2025; "active" means flagged current or recently updated.
+            let now = cfg.now.unwrap_or_else(util::now_secs);
+            let days = p.days.unwrap_or(30);
+            evs.retain(|e| sources::is_recent(e, now, days));
+            Ok((evs, st))
         }
         "eonet" => {
             let (v, st) = json_of(format!("{}?status=open&limit=150", cfg.eonet), 600)?;
@@ -324,6 +344,7 @@ async fn sources_info(State(app): State<Shared>) -> Json<Value> {
 async fn tools() -> Json<Value> {
     let common = json!({
         "sources": { "type": "string", "description": "comma list of gdacs, eonet, gvp, hans, nhc, nws, reliefweb (default: the first five)" },
+        "days": { "type": "integer", "description": "GDACS events must be current or updated within this many days (1-730, default 30)" },
         "hazard": { "type": "string", "description": "comma list: earthquake, cyclone, flood, volcano, drought, wildfire, storm, ice, landslide, dust, weather-alert, other" },
         "level": { "type": "string", "enum": ["green", "yellow", "orange", "red"], "description": "minimum alert level for sources that have one" },
     });

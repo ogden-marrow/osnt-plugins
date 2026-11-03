@@ -45,6 +45,8 @@ struct Warning {
     authority: String,
     text: String,
     cancelled: bool,
+    /// whole days since the warning was issued (when its issue date could be read)
+    age_days: Option<i64>,
     shapes: Vec<Shape>,
     bbox: Option<[f64; 4]>,
 }
@@ -59,6 +61,8 @@ struct AppState {
     base: String,
     warnings: Mutex<Option<Snapshot>>,
     asam: Mutex<Option<(Instant, Arc<Vec<Value>>)>>,
+    /// last ASAM failure, replayed for a few minutes so a 503 that takes seconds is not re-asked on every click
+    asam_err: Mutex<Option<(Instant, String)>>,
 }
 type Shared = Arc<AppState>;
 
@@ -98,6 +102,33 @@ fn issue_sort_key(s: &str) -> String {
         }
     }
     String::new()
+}
+
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+
+/// Whole days between a sort key (`2024-05-10T15:15Z`) and `now_days` (days since 1970-01-01); None for an empty key.
+fn age_days(sort_key: &str, now_days: i64) -> Option<i64> {
+    let (y, m, d) = (sort_key.get(0..4)?.parse().ok()?, sort_key.get(5..7)?.parse().ok()?, sort_key.get(8..10)?.parse().ok()?);
+    Some((now_days - days_from_civil(y, m, d)).max(0))
+}
+
+fn today() -> i64 {
+    (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) / 86_400) as i64
+}
+
+/// How current the whole feed is, judged by its newest warning. NGA issues several warnings a day, so a feed whose
+/// newest warning is weeks old has stopped updating (or this plugin is reading a frozen copy) and must say so.
+fn feed_status(list: &[Warning], now_days: i64) -> Value {
+    let newest = list.iter().map(|w| w.issued_sort.as_str()).filter(|k| !k.is_empty()).max();
+    let age = newest.and_then(|k| age_days(k, now_days));
+    json!({ "newest_issued": newest, "feed_age_days": age, "feed_stale": age.is_some_and(|a| a > 14),
+            "feed_note": age.filter(|a| *a > 14).map(|a| format!("NGA's feed has no warning newer than {a} days ago. These are the warnings NGA still lists as active; they may be long expired. Check msi.nga.mil for current notices.")) })
 }
 
 fn as_i64(v: &Value) -> i64 {
@@ -140,6 +171,7 @@ fn parse_warnings(body: &Value) -> Vec<Warning> {
                         area_label: area_label(&nav),
                         subregion: as_str(&w["subregion"]),
                         issued_sort: issue_sort_key(&issued),
+                        age_days: age_days(&issue_sort_key(&issued), today()),
                         issued,
                         authority: as_str(&w["authority"]),
                         cancelled: !w["cancelDate"].is_null() || as_str(&w["status"]).eq_ignore_ascii_case("C"),
@@ -241,7 +273,7 @@ fn filter(list: &[Warning], q: &WarnQuery) -> Result<Vec<Warning>, ApiError> {
 async fn warnings_handler(State(s): State<Shared>, Query(q): Query<WarnQuery>) -> Result<Json<Value>, ApiError> {
     let (list, stale) = warnings(&s, false).await?;
     let out = filter(&list, &q)?;
-    Ok(Json(json!({ "total": list.len(), "count": out.len(), "stale": stale, "warnings": out })))
+    Ok(Json(json!({ "total": list.len(), "count": out.len(), "stale": stale, "feed": feed_status(&list, today()), "warnings": out })))
 }
 
 async fn areas_handler(State(s): State<Shared>) -> Result<Json<Value>, ApiError> {
@@ -255,7 +287,7 @@ async fn areas_handler(State(s): State<Shared>) -> Result<Json<Value>, ApiError>
         e.3 = e.3.max(w.year);
     }
     let areas: Vec<Value> = by.into_iter().map(|(k, (n, mapped, subs, year))| json!({ "code": k, "label": area_label(&k), "count": n, "mapped": mapped, "latest_year": year, "subregions": subs })).collect();
-    Ok(Json(json!({ "areas": areas, "stale": stale })))
+    Ok(Json(json!({ "areas": areas, "stale": stale, "feed": feed_status(&list, today()) })))
 }
 
 async fn one_handler(State(s): State<Shared>, Path((area, year, number)): Path<(String, i64, i64)>) -> Result<Json<Warning>, ApiError> {
@@ -305,9 +337,18 @@ async fn asam_handler(State(s): State<Shared>, Query(q): Query<AsamQuery>) -> Re
     let rows = match cached {
         Some(r) => r,
         None => {
+            if let Some((at, m)) = s.asam_err.lock().unwrap().as_ref() {
+                if at.elapsed() < Duration::from_secs(300) {
+                    return Err(ApiError(StatusCode::BAD_GATEWAY, m.clone()));
+                }
+            }
             let st = s.clone();
             let body = tokio::task::spawn_blocking(move || fetch_json(&st, "/api/publications/asam?output=json")).await.map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            let body = body.map_err(|e| ApiError(StatusCode::BAD_GATEWAY, format!("NGA is not serving ASAM piracy reports on the API path this plugin uses right now ({e:#}). Browse them at https://msi.nga.mil/Piracy")))?;
+            let body = body.map_err(|e| {
+                let m = format!("NGA is not serving ASAM piracy reports on the API path this plugin uses right now ({e:#}). Browse them at https://msi.nga.mil/Piracy");
+                *s.asam_err.lock().unwrap() = Some((Instant::now(), m.clone()));
+                ApiError(StatusCode::BAD_GATEWAY, m)
+            })?;
             let rows = Arc::new(parse_asam(&body));
             *s.asam.lock().unwrap() = Some((Instant::now(), rows.clone()));
             rows
@@ -351,7 +392,7 @@ fn app(state: Shared) -> Router {
 }
 
 fn new_state(base: String) -> Shared {
-    Arc::new(AppState { agent: osnt_common::http_agent("osnt-maritime-notices/0.1 (+https://github.com/ogden-marrow/osnt-hub)"), base, warnings: Mutex::default(), asam: Mutex::default() })
+    Arc::new(AppState { agent: osnt_common::http_agent("osnt-maritime-notices/0.1 (+https://github.com/ogden-marrow/osnt-hub)"), base, warnings: Mutex::default(), asam: Mutex::default(), asam_err: Mutex::default() })
 }
 
 #[tokio::main]
@@ -410,6 +451,23 @@ mod tests {
         let st = res.status();
         let b = res.into_body().collect().await.unwrap().to_bytes();
         (st, serde_json::from_slice(&b).unwrap_or(Value::Null))
+    }
+
+    #[test]
+    fn feed_age_is_reported_and_old_feeds_are_flagged() {
+        let body: Value = serde_json::from_str(&fixture()).unwrap();
+        let list = parse_warnings(&body);
+        let newest = list.iter().map(|w| w.issued_sort.clone()).max().unwrap();
+        let day = |k: &str| days_from_civil(k[0..4].parse().unwrap(), k[5..7].parse().unwrap(), k[8..10].parse().unwrap());
+        let fresh = feed_status(&list, day(&newest) + 2);
+        assert_eq!(fresh["feed_age_days"], 2);
+        assert_eq!(fresh["feed_stale"], false);
+        assert!(fresh["feed_note"].is_null());
+        let old = feed_status(&list, day(&newest) + 900);
+        assert_eq!(old["feed_stale"], true);
+        assert!(old["feed_note"].as_str().unwrap().contains("900 days"));
+        assert_eq!(age_days("", 100), None);
+        assert_eq!(age_days("2024-05-10T15:15Z", days_from_civil(2024, 5, 12)), Some(2));
     }
 
     #[test]
@@ -499,6 +557,16 @@ mod tests {
         let (st, v) = get_json(&a, "/api/asam").await;
         assert_eq!(st, StatusCode::BAD_GATEWAY);
         assert!(v["error"].as_str().unwrap().contains("msi.nga.mil"));
+    }
+
+    #[tokio::test]
+    async fn asam_failure_is_replayed_without_asking_nga_again() {
+        let (base, hits) = fake(vec![("/api/publications/asam", 503, "text/html", "<html></html>".into())]);
+        let a = app(new_state(base));
+        assert_eq!(get_json(&a, "/api/asam").await.0, StatusCode::BAD_GATEWAY);
+        let n = hits.load(Ordering::SeqCst);
+        assert_eq!(get_json(&a, "/api/asam").await.0, StatusCode::BAD_GATEWAY);
+        assert_eq!(hits.load(Ordering::SeqCst), n, "second call served from the failure cache");
     }
 
     #[tokio::test]
