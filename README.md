@@ -21,6 +21,14 @@ A folder link works for any public GitHub repository that follows the format bel
 to share a plugin. The installer pins the link to an exact commit, shows what the plugin is allowed to do, and asks
 before building. Plugins are third-party code: read the source before you install one.
 
+## Releases (what the hub's web installer installs)
+
+Every push to `main` runs `.github/workflows/release.yml`, which runs `tools/package.py`: it builds each plugin for the
+Pi (`aarch64-unknown-linux-musl`), packs `plugin.toml` + the binary into `dist/<id>.tar.gz`, writes `dist/manifest.json`
+(version and SHA-256 per plugin) and publishes them as the rolling `latest` release. The hub's Packages page installs from
+there. Bump `version` in a plugin's `plugin.toml` (and `index.toml`) so installed copies show "update available". Run it
+locally with `python3 tools/package.py` (`ONLY=lookup,map` to limit it).
+
 ## Layout
 
 ```

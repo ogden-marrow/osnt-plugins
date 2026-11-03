@@ -3,93 +3,64 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OSNT Packages</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Packages</title>
   <base target="_top">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
   <style>
-    :root { color-scheme: dark; --bg:#0f1419; --panel:#151c24; --line:#243040; --line2:#2d3a4a; --text:#e6e6e6; --dim:#9fb0c0; --faint:#7f93a8; --ok:#3fae91; --warn:#ffd54f; --bad:#ef6c6c; --link:#6fc3ff; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
-    main { max-width: 860px; margin: 0 auto; padding: 16px 16px 80px; }
-    h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin: 28px 0 8px; font-weight: 600; }
-    a { color: var(--link); }
-    .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .grow { flex: 1; min-width: 160px; }
-    input[type=search], input[type=text] { width: 100%; padding: 10px 12px; background: var(--bg); color: inherit; border: 1px solid var(--line2); border-radius: 8px; font: inherit; }
-    input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
-    button { background: var(--panel); color: inherit; border: 1px solid var(--line2); border-radius: 8px; padding: 9px 14px; cursor: pointer; font: inherit; min-height: 40px; }
-    button:hover:not(:disabled) { border-color: var(--ok); }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    button.primary { background: #1d3a34; border-color: #2f6f5e; }
-    button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
-    button.ghost { background: transparent; }
-    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-    .chip { padding: 6px 12px; border-radius: 999px; font-size: 13px; min-height: 0; }
-    .chip[aria-pressed=true] { background: #1d3a34; border-color: #2f6f5e; }
-    .card { margin-top: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
-    .card.busy { border-color: var(--ok); }
-    .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
-    .name { font-size: 15px; font-weight: 600; }
-    .ver { color: var(--faint); font-size: 12px; margin-left: 6px; font-weight: 400; }
-    .desc { margin: 4px 0 0; font-size: 13px; color: var(--dim); line-height: 1.45; }
-    .badge { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line2); color: var(--faint); white-space: nowrap; vertical-align: middle; margin-left: 6px; }
-    .badge.installed { color: var(--ok); border-color: #2f6f5e; } .badge.update { color: var(--warn); border-color: #6f5e2f; } .badge.core { color: var(--link); border-color: #2f4f6f; }
-    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .meta { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--faint); align-items: center; }
-    .tag { border: 1px solid var(--line2); border-radius: 6px; padding: 1px 7px; }
-    .tag.bad { color: var(--bad); border-color: #6f2f2f; }
-    .status { margin-top: 10px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
-    .status.ok { color: var(--ok); } .status.err { color: var(--bad); }
-    .spin { width: 14px; height: 14px; border: 2px solid var(--line2); border-top-color: var(--ok); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
-    .muted { color: var(--faint); font-size: 13px; } .err { color: var(--bad); }
-    .empty { text-align: center; padding: 28px 16px; border: 1px dashed var(--line2); border-radius: 10px; color: var(--dim); }
-    .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
-    .repo { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .repo .url { word-break: break-all; font-size: 14px; }
-    dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 12px; padding: 0; width: min(520px, calc(100vw - 32px)); }
-    dialog::backdrop { background: rgba(5, 8, 12, .7); }
-    dialog form { padding: 20px; } dialog h3 { margin: 0 0 4px; font-size: 17px; }
-    dialog ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--dim); line-height: 1.6; }
-    dialog .row { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
-    dialog label.check { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 13px; color: var(--dim); }
-    code { font: 12px ui-monospace, monospace; background: #0b0f14; padding: 1px 5px; border-radius: 4px; }
+    .pkg .name { font-weight: 650; font-size: var(--fs-lg); }
+    .pkg .ver { color: var(--ink-3); font-size: var(--fs-sm); margin-left: 6px; font-weight: 400; }
+    .pkg .desc { margin: 4px 0 0; color: var(--ink-2); font-size: var(--fs-md); max-width: 70ch; }
+    .pkg .meta { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: var(--fs-sm); color: var(--ink-3); }
+    .tag { background: var(--surface-2); border-radius: 6px; padding: 1px 8px; color: var(--ink-2); }
+    .tag.bad { background: var(--err-soft); color: var(--err); }
+    .pkg.busy { border-color: var(--accent); }
+    .progress { margin-top: 12px; display: flex; gap: 10px; align-items: center; font-size: var(--fs-md); }
+    .progress.ok { color: var(--ok); } .progress.err { color: var(--err); }
+    dialog.dialog { width: min(540px, calc(100vw - 32px)); }
+    dialog.dialog ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); font-size: var(--fs-md); line-height: 1.6; }
+    dialog.dialog .sys { margin: 14px 0; }
+    dialog.dialog .sys ul { color: var(--ink); }
+    .code-big { font: 600 30px/1.2 var(--font-mono); letter-spacing: .2em; margin: 8px 0; background: none; padding: 0; }
   </style>
 </head>
 <body>
-  <main>
-    <div class="bar">
-      <div class="grow"><input type="search" id="q" placeholder="Search packages" aria-label="Search packages"></div>
-      <div class="chips" id="chips" role="group" aria-label="Filter">
-        <button class="chip" data-f="all" aria-pressed="true">All</button>
-        <button class="chip" data-f="installed" aria-pressed="false">Installed</button>
-        <button class="chip" data-f="available" aria-pressed="false">Not installed</button>
-        <button class="chip" data-f="update" aria-pressed="false">Updates</button>
+  <main class="page" id="main">
+    <div class="row" style="margin-bottom:16px">
+      <div class="grow" style="min-width:200px"><input type="search" id="q" class="input" placeholder="Search packages" aria-label="Search packages" style="width:100%"></div>
+      <div class="seg" id="chips" role="group" aria-label="Filter">
+        <button data-f="all" aria-pressed="true">All</button>
+        <button data-f="installed" aria-pressed="false">Installed</button>
+        <button data-f="available" aria-pressed="false">Not installed</button>
+        <button data-f="update" aria-pressed="false">Updates</button>
       </div>
-      <button id="refresh" class="ghost" title="Check the repositories again">Refresh</button>
+      <button id="refresh" class="btn ghost" title="Check the repositories again">Refresh</button>
     </div>
     <div id="banner"></div>
-    <div id="pkgs" aria-live="polite"><p class="muted">Loading&hellip;</p></div>
+    <div id="pkgs" class="stack-sm" aria-live="polite"><span class="loading"><span class="spin"></span>Loading packages</span></div>
 
-    <h2>Repositories</h2>
-    <div id="repos"></div>
-    <form id="addForm" class="bar" style="margin-top:10px"><div class="grow"><input type="text" id="url" placeholder="https://github.com/owner/repo" aria-label="GitHub repository link" autocomplete="off"></div><button class="primary">Add repository</button></form>
-    <p class="muted err" id="msg" role="alert"></p>
+    <h2 class="group-label">Repositories</h2>
+    <div id="repos" class="stack-sm"></div>
+    <form id="addForm" class="row" style="margin-top:10px">
+      <div class="grow"><input type="text" id="url" class="input" placeholder="https://github.com/owner/repo" aria-label="GitHub repository link" autocomplete="off" style="width:100%"></div>
+      <button class="btn primary">Add repository</button>
+    </form>
+    <p class="err small" id="msg" role="alert"></p>
 
-    <h2>GitHub</h2>
-    <div class="card" id="gh"><p class="muted">Checking&hellip;</p></div>
+    <h2 class="group-label">GitHub</h2>
+    <div class="card" id="gh"><span class="loading"><span class="spin"></span>Checking</span></div>
   </main>
 
-  <dialog id="dlg"><form method="dialog" id="dlgForm"></form></dialog>
+  <dialog class="dialog" id="dlg" aria-labelledby="dlgTitle"><form method="dialog" id="dlgForm"></form></dialog>
 
   <script>
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const call = (method, path, body) => fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body && JSON.stringify(body) });
-    const LABEL = { installed: 'installed', update: 'update available', available: 'not installed' };
+    const LABEL = { installed: 'Installed', update: 'Update available', available: 'Not installed' };
     let data = { packages: [], other_installed: [], repos: [], github: false };
     let filter = 'all', query = '', working = false;
-    const progress = {}; // plugin id -> { text, state } shown on its card while a job runs or after it ends
+    const progress = {}; // plugin id -> { text, state, keys }
 
     async function load(fresh = false) {
       const r = await call('GET', 'api/packages' + (fresh ? '?fresh=1' : ''));
@@ -103,8 +74,8 @@
       const updates = data.packages.filter(p => p.status === 'update' && p.installable);
       $('banner').innerHTML = '';
       if (updates.length && !working) {
-        const b = document.createElement('div'); b.className = 'card';
-        b.innerHTML = `<div class="top"><div><b>${updates.length} update${updates.length > 1 ? 's' : ''} available</b><p class="desc">${updates.map(p => esc(p.name)).join(', ')}</p></div><div class="actions"><button class="primary">Update all</button></div></div>`;
+        const b = document.createElement('div'); b.className = 'notice info'; b.style.marginBottom = '12px';
+        b.innerHTML = `<div class="grow"><b>${updates.length} update${updates.length > 1 ? 's' : ''} available</b><div class="small">${updates.map(p => esc(p.name)).join(', ')}</div></div><button class="btn primary sm">Update all</button>`;
         b.querySelector('button').onclick = () => updateAll(updates);
         $('banner').append(b);
       }
@@ -112,33 +83,35 @@
       const list = all.filter(p => (filter === 'all' || p.status === filter) && (!query || (p.name + ' ' + p.id + ' ' + (p.description || '')).toLowerCase().includes(query)));
       const box = $('pkgs'); box.innerHTML = '';
       if (!data.repos.length) {
-        box.innerHTML = '<div class="empty"><b>Add a package repository to get started</b>Paste a GitHub link in the box under Repositories. Your own plugins repository works once GitHub is connected.</div>';
+        box.innerHTML = '<div class="state"><div class="h3">Add a package repository to get started</div><p>Paste a GitHub link in the box under Repositories. Private repositories work after you connect GitHub below.</p></div>';
         return;
       }
-      if (!list.length) box.innerHTML = `<div class="empty"><b>${all.length ? 'No packages match' : 'Nothing here yet'}</b>${all.length ? 'Try another filter or search.' : 'The repositories above did not list any packages.'}</div>`;
+      if (!list.length) box.innerHTML = `<div class="state"><div class="h3">${all.length ? 'No packages match' : 'Nothing here yet'}</div><p>${all.length ? 'Try another filter or search.' : 'The repositories above did not list any packages.'}</p></div>`;
       for (const p of list) box.append(card(p));
     }
 
     function card(p) {
-      const el = document.createElement('div'); el.className = 'card'; el.id = 'pkg-' + p.id;
+      const el = document.createElement('div'); el.className = 'card pkg'; el.id = 'pkg-' + p.id;
       const prog = progress[p.id];
       const ver = p.installed_version ? (p.status === 'update' && p.version ? `${esc(p.installed_version)} &rarr; ${esc(p.version)}` : esc(p.installed_version)) : esc(p.version);
+      const badge = p.status === 'installed' ? 'ok' : p.status === 'update' ? 'warn' : '';
       const blocked = !!(p.missing_requires && p.missing_requires.some(r => !data.packages.some(x => x.id === r && x.installable)));
-      el.innerHTML = `<div class="top"><div style="flex:1;min-width:200px"><span class="name">${esc(p.name)}</span><span class="ver">${ver}</span>
-          <span class="badge ${p.status}">${LABEL[p.status]}</span>${p.core ? '<span class="badge core">core</span>' : ''}
-          <p class="desc">${esc(p.description)}</p></div><div class="actions"></div></div><div class="meta"></div>`;
+      el.innerHTML = `<div class="card-head" style="align-items:flex-start;margin-bottom:0"><div class="grow" style="min-width:200px"><span class="name">${esc(p.name)}</span><span class="ver">${ver}</span>
+          <span class="badge ${badge}" style="margin-left:8px">${LABEL[p.status]}</span>${p.core ? ' <span class="badge">Core</span>' : ''}
+          <p class="desc">${esc(p.description)}</p></div><div class="row actions"></div></div><div class="meta"></div>`;
       const act = el.querySelector('.actions'), meta = el.querySelector('.meta');
-      const add = (label, cls, fn, disabled, title) => { const b = document.createElement('button'); b.textContent = label; b.className = cls || ''; b.disabled = working || !!disabled; if (title) b.title = title; b.onclick = fn; act.append(b); };
+      const add = (label, cls, fn, disabled, title) => { const b = document.createElement('button'); b.textContent = label; b.className = 'btn ' + (cls || ''); b.disabled = working || !!disabled; if (title) b.title = title; b.onclick = fn; act.append(b); };
+      if (p.status !== 'available') { const a = document.createElement('a'); a.href = '/p/' + p.id + '/'; a.className = 'btn ghost'; a.textContent = 'Open'; act.append(a); }
       if (p.status === 'available') add('Install', 'primary', () => confirmInstall(p), !p.installable || blocked, !p.installable ? 'No build has been published yet' : blocked ? 'A required package is not available' : '');
       if (p.status === 'update') add('Update', 'primary', () => confirmInstall(p), !p.installable, !p.installable ? 'No build has been published yet' : '');
       if (p.status !== 'available' && !p.core) add('Uninstall', 'danger', () => confirmRemove(p), p.dependents && p.dependents.length, p.dependents && p.dependents.length ? 'Remove ' + p.dependents.join(', ') + ' first' : '');
-      if (p.status !== 'available') { const a = document.createElement('a'); a.href = '/p/' + p.id + '/'; a.textContent = 'Open'; a.style.fontSize = '14px'; act.prepend(a); }
       if (p.requires && p.requires.length) meta.insertAdjacentHTML('beforeend', 'Needs ' + p.requires.map(r => `<span class="tag ${p.missing_requires.includes(r) ? 'bad' : ''}">${esc(r)}</span>`).join(''));
       if (p.dependents && p.dependents.length) meta.insertAdjacentHTML('beforeend', 'Used by ' + p.dependents.map(r => `<span class="tag">${esc(r)}</span>`).join(''));
       if (!p.local && !p.installable) meta.insertAdjacentHTML('beforeend', '<span class="tag">No build published yet. Run the repository&rsquo;s release workflow (Actions tab).</span>');
+      if (!meta.children.length && !meta.textContent) meta.remove();
       if (prog) {
         el.classList.toggle('busy', prog.state === 'running');
-        const s = document.createElement('div'); s.className = 'status ' + (prog.state === 'done' ? 'ok' : prog.state === 'failed' ? 'err' : '');
+        const s = document.createElement('div'); s.className = 'progress ' + (prog.state === 'done' ? 'ok' : prog.state === 'failed' ? 'err' : '');
         s.setAttribute('role', prog.state === 'failed' ? 'alert' : 'status');
         s.innerHTML = (prog.state === 'running' ? '<span class="spin"></span>' : '') + `<span>${esc(prog.text)}</span>` + (prog.keys ? ' <a href="/settings#credentials">Add API keys</a>' : '');
         el.append(s);
@@ -150,41 +123,60 @@
     function ask(html, okLabel, okClass) {
       return new Promise(res => {
         const dlg = $('dlg'), form = $('dlgForm');
-        form.innerHTML = html + `<div class="row"><button type="button" value="no" class="ghost">Cancel</button><button type="submit" class="${okClass || 'primary'}" value="yes">${okLabel}</button></div>`;
+        form.innerHTML = html + `<div class="actions"><button type="button" value="no" class="btn ghost">Cancel</button><button type="submit" class="btn ${okClass || 'primary'}" value="yes">${okLabel}</button></div>`;
         form.querySelector('[value=no]').onclick = () => dlg.close('no');
         dlg.onclose = () => res(dlg.returnValue === 'yes' ? { purge: !!form.querySelector('#purge')?.checked } : null);
         dlg.returnValue = 'no'; dlg.showModal();
       });
     }
 
+    async function details(p) {
+      try { const r = await call('GET', 'api/details?repo=' + encodeURIComponent(p.repo) + '&id=' + encodeURIComponent(p.id)); if (r.ok) return await r.json(); } catch {}
+      return {};
+    }
+
     async function confirmInstall(p) {
-      const dep = (p.missing_requires || []).map(r => data.packages.find(x => x.id === r)).filter(Boolean);
-      let d = {};
-      try { const r = await call('GET', 'api/details?repo=' + encodeURIComponent(p.repo) + '&id=' + encodeURIComponent(p.id)); if (r.ok) d = await r.json(); } catch {}
+      const deps = (p.missing_requires || []).map(r => data.packages.find(x => x.id === r)).filter(Boolean);
+      const steps = [...deps, p];
+      const ds = await Promise.all(steps.map(details));
+      const d = ds[ds.length - 1];
+      const apt = [...new Set(ds.flatMap(x => x.system?.apt || []))];
+      const downloads = ds.flatMap(x => x.system?.downloads || []);
+      const approvals = [...new Set(ds.flatMap(x => x.system?.approvals || []))];
       const secrets = (d.secrets || []).map(s => `<li>${esc(s.label || s.name)} <code>${esc(s.name)}</code>${s.required ? ' (required)' : ''}</li>`).join('');
-      const ok = await ask(`<h3>${p.status === 'update' ? 'Update' : 'Install'} ${esc(p.name)}</h3><p class="desc">${esc(p.description)}</p><ul>
+      const hasSystem = apt.length || downloads.length;
+      const system = hasSystem ? `<div class="notice warn sys"><div><b>This will install software on your Pi</b><ul>
+          ${apt.map(a => `<li><code>${esc(a)}</code>: a Raspberry Pi OS package (installed with apt, as root)</li>`).join('')}
+          ${downloads.map(x => `<li><code>${esc(x.name)}</code>: a program downloaded from ${esc(x.url.split('/').slice(2, 5).join('/'))}, ${x.verified ? 'checksum verified' : 'not checksum verified'}</li>`).join('')}
+        </ul></div></div>` : '';
+      const ok = await ask(`<h2 id="dlgTitle">${p.status === 'update' ? 'Update' : 'Install'} ${esc(p.name)}</h2><p>${esc(p.description)}</p>${system}<ul>
           <li>Runs as a sandboxed service on this Pi, with network access.</li>
           <li>${d.stores_data ? 'Keeps its own data on the Pi.' : 'Keeps no data of its own.'}</li>
-          ${dep.length ? `<li>Also installs the packages it needs: <b>${dep.map(x => esc(x.name)).join(', ')}</b>.</li>` : ''}
+          ${deps.length ? `<li>Also installs the packages it needs: <b>${deps.map(x => esc(x.name)).join(', ')}</b>.</li>` : ''}
           ${secrets ? `<li>Can read these credentials once you add them:<ul>${secrets}</ul></li>` : '<li>Asks for no credentials.</li>'}
-        </ul><p class="muted" style="margin-top:12px">Only install packages from repositories you trust: they run code on your Pi.</p>`, p.status === 'update' ? 'Update' : 'Install');
-      if (ok) run([...dep, p].map(x => ({ kind: 'install', pkg: x })));
+        </ul><p class="small faint" style="margin:12px 0 16px">Only install packages from repositories you trust: they run code on your Pi.</p>`,
+        hasSystem ? 'Install and add software' : (p.status === 'update' ? 'Update' : 'Install'));
+      if (ok) run(steps.map(x => ({ kind: 'install', pkg: x, approved: approvals })));
     }
 
     async function confirmRemove(p) {
-      const ok = await ask(`<h3>Uninstall ${esc(p.name)}?</h3><p class="desc">The service stops and disappears from the launcher. Credentials you saved stay in your key store.</p>
+      const ok = await ask(`<h2 id="dlgTitle">Uninstall ${esc(p.name)}?</h2><p>The service stops and disappears from the launcher. Credentials you saved stay in your key store, and software it installed on the Pi (such as ffmpeg) is kept.</p>
         <label class="check"><input type="checkbox" id="purge"> Also delete the data it stored on the Pi</label>`, 'Uninstall', 'danger');
       if (ok) run([{ kind: 'remove', pkg: p, purge: ok.purge }]);
     }
 
-    function updateAll(list) { run(list.map(p => ({ kind: 'install', pkg: p }))); }
+    async function updateAll(list) {
+      // An update may need new system software; ask once per package that does.
+      for (const p of list) { const d = await details(p); if (d.system && d.system.approvals?.length) { return confirmInstall(p); } }
+      run(list.map(p => ({ kind: 'install', pkg: p, approved: [] })));
+    }
 
     // ---- running jobs ----
     async function runJob(step) {
       const { kind, pkg } = step;
       const set = (text, state, keys) => { progress[pkg.id] = { text, state, keys }; render(); };
       set(kind === 'install' ? 'Starting' : 'Removing', 'running');
-      const r = await call('POST', kind === 'install' ? 'api/install' : 'api/remove', kind === 'install' ? { repo: pkg.repo, id: pkg.id } : { id: pkg.id, purge: !!step.purge });
+      const r = await call('POST', kind === 'install' ? 'api/install' : 'api/remove', kind === 'install' ? { repo: pkg.repo, id: pkg.id, approved: step.approved || [] } : { id: pkg.id, purge: !!step.purge });
       const j = await r.json();
       if (!r.ok) { set(j.error || 'Could not start', 'failed'); return false; }
       const started = Date.now();
@@ -197,7 +189,7 @@
         const waiting = s.state === 'queued' && Date.now() - started > 20000;
         set(waiting ? 'The installer service has not picked this up. Is osnt-helper running on the Pi?' : s.message, waiting ? 'failed' : 'running');
         if (waiting) return false;
-        if (Date.now() - started > 600000) { set('Timed out waiting for the installer', 'failed'); return false; }
+        if (Date.now() - started > 1800000) { set('Timed out waiting for the installer', 'failed'); return false; }
       }
     }
 
@@ -211,10 +203,10 @@
     // ---- repositories ----
     function renderRepos() {
       const box = $('repos'); box.innerHTML = '';
-      if (!data.repos.length) box.innerHTML = '<p class="muted">No repositories yet.</p>';
+      if (!data.repos.length) box.innerHTML = '<p class="muted small">No repositories yet.</p>';
       for (const repo of data.repos) {
-        const el = document.createElement('div'); el.className = 'card repo';
-        el.innerHTML = `<div><div class="url">${esc(repo.url.replace('https://github.com/', ''))}</div><div class="${repo.ok ? 'muted' : 'err'}" style="font-size:13px">${repo.ok ? `${esc(repo.count)} packages${repo.published ? '' : ' &middot; no published build yet'}` : esc(repo.error)}</div></div><button class="danger ghost">Remove</button>`;
+        const el = document.createElement('div'); el.className = 'card row spread';
+        el.innerHTML = `<div class="grow"><div class="wrap-anywhere">${esc(repo.url.replace('https://github.com/', ''))}</div><div class="small ${repo.ok ? 'faint' : 'err'}">${repo.ok ? `${esc(repo.count)} packages${repo.published ? '' : ' &middot; no published build yet'}` : esc(repo.error)}</div></div><button class="btn danger ghost sm">Remove</button>`;
         el.querySelector('button').onclick = async () => { await call('DELETE', 'api/repos?url=' + encodeURIComponent(repo.url)); load(true); };
         box.append(el);
       }
@@ -227,7 +219,7 @@
       if (res.ok) { $('url').value = ''; await load(true); }
     };
     $('q').oninput = e => { query = e.target.value.trim().toLowerCase(); render(); };
-    $('chips').onclick = e => { const b = e.target.closest('[data-f]'); if (!b) return; filter = b.dataset.f; document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c === b))); render(); };
+    $('chips').onclick = e => { const b = e.target.closest('[data-f]'); if (!b) return; filter = b.dataset.f; document.querySelectorAll('#chips button').forEach(c => c.setAttribute('aria-pressed', String(c === b))); render(); };
     $('refresh').onclick = async e => { e.target.disabled = true; await load(true); e.target.disabled = false; };
 
     // ---- GitHub connection (device flow) ----
@@ -236,10 +228,10 @@
       const d = await (await call('GET', 'api/github')).json();
       const box = $('gh');
       if (d.connected) {
-        box.innerHTML = `<div class="repo"><div><b>Connected as ${esc(d.login)}</b><div class="muted">Private repositories where the OSNT GitHub App is installed can be read.</div></div><button class="danger ghost">Disconnect</button></div>`;
+        box.innerHTML = `<div class="row spread"><div class="grow"><b>Connected as ${esc(d.login)}</b><div class="small muted">Private repositories where the OSNT GitHub App is installed can be read.</div></div><button class="btn danger ghost sm">Disconnect</button></div>`;
         box.querySelector('button').onclick = async () => { await call('DELETE', 'api/github'); ghStatus(); load(true); };
       } else if (!polling) {
-        box.innerHTML = `<div class="repo"><div><b>Not connected</b><div class="muted">${d.stored ? 'The saved sign-in has expired. ' : ''}Needed only for private repositories.</div></div><button class="primary">Connect GitHub</button></div><p class="err" id="ghErr" role="alert"></p>`;
+        box.innerHTML = `<div class="row spread"><div class="grow"><b>Not connected</b><div class="small muted">${d.stored ? 'The saved sign-in has expired. ' : ''}Needed only for private repositories.</div></div><button class="btn primary">Connect GitHub</button></div><p class="err small" id="ghErr" role="alert"></p>`;
         box.querySelector('button').onclick = ghConnect;
       }
     }
@@ -247,8 +239,8 @@
       const r = await call('POST', 'api/github/start'); const d = await r.json();
       if (!r.ok) { $('ghErr').textContent = d.error; return; }
       polling = true;
-      $('gh').innerHTML = `<b>Enter this code on GitHub</b><p style="font-size:28px;letter-spacing:.2em;margin:8px 0"><code>${esc(d.user_code)}</code></p>
-        <p class="muted">Open <a href="${esc(d.verification_uri)}" target="_blank" rel="noopener noreferrer">${esc(d.verification_uri)}</a> on any device, type the code and approve. This page continues by itself.</p>`;
+      $('gh').innerHTML = `<b>Enter this code on GitHub</b><div><code class="code-big">${esc(d.user_code)}</code></div>
+        <p class="small muted" style="margin:0">Open <a href="${esc(d.verification_uri)}" target="_blank" rel="noopener noreferrer">${esc(d.verification_uri)}</a> on any device, type the code and approve. This page continues by itself.</p>`;
       let wait = Math.max(5, d.interval || 5); const deadline = Date.now() + (d.expires_in || 900) * 1000;
       while (Date.now() < deadline) {
         await new Promise(res => setTimeout(res, wait * 1000));

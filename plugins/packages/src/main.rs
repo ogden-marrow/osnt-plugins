@@ -311,8 +311,9 @@ async fn remove_repo(method: Method, uri: Uri, headers: HeaderMap, Query(q): Que
 
 #[derive(Deserialize, Default)]
 struct PackagesQuery {
+    /// `?fresh=1` skips the short cache. A string, because query strings carry "1" rather than a boolean.
     #[serde(default)]
-    fresh: bool,
+    fresh: Option<String>,
 }
 
 /// Every repository's offerings merged with what is installed.
@@ -322,7 +323,7 @@ async fn packages(method: Method, uri: Uri, headers: HeaderMap, Query(q): Query<
     }
     let repos = load_repos();
     let token = load_token();
-    let fresh = q.fresh;
+    let fresh = q.fresh.is_some_and(|f| !matches!(f.as_str(), "" | "0" | "false"));
     let results = tokio::task::spawn_blocking(move || {
         std::thread::scope(|s| {
             let handles: Vec<_> = repos.iter().map(|url| { let token = token.as_deref(); s.spawn(move || repo_data(url, token, fresh)) }).collect();
@@ -397,6 +398,7 @@ async fn details(method: Method, uri: Uri, headers: HeaderMap, Query(q): Query<D
         Ok::<Value, String>(json!({
             "id": q.id, "name": s("name"), "description": s("description"), "version": s("version"), "grid": s("grid"),
             "requires": list("requires"), "provides": list("provides"), "secrets": secrets,
+            "system": system_of(&m),
             "stores_data": m.get("service").and_then(|v| v.get("state_dir")).and_then(|v| v.as_bool()).unwrap_or(false),
         }))
     })
@@ -406,6 +408,25 @@ async fn details(method: Method, uri: Uri, headers: HeaderMap, Query(q): Query<D
         Ok(Err(e)) => error(StatusCode::BAD_GATEWAY, &e),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
     }
+}
+
+/// The `[system]` section as the dialog shows it: Pi OS packages and programs downloaded from GitHub releases, plus the
+/// exact approval strings the installer will insist on.
+fn system_of(m: &toml::Value) -> Value {
+    let sys = m.get("system");
+    let apt: Vec<String> = sys.and_then(|v| v.get("apt")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    let downloads: Vec<Value> = sys
+        .and_then(|v| v.get("download"))
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|d| {
+            let url = d.get("url")?.as_str()?;
+            Some(json!({ "name": d.get("name")?.as_str()?, "url": url, "verified": d.get("sha256_url").is_some() }))
+        })
+        .collect();
+    let approvals: Vec<String> = apt.iter().map(|a| format!("apt:{a}")).chain(downloads.iter().filter_map(|d| d["url"].as_str().map(|u| format!("download:{u}")))).collect();
+    json!({ "apt": apt, "downloads": downloads, "approvals": approvals })
 }
 
 fn state_dir() -> PathBuf {
@@ -419,7 +440,7 @@ fn random_job() -> Option<String> {
 }
 
 /// Queue a request for the root helper (a systemd path unit starts it when the file appears) and a job record to poll.
-fn queue(action: &str, id: &str, repo: &str, purge: bool) -> Result<String, String> {
+fn queue(action: &str, id: &str, repo: &str, purge: bool, approved: &[String]) -> Result<String, String> {
     let job = random_job().ok_or("no randomness available")?;
     let dir = state_dir();
     let (requests, jobs) = (dir.join("requests"), dir.join("jobs"));
@@ -427,7 +448,7 @@ fn queue(action: &str, id: &str, repo: &str, purge: bool) -> Result<String, Stri
     let record = json!({ "job": job, "action": action, "id": id, "state": "queued", "message": "Waiting for the installer to start", "log": [] });
     fs::write(jobs.join(format!("{job}.json")), record.to_string()).map_err(|e| format!("could not queue: {e}"))?;
     let tmp = requests.join(format!("{job}.tmp"));
-    fs::write(&tmp, json!({ "job": job, "action": action, "id": id, "repo": repo, "purge": purge }).to_string()).map_err(|e| format!("could not queue: {e}"))?;
+    fs::write(&tmp, json!({ "job": job, "action": action, "id": id, "repo": repo, "purge": purge, "approved": approved }).to_string()).map_err(|e| format!("could not queue: {e}"))?;
     fs::rename(&tmp, requests.join(format!("{job}.json"))).map_err(|e| format!("could not queue: {e}"))?;
     forget_cache();
     Ok(job)
@@ -437,6 +458,9 @@ fn queue(action: &str, id: &str, repo: &str, purge: bool) -> Result<String, Stri
 struct InstallBody {
     repo: String,
     id: String,
+    /// The system software the user approved in the dialog; the installer refuses anything else.
+    #[serde(default)]
+    approved: Vec<String>,
 }
 
 async fn install(method: Method, uri: Uri, headers: HeaderMap, Json(b): Json<InstallBody>) -> Response {
@@ -446,7 +470,10 @@ async fn install(method: Method, uri: Uri, headers: HeaderMap, Json(b): Json<Ins
     if !valid_id(&b.id) || !load_repos().contains(&b.repo) {
         return error(StatusCode::BAD_REQUEST, "unknown package");
     }
-    match queue("install", &b.id, &b.repo, false) {
+    if b.approved.len() > 30 || b.approved.iter().any(|a| a.len() > 300 || a.chars().any(char::is_control)) {
+        return error(StatusCode::BAD_REQUEST, "bad approval list");
+    }
+    match queue("install", &b.id, &b.repo, false, &b.approved) {
         Ok(job) => Json(json!({ "job": job })).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e),
     }
@@ -466,7 +493,7 @@ async fn uninstall(method: Method, uri: Uri, headers: HeaderMap, Json(b): Json<R
     if !valid_id(&b.id) || CORE.contains(&b.id.as_str()) {
         return error(StatusCode::BAD_REQUEST, "this package cannot be removed from here");
     }
-    match queue("remove", &b.id, "", b.purge) {
+    match queue("remove", &b.id, "", b.purge, &[]) {
         Ok(job) => Json(json!({ "job": job })).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e),
     }
