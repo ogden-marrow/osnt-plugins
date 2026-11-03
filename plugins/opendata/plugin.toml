@@ -1,0 +1,13 @@
+id = "opendata"
+name = "Disaster imagery (Maxar Open Data)"
+description = "Browse Maxar's free event imagery for disasters and crises, and compare acquisitions before and after."
+grid = "Geospatial"
+port = 8125
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_OPENDATA_BIND = "127.0.0.1:{port}"
+OSNT_OPENDATA_STATE = "{state_dir}"

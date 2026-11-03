@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Disaster imagery · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; position: relative; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 380px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); font-size: 13px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+    aside h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    aside input[type=search] { width: 100%; }
+    .ev { display: block; width: 100%; text-align: left; padding: 9px 11px; margin: 5px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--ink); font: inherit; cursor: pointer; line-height: 1.35; }
+    .ev:hover { border-color: var(--edge-strong); }
+    .ev b { font-size: 13px; } .ev small { display: block; color: var(--ink-2); font-size: 12px; }
+    #evlist { max-height: 38dvh; overflow-y: auto; }
+    .dategroup { margin: 10px 0 4px; font-weight: 600; color: var(--ink-2); font-size: 12px; }
+    .acq { display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin: 4px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); }
+    .acq .t { flex: 1; min-width: 0; line-height: 1.3; }
+    .acq .t small { display: block; color: var(--ink-3); font: 11px var(--font-mono); overflow-wrap: anywhere; }
+    .acq.isA { box-shadow: inset 3px 0 0 #e8a33d; } .acq.isB { box-shadow: inset 3px 0 0 #4a9be8; }
+    .acq .btn { min-height: 28px; padding: 0 9px; font-size: 12px; }
+    #acqlist { max-height: 40dvh; overflow-y: auto; }
+    #cmpbar { position: absolute; z-index: 1000; left: 10px; right: 10px; bottom: 26px; display: none; justify-content: center; pointer-events: none; }
+    #cmpbar .box { pointer-events: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 100%; padding: 6px 10px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--edge-strong); border-radius: var(--radius); box-shadow: var(--shadow-float); font-size: 12px; }
+    #cmpbar input[type=range] { width: min(320px, 56vw); }
+    .tag { display: inline-block; min-width: 18px; text-align: center; padding: 1px 6px; border-radius: 4px; font-weight: 700; color: #1a1a1a; }
+    .tag.a { background: #e8a33d; } .tag.b { background: #4a9be8; }
+    #divider { position: absolute; z-index: 900; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.45); pointer-events: none; display: none; }
+    #zoomhint { position: absolute; z-index: 1000; left: 50%; top: 12px; transform: translateX(-50%); display: none; max-width: calc(100% - 140px); }
+    #panelBtn { display: none; }
+    @media (max-width: 760px) {
+      #panelBtn { display: inline-flex; }
+      .topbar .status { display: none; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 66dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); }
+      aside#panel.open { display: flex; }
+      #cmpbar { bottom: 34px; }
+      #evlist { max-height: 30dvh; } #acqlist { max-height: 30dvh; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Disaster imagery</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Loading events…</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Events</button></div>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map"></div>
+    <div id="divider"></div>
+    <div id="zoomhint" class="notice warn">Zoom in to street level (12+) to see the imagery.</div>
+    <div id="cmpbar"><div class="box">
+      <span><span class="tag a">A</span> <span id="lblA">none</span></span>
+      <input id="swipe" type="range" min="0" max="100" value="50" aria-label="Swipe position between A and B">
+      <span><span class="tag b">B</span> <span id="lblB">none</span></span>
+      <span class="seg" role="group" aria-label="Compare mode"><button id="mSwipe" class="on">Swipe</button><button id="mBlend">Blend</button></span>
+      <button id="clearCmp" class="btn sm">Clear</button>
+    </div></div>
+    <aside id="panel" aria-label="Events and acquisitions">
+      <div>
+        <h2>Events</h2>
+        <label class="sr-only" for="q">Filter events</label>
+        <input id="q" type="search" placeholder="Filter events (flood, cyclone, country)" style="margin-top:6px">
+        <div id="evlist"><div class="row muted" style="padding:10px 0"><span class="spin"></span> Reading the catalog…</div></div>
+      </div>
+      <div id="evbox" hidden>
+        <h2 id="evtitle"></h2>
+        <p id="evdesc" class="muted" style="margin:4px 0 8px"></p>
+        <div class="row" style="margin-bottom:6px"><span class="muted small">Pick a date for A and another for B to compare (swipe). Earlier dates are usually before the event.</span></div>
+        <div id="acqlist"></div>
+      </div>
+      <div class="notice warn"><span><b>Licence:</b> Maxar Open Data Program, CC BY-NC 4.0. Non-commercial use only, credit Maxar (Vantor). Imagery streams from Maxar's public bucket through the public titiler.xyz demo renderer (best effort, may be slow). Nothing is stored here.</span></div>
+    </aside>
+  </div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    function el(tag, attrs = {}, ...kids) {
+      const e = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e[k] = v; else if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v === true ? '' : v); }
+      for (const c of kids.flat()) if (c !== null && c !== undefined && c !== false) e.append(c.nodeType ? c : document.createTextNode(c));
+      return e;
+    }
+    const S = { events: [], ev: null, acqs: [], A: null, B: null, mode: 'swipe', layers: { A: [], B: [] }, markers: null, fp: null, map: null, cache: {} };
+    const bounds = b => L.latLngBounds([b[1], b[0]], [b[3], b[2]]);
+    const dateRange = e => e.start && e.end && e.start !== e.end ? `${e.start} to ${e.end}` : (e.start || 'dates unknown');
+
+    function renderEvents() {
+      const f = $('q').value.trim().toLowerCase();
+      const list = S.events.filter(e => !f || (e.title + ' ' + e.id + ' ' + e.description).toLowerCase().includes(f));
+      $('evlist').replaceChildren(...(list.length ? list.map(e => el('button', { class: 'ev', onclick: () => pickEvent(e) }, el('b', {}, e.title),
+        el('small', {}, `${dateRange(e)} · ${e.acquisitions} acquisition${e.acquisitions === 1 ? '' : 's'}`))) : [el('div', { class: 'state' }, el('p', {}, 'No events match.'))]));
+    }
+
+    async function pickEvent(e) {
+      S.ev = e; S.A = S.B = null; applyLayers(); clearFp();
+      $('evbox').hidden = false; $('evtitle').textContent = e.title; $('evdesc').textContent = e.description;
+      $('acqlist').replaceChildren(el('div', { class: 'row muted' }, el('span', { class: 'spin' }), 'Reading acquisitions…'));
+      if (e.bbox) S.map.fitBounds(bounds(e.bbox), { maxZoom: 12 });
+      if (innerWidth <= 760) { $('panel').classList.add('open'); $('panelBtn').setAttribute('aria-expanded', 'true'); }
+      $('status').textContent = e.title;
+      $('evbox').scrollIntoView({ block: 'start' });
+      try {
+        const r = await fetch('api/acquisitions?event=' + encodeURIComponent(e.id)); const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        S.acqs = d.acquisitions; renderAcqs(d);
+      } catch (err) { $('acqlist').replaceChildren(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Could not read acquisitions'), el('p', {}, String(err.message || err)), el('button', { class: 'btn', onclick: () => pickEvent(e) }, 'Retry'))); }
+    }
+
+    function clearFp() { if (S.fp) { S.map.removeLayer(S.fp); S.fp = null; } }
+
+    function renderAcqs(d) {
+      clearFp();
+      S.fp = L.layerGroup(S.acqs.filter(a => a.bbox).map(a => L.rectangle(bounds(a.bbox), { color: '#e8a33d', weight: 1, fillOpacity: 0.05 }).on('click', () => assign('A', a)))).addTo(S.map);
+      if (!S.acqs.length) { $('acqlist').replaceChildren(el('div', { class: 'state' }, el('p', {}, 'This event has no acquisitions listed.'))); return; }
+      const rows = []; let last = '';
+      for (const a of S.acqs) {
+        if (a.date !== last) { last = a.date; rows.push(el('div', { class: 'dategroup' }, a.date || 'unknown date')); }
+        rows.push(el('div', { class: 'acq', 'data-id': a.id },
+          el('div', { class: 't' }, (a.datetime || '').slice(11, 16) + ' UTC · ' + a.items + ' tile' + (a.items === 1 ? '' : 's'), el('small', {}, a.id)),
+          el('button', { class: 'btn', onclick: () => assign('A', a) }, 'A'), el('button', { class: 'btn', onclick: () => assign('B', a) }, 'B')));
+      }
+      if (d.total > d.count) rows.push(el('p', { class: 'muted small' }, `Showing the first ${d.count} of ${d.total} acquisitions.`));
+      $('acqlist').replaceChildren(...rows);
+      markAcqs();
+    }
+
+    function markAcqs() { for (const c of document.querySelectorAll('.acq')) { c.classList.toggle('isA', !!S.A && S.A.id === c.dataset.id); c.classList.toggle('isB', !!S.B && S.B.id === c.dataset.id); } }
+
+    async function loadItems(a) {
+      if (S.cache[a.id]) return S.cache[a.id];
+      const r = await fetch(`api/acquisition?event=${encodeURIComponent(S.ev.id)}&id=${encodeURIComponent(a.id)}`); const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      return S.cache[a.id] = d;
+    }
+
+    async function assign(slot, a) {
+      S[slot] = a; markAcqs();
+      $('status').textContent = 'Loading ' + (a.date || a.id) + '…';
+      try {
+        const d = await loadItems(a);
+        S[slot].detail = d;
+        applyLayers();
+        if (slot === 'A' || !S.A) {
+          const b = bounds(d.bbox || a.bbox); S.map.fitBounds(b, { maxZoom: 16 });
+          if (S.map.getZoom() < 12) S.map.setView(b.getCenter(), 13);
+        }
+        $('status').textContent = S.ev.title;
+      } catch (e) { $('status').textContent = 'Failed: ' + (e.message || e); S[slot] = null; applyLayers(); markAcqs(); }
+    }
+
+    function makeLayers(a, z) {
+      return a.detail.items.map(it => L.tileLayer(it.tiles, { minZoom: 12, maxZoom: 19, maxNativeZoom: 19, bounds: bounds(it.bbox), zIndex: z, attribution: 'Imagery &copy; Maxar (Vantor) Open Data, CC BY-NC 4.0' }));
+    }
+
+    function applyLayers() {
+      for (const k of ['A', 'B']) { for (const l of S.layers[k]) S.map.removeLayer(l); S.layers[k] = []; }
+      if (S.A && S.A.detail) S.layers.A = makeLayers(S.A, 400).map(l => l.addTo(S.map));
+      if (S.B && S.B.detail) S.layers.B = makeLayers(S.B, 410).map(l => l.addTo(S.map));
+      $('cmpbar').style.display = (S.A || S.B) ? 'flex' : 'none';
+      const lab = a => a ? `${a.date} ${(a.datetime || '').slice(11, 16)}` : 'none';
+      $('lblA').textContent = lab(S.A); $('lblB').textContent = lab(S.B);
+      const cmp = !!(S.A && S.B); $('swipe').disabled = !cmp; $('mSwipe').disabled = $('mBlend').disabled = !cmp;
+      updateCompare();
+    }
+
+    function updateCompare() {
+      const A = S.layers.A, B = S.layers.B, cmp = !!(S.A && S.B && A.length && B.length), pos = +$('swipe').value;
+      $('zoomhint').style.display = S.map && (A.length || B.length) && S.map.getZoom() < 12 ? 'flex' : 'none';
+      $('divider').style.display = cmp && S.mode === 'swipe' ? 'block' : 'none';
+      for (const l of [...A, ...B]) { if (l.getContainer()) l.getContainer().style.clip = ''; l.setOpacity(1); }
+      if (!cmp) return;
+      if (S.mode === 'blend') { for (const l of A) l.setOpacity(1 - pos / 100); return; }
+      const sz = S.map.getSize(), nw = S.map.containerPointToLayerPoint([0, 0]), se = S.map.containerPointToLayerPoint(sz), cx = nw.x + sz.x * pos / 100;
+      for (const l of A) if (l.getContainer()) l.getContainer().style.clip = `rect(${nw.y}px,${cx}px,${se.y}px,${nw.x}px)`;
+      for (const l of B) if (l.getContainer()) l.getContainer().style.clip = `rect(${nw.y}px,${se.x}px,${se.y}px,${cx}px)`;
+      $('divider').style.left = (sz.x * pos / 100) + 'px';
+    }
+
+    $('q').oninput = renderEvents;
+    $('mSwipe').onclick = () => { S.mode = 'swipe'; $('mSwipe').classList.add('on'); $('mBlend').classList.remove('on'); updateCompare(); };
+    $('mBlend').onclick = () => { S.mode = 'blend'; $('mBlend').classList.add('on'); $('mSwipe').classList.remove('on'); updateCompare(); };
+    $('swipe').oninput = updateCompare;
+    $('clearCmp').onclick = () => { S.A = S.B = null; applyLayers(); markAcqs(); };
+    $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
+
+    (async () => {
+      const { map } = await OSNT.createMap('map');
+      S.map = map; map.setView([15, 30], 2);
+      map.on('move zoom viewreset layeradd resize', updateCompare);
+      try {
+        const r = await fetch('api/events'); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        S.events = d.events; renderEvents();
+        S.markers = L.layerGroup(S.events.filter(e => e.bbox).map(e => L.circleMarker([(e.bbox[1] + e.bbox[3]) / 2, (e.bbox[0] + e.bbox[2]) / 2], { radius: 6, color: '#fff', weight: 1.5, fillColor: '#d9552b', fillOpacity: 0.9 }).bindTooltip(e.title).on('click', () => pickEvent(e)))).addTo(map);
+        $('status').textContent = `${d.count} events`;
+      } catch (e) {
+        $('status').textContent = 'Catalog unavailable';
+        $('evlist').replaceChildren(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Could not read the Maxar catalog'), el('p', {}, String(e.message || e)), el('button', { class: 'btn', onclick: () => location.reload() }, 'Retry')));
+      }
+    })();
+  </script>
+</body>
+</html>

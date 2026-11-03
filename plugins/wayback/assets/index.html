@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Imagery history · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; position: relative; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 360px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); font-size: 13px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
+    aside h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .big { font: 650 20px/1.2 var(--font); font-variant-numeric: tabular-nums; }
+    .tl { display: flex; align-items: center; gap: 6px; }
+    .tl input[type=range] { flex: 1; min-width: 0; }
+    .tl .btn { padding: 0 10px; min-width: 34px; }
+    .slot { border-left: 3px solid; padding-left: 10px; }
+    .slot.a { border-color: #e8a33d; } .slot.b { border-color: #4a9be8; }
+    .vers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-height: 190px; overflow-y: auto; }
+    .ver { display: inline-flex; align-items: center; border: 1px solid var(--edge-strong); border-radius: var(--radius-sm); background: var(--surface); font-size: 12px; overflow: hidden; }
+    .ver span { padding: 4px 7px; font-variant-numeric: tabular-nums; }
+    .ver button { border: 0; border-left: 1px solid var(--edge); background: var(--surface-2); color: var(--ink-2); font: 700 11px var(--font); padding: 4px 6px; cursor: pointer; min-height: 26px; }
+    .ver button:hover { background: var(--accent-soft); color: var(--ink); }
+    .ver.a { box-shadow: inset 0 -2px #e8a33d; } .ver.b { box-shadow: inset 0 -2px #4a9be8; }
+    dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
+    dl.kv dt { color: var(--ink-2); } dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+    #cmpbar { position: absolute; z-index: 1000; left: 10px; right: 10px; bottom: 26px; display: none; justify-content: center; pointer-events: none; }
+    #cmpbar .box { pointer-events: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 100%; padding: 6px 10px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--edge-strong); border-radius: var(--radius); box-shadow: var(--shadow-float); font-size: 12px; }
+    #cmpbar input[type=range] { width: min(320px, 56vw); }
+    .tag { display: inline-block; min-width: 18px; text-align: center; padding: 1px 6px; border-radius: 4px; font-weight: 700; color: #1a1a1a; }
+    .tag.a { background: #e8a33d; } .tag.b { background: #4a9be8; }
+    #divider { position: absolute; z-index: 900; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.45); pointer-events: none; display: none; }
+    #panelBtn { display: none; }
+    @media (max-width: 760px) {
+      #panelBtn { display: inline-flex; }
+      .topbar .status { display: none; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 62dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); }
+      aside#panel.open { display: flex; }
+      #cmpbar { bottom: 34px; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Imagery history</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Loading releases…</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Dates</button></div>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map"></div>
+    <div id="divider"></div>
+    <div id="cmpbar"><div class="box">
+      <span><span class="tag a">A</span> <span id="lblA">-</span></span>
+      <input id="swipe" type="range" min="0" max="100" value="50" aria-label="Swipe position between A and B">
+      <span><span class="tag b">B</span> <span id="lblB">-</span></span>
+      <span class="seg" role="group" aria-label="Compare mode"><button id="mSwipe" class="on">Swipe</button><button id="mBlend">Blend</button></span>
+    </div></div>
+    <aside id="panel" aria-label="Imagery dates">
+      <div>
+        <div class="seg" role="group" aria-label="View mode"><button id="vSingle" class="on">One date</button><button id="vCompare">Compare two</button></div>
+      </div>
+      <div class="slot a">
+        <h2><span class="tag a">A</span> Release date</h2>
+        <div class="big" id="dateA">-</div>
+        <div class="tl"><button class="btn" id="prevA" aria-label="Previous release for A">&lsaquo;</button><input id="slA" type="range" min="0" max="0" value="0" aria-label="Release date A"><button class="btn" id="nextA" aria-label="Next release for A">&rsaquo;</button></div>
+      </div>
+      <div class="slot b" id="slotB" hidden>
+        <h2><span class="tag b">B</span> Release date</h2>
+        <div class="big" id="dateB">-</div>
+        <div class="tl"><button class="btn" id="prevB" aria-label="Previous release for B">&lsaquo;</button><input id="slB" type="range" min="0" max="0" value="0" aria-label="Release date B"><button class="btn" id="nextB" aria-label="Next release for B">&rsaquo;</button></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2 style="margin:0">Versions at this location</h2></div>
+        <p class="muted" style="margin:0 0 8px">Many releases repeat the same picture. Find the ones that are actually new for the middle of the map.</p>
+        <div class="row"><button id="findBtn" class="btn sm primary">Find versions here</button>
+          <label class="check"><input id="snap" type="checkbox" disabled> Slider shows only these</label></div>
+        <div id="versMsg" class="muted small" style="margin-top:6px"></div>
+        <div id="vers" class="vers"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2 style="margin:0">When was it photographed?</h2></div>
+        <div id="capture" class="muted">Click the map to see the real capture date, resolution and provider for that point in the selected release.</div>
+      </div>
+      <div class="notice info"><span id="attrib">Imagery: Esri World Imagery Wayback. Source: Esri, Vantor, Earthstar Geographics and the GIS user community. Tiles stream from Esri on demand; nothing is stored here. A release is a basemap snapshot, so the picture can be older than its date.</span></div>
+    </aside>
+  </div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const PLACES = { 'Palm Jumeirah, Dubai': [25.112, 55.139, 14], 'Suez Canal': [30.45, 32.35, 9], 'Three Gorges Dam': [30.82, 111.0, 13],
+                     'Rotterdam port': [51.95, 4.1, 12], 'Aral Sea': [45.0, 59.5, 8], 'Gainesville, FL': [29.65, -82.34, 12], 'Kyiv': [50.45, 30.52, 11] };
+    function el(tag, attrs = {}, ...kids) {
+      const e = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e[k] = v; else if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v === true ? '' : v); }
+      for (const c of kids.flat()) if (c !== null && c !== undefined && c !== false) e.append(c.nodeType ? c : document.createTextNode(c));
+      return e;
+    }
+    // S.all: every release; S.list: what the sliders walk (all, or only versions found here); S.a/S.b: indexes into S.list.
+    const S = { all: [], list: [], tpl: '', a: 0, b: 0, compare: false, mode: 'swipe', la: null, lb: null, map: null, versions: [] };
+    const relA = () => S.list[S.a], relB = () => S.list[S.b];
+
+    function layer(rel, z) {
+      return L.tileLayer(S.tpl.replace('{id}', rel.id), { maxNativeZoom: 19, maxZoom: 19, zIndex: z, attribution: 'Esri World Imagery Wayback &middot; Esri, Vantor, Earthstar Geographics' });
+    }
+
+    function apply() {
+      for (const k of ['la', 'lb']) if (S[k]) { S.map.removeLayer(S[k]); S[k] = null; }
+      if (!S.list.length) return;
+      S.a = Math.min(S.a, S.list.length - 1); S.b = Math.min(S.b, S.list.length - 1);
+      S.la = layer(relA(), 400).addTo(S.map);
+      if (S.compare) S.lb = layer(relB(), 410).addTo(S.map);
+      $('dateA').textContent = relA().date; $('lblA').textContent = relA().date;
+      $('slA').max = $('slB').max = S.list.length - 1; $('slA').value = S.a; $('slB').value = S.b;
+      $('slotB').hidden = !S.compare;
+      if (S.compare) { $('dateB').textContent = relB().date; $('lblB').textContent = relB().date; }
+      $('cmpbar').style.display = S.compare ? 'flex' : 'none';
+      $('vSingle').classList.toggle('on', !S.compare); $('vCompare').classList.toggle('on', S.compare);
+      $('status').textContent = S.compare ? `A ${relA().date} · B ${relB().date}` : `Release ${relA().date}`;
+      markVersions(); updateCompare();
+    }
+
+    function updateCompare() {
+      const a = S.la, b = S.lb, pos = +$('swipe').value, cmp = !!(S.compare && a && b);
+      $('divider').style.display = cmp && S.mode === 'swipe' ? 'block' : 'none';
+      for (const l of [a, b]) if (l && l.getContainer()) { l.getContainer().style.clip = ''; l.setOpacity(1); }
+      if (!cmp) return;
+      if (S.mode === 'blend') { a.setOpacity(1 - pos / 100); return; }
+      const sz = S.map.getSize(), nw = S.map.containerPointToLayerPoint([0, 0]), se = S.map.containerPointToLayerPoint(sz), cx = nw.x + sz.x * pos / 100;
+      a.getContainer().style.clip = `rect(${nw.y}px,${cx}px,${se.y}px,${nw.x}px)`;
+      b.getContainer().style.clip = `rect(${nw.y}px,${se.x}px,${se.y}px,${cx}px)`;
+      $('divider').style.left = (sz.x * pos / 100) + 'px';
+    }
+
+    function setIndex(slot, i) { const n = S.list.length; S[slot] = Math.max(0, Math.min(n - 1, i)); apply(); }
+    function idxOfId(id) { return S.list.findIndex(r => r.id === id); }
+    function pickVersion(slot, v) {
+      if (idxOfId(v.id) < 0) { $('snap').checked = false; S.list = S.all; }
+      if (slot === 'b' && !S.compare) S.compare = true;
+      setIndex(slot, idxOfId(v.id));
+    }
+
+    function markVersions() {
+      for (const c of document.querySelectorAll('.ver')) {
+        const id = +c.dataset.id;
+        c.classList.toggle('a', !!relA() && relA().id === id); c.classList.toggle('b', S.compare && !!relB() && relB().id === id);
+      }
+    }
+
+    async function findVersions() {
+      const c = S.map.getCenter(), z = Math.max(10, Math.min(19, Math.round(S.map.getZoom())));
+      $('findBtn').setAttribute('aria-busy', 'true'); $('findBtn').disabled = true;
+      $('vers').replaceChildren(); $('versMsg').replaceChildren(el('span', { class: 'spin' }), ' Checking all releases for this spot (about 10 seconds)…');
+      try {
+        const r = await fetch(`api/changes?lat=${c.lat.toFixed(5)}&lon=${(((c.lng + 540) % 360) - 180).toFixed(5)}&zoom=${z}`);
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        S.versions = d.versions;
+        $('versMsg').textContent = `${d.count} distinct versions of ${d.releases_checked} releases for the map tile at zoom ${d.tile.z} under the centre.`;
+        $('vers').replaceChildren(...d.versions.slice().reverse().map(v => el('div', { class: 'ver', 'data-id': v.id },
+          el('span', {}, v.date), el('button', { onclick: () => pickVersion('a', v), 'aria-label': 'Set A to ' + v.date }, 'A'), el('button', { onclick: () => pickVersion('b', v), 'aria-label': 'Set B to ' + v.date }, 'B'))));
+        $('snap').disabled = !d.versions.length;
+        markVersions();
+      } catch (e) {
+        $('versMsg').textContent = 'Could not check versions: ' + (e.message || e);
+      } finally { $('findBtn').removeAttribute('aria-busy'); $('findBtn').disabled = false; }
+    }
+
+    $('snap').onchange = () => {
+      const keepA = relA() && relA().id, keepB = relB() && relB().id;
+      S.list = $('snap').checked ? S.versions.map(v => S.all.find(r => r.id === v.id)).filter(Boolean) : S.all;
+      const nearest = id => { const t = S.all.find(r => r.id === id)?.date || ''; let best = S.list.length - 1; for (let i = 0; i < S.list.length; i++) if (S.list[i].date >= t) { best = i; break; } return best; };
+      S.a = nearest(keepA); S.b = nearest(keepB); apply();
+    };
+
+    async function showCapture(latlng) {
+      const rel = relA(); if (!rel) return;
+      const lng = ((latlng.lng + 540) % 360) - 180;
+      const box = $('capture'); box.replaceChildren(el('span', { class: 'spin' }), ' Looking up…');
+      if (!$('panel').classList.contains('open') && innerWidth <= 760) { $('panel').classList.add('open'); $('panelBtn').setAttribute('aria-expanded', 'true'); }
+      try {
+        const r = await fetch(`api/capture?lat=${latlng.lat.toFixed(5)}&lon=${lng.toFixed(5)}&release=${rel.id}`);
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        if (!d.found) { box.textContent = `No capture footprint at ${latlng.lat.toFixed(4)}, ${lng.toFixed(4)} in the ${rel.date} release.`; return; }
+        box.replaceChildren(el('dl', { class: 'kv' },
+          el('dt', {}, 'Point'), el('dd', {}, `${latlng.lat.toFixed(4)}, ${lng.toFixed(4)}`),
+          el('dt', {}, 'Captured'), el('dd', {}, el('b', {}, d.capture_date || 'unknown')),
+          el('dt', {}, 'Release'), el('dd', {}, d.release_date),
+          el('dt', {}, 'Resolution'), el('dd', {}, d.resolution_m != null ? d.resolution_m + ' m' : 'unknown'),
+          el('dt', {}, 'Accuracy'), el('dd', {}, d.accuracy_m != null ? d.accuracy_m + ' m' : 'unknown'),
+          el('dt', {}, 'Source'), el('dd', {}, [d.source, d.provider].filter(Boolean).join(' / ') || 'unknown')));
+      } catch (e) { box.textContent = 'Lookup failed: ' + (e.message || e); }
+    }
+
+    $('prevA').onclick = () => setIndex('a', S.a - 1); $('nextA').onclick = () => setIndex('a', S.a + 1);
+    $('prevB').onclick = () => setIndex('b', S.b - 1); $('nextB').onclick = () => setIndex('b', S.b + 1);
+    $('slA').oninput = () => setIndex('a', +$('slA').value); $('slB').oninput = () => setIndex('b', +$('slB').value);
+    $('vSingle').onclick = () => { S.compare = false; apply(); };
+    $('vCompare').onclick = () => { if (!S.compare) { S.compare = true; S.b = Math.max(0, S.a - Math.min(S.a, 12)); } apply(); };
+    $('mSwipe').onclick = () => { S.mode = 'swipe'; $('mSwipe').classList.add('on'); $('mBlend').classList.remove('on'); updateCompare(); };
+    $('mBlend').onclick = () => { S.mode = 'blend'; $('mBlend').classList.add('on'); $('mSwipe').classList.remove('on'); updateCompare(); };
+    $('swipe').oninput = updateCompare;
+    $('findBtn').onclick = findVersions;
+    $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
+
+    (async () => {
+      const { map } = await OSNT.createMap('map');
+      S.map = map;
+      const pl = L.control({ position: 'topleft' });
+      pl.onAdd = () => { const s = el('select', { 'aria-label': 'Go to place', class: 'input' }, ...Object.keys(PLACES).map(k => el('option', {}, k))); s.onchange = () => map.setView(PLACES[s.value].slice(0, 2), PLACES[s.value][2]); L.DomEvent.disableClickPropagation(s); s.id = 'place'; return s; };
+      pl.addTo(map);
+      map.on('move zoom viewreset layeradd resize', updateCompare);
+      map.on('click', e => showCapture(e.latlng));
+      $('place').value = 'Palm Jumeirah, Dubai'; $('place').onchange();
+      try {
+        const r = await fetch('api/releases'); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        S.all = S.list = d.releases; S.tpl = d.tile_template; if (d.attribution) $('attrib').textContent = d.attribution + ' Tiles stream from Esri on demand; nothing is stored here. A release is a basemap snapshot, so the picture can be older than its date.';
+        S.a = S.all.length - 1; S.b = Math.max(0, S.all.findIndex(r => r.date >= '2016-01-01'));
+        apply();
+      } catch (e) {
+        $('status').textContent = 'Release list unavailable';
+        $('panel').prepend(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Could not load the Wayback releases'), el('p', {}, String(e.message || e)), el('button', { class: 'btn', onclick: () => location.reload() }, 'Retry')));
+      }
+    })();
+  </script>
+</body>
+</html>

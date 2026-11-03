@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Satellite scenes · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; position: relative; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 380px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); font-size: 13px; display: flex; flex-direction: column; }
+    #controls { padding: 14px 16px; border-bottom: 1px solid var(--edge); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    #controls .full { grid-column: 1 / -1; }
+    #controls .field > .label { margin-bottom: 3px; }
+    #controls select, #controls input { width: 100%; }
+    #results { padding: 10px 16px 16px; flex: 1; }
+    #results h2 { margin: 6px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; }
+    .scene { display: grid; grid-template-columns: 84px 1fr; gap: 10px; padding: 8px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); }
+    .scene.sel { border-color: var(--accent); background: var(--accent-soft); }
+    .scene.isA { box-shadow: inset 3px 0 0 #e8a33d; } .scene.isB { box-shadow: inset 3px 0 0 #4a9be8; }
+    .scene .th { width: 84px; height: 84px; border-radius: 4px; background: var(--surface-3); object-fit: cover; display: block; }
+    .scene .meta { min-width: 0; line-height: 1.4; }
+    .scene .meta b { font-size: 13px; }
+    .scene .id { font: 11px/1.3 var(--font-mono); color: var(--ink-3); overflow-wrap: anywhere; }
+    .scene .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .scene .acts .btn { min-height: 28px; padding: 0 9px; font-size: 12px; }
+    .scene .links { font-size: 12px; margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+    #cmpbar { position: absolute; z-index: 1000; left: 10px; right: 10px; bottom: 26px; display: none; justify-content: center; pointer-events: none; }
+    #cmpbar .box { pointer-events: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 100%; padding: 6px 10px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--edge-strong); border-radius: var(--radius); box-shadow: var(--shadow-float); font-size: 12px; }
+    #cmpbar input[type=range] { width: min(320px, 56vw); }
+    .tag { display: inline-block; min-width: 18px; text-align: center; padding: 1px 6px; border-radius: 4px; font-weight: 700; color: #1a1a1a; }
+    .tag.a { background: #e8a33d; } .tag.b { background: #4a9be8; }
+    #divider { position: absolute; z-index: 900; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.45); pointer-events: none; display: none; }
+    #goBtn { position: absolute; z-index: 1000; left: 56px; top: 12px; box-shadow: var(--shadow-float); }
+    #panelBtn { display: none; }
+    #cloudVal { font-variant-numeric: tabular-nums; }
+    @media (max-width: 760px) {
+      #panelBtn { display: inline-flex; }
+      .topbar .status { display: none; }
+      aside#panel { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200; width: auto; max-height: 68dvh; border-left: 0; border-top: 1px solid var(--edge-strong); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-float); }
+      aside#panel.open { display: flex; }
+      #cmpbar { bottom: 34px; }
+      body:has(#panel.open) #goBtn { display: none; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Satellite scenes</h1>
+    <div class="bar-end"><span id="status" class="status" role="status">Pan to an area, then search</span><button id="panelBtn" class="btn sm" aria-expanded="false" aria-controls="panel">Scenes</button></div>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map"></div>
+    <div id="divider"></div>
+    <button id="goBtn" class="btn primary">Search this view</button>
+    <div id="cmpbar"><div class="box">
+      <span><span class="tag a">A</span> <span id="lblA">none</span></span>
+      <input id="swipe" type="range" min="0" max="100" value="50" aria-label="Swipe position between A and B">
+      <span><span class="tag b">B</span> <span id="lblB">none</span></span>
+      <span class="seg" role="group" aria-label="Compare mode"><button id="mSwipe" class="on">Swipe</button><button id="mBlend">Blend</button></span>
+      <button id="clearCmp" class="btn sm">Clear</button>
+    </div></div>
+    <aside id="panel" aria-label="Scene search">
+      <div id="controls">
+        <label class="field full"><span class="label">Sensor</span>
+          <select id="kind">
+            <option value="s2">Sentinel-2 optical, 10 m</option>
+            <option value="s1">Sentinel-1 radar (clouds, night), 10 m</option>
+            <option value="landsat">Landsat 8/9 optical, 30 m</option>
+            <option value="naip">NAIP aerial, 0.6 m (USA)</option>
+          </select></label>
+        <label class="field"><span class="label">From</span><input id="start" type="date"></label>
+        <label class="field"><span class="label">To</span><input id="end" type="date"></label>
+        <label class="field" id="cloudBox"><span class="label">Max cloud <span id="cloudVal">40</span>%</span><input id="cloud" type="range" min="0" max="100" value="40"></label>
+        <label class="field full"><span class="label">Source</span>
+          <select id="source"><option value="pc">Microsoft Planetary Computer</option><option value="es">Element 84 Earth Search (AWS)</option></select></label>
+        <label class="field full"><span class="label">Go to</span><select id="place"></select></label>
+        <button id="search" class="btn primary full">Search this view</button>
+      </div>
+      <div id="results"><div class="state"><div class="h3">No search yet</div><p>Pick a sensor and dates, move the map to your area and press Search. Pick two scenes (A and B) to compare them with a swipe.</p></div></div>
+      <div style="padding:0 16px 16px"><div class="notice info" id="attrib"><span>Scenes are found with free STAC catalogs; tiles stream from the source on demand and nothing is stored here.</span></div></div>
+    </aside>
+  </div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const PLACES = { 'Suez Canal': [30.45, 32.35, 9], 'Kyiv': [50.45, 30.52, 9], 'Strait of Hormuz': [26.5, 56.3, 8], 'Taiwan Strait': [24.5, 120.2, 7],
+                     'Rotterdam port': [51.95, 4.1, 10], 'Gainesville, FL': [29.65, -82.34, 10], 'Black Sea / Crimea': [45.0, 34.0, 7] };
+    const iso = d => d.toISOString().slice(0, 10);
+    const daysAgo = n => iso(new Date(Date.now() - n * 864e5));
+    function el(tag, attrs = {}, ...kids) {
+      const e = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e[k] = v; else if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v === true ? '' : v); }
+      for (const c of kids.flat()) if (c !== null && c !== undefined && c !== false) e.append(c.nodeType ? c : document.createTextNode(c));
+      return e;
+    }
+    const fmtDate = s => s ? s.replace('T', ' ').slice(0, 16) + ' UTC' : 'unknown time';
+    const S = { scenes: [], A: null, B: null, sel: null, layers: { A: null, B: null }, mode: 'swipe', fp: null, map: null };
+
+    for (const k of Object.keys(PLACES)) $('place').add(new Option(k, k));
+    $('start').value = daysAgo(30); $('end').value = daysAgo(0); $('end').max = daysAgo(0);
+    $('cloud').oninput = () => $('cloudVal').textContent = $('cloud').value;
+    $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
+    $('kind').onchange = () => {
+      const k = $('kind').value;
+      $('cloudBox').hidden = !(k === 's2' || k === 'landsat');
+      if (k === 'naip') $('start').value = '2018-01-01'; else if ($('start').value < daysAgo(400) ) $('start').value = daysAgo(30);
+      if (k === 'naip') $('end').value = '2024-12-31'; else $('end').value = daysAgo(0);
+    };
+
+    function setStatus(t) { $('status').textContent = t; }
+
+    function bboxOf(map) { const b = map.getBounds(); return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(v => +v.toFixed(5)); }
+
+    async function runSearch() {
+      const map = S.map, b = bboxOf(map);
+      const p = new URLSearchParams({ bbox: b.join(','), start: $('start').value, end: $('end').value, kind: $('kind').value, source: $('source').value, limit: 30 });
+      if (!$('cloudBox').hidden) p.set('cloud', $('cloud').value);
+      $('search').setAttribute('aria-busy', 'true'); $('goBtn').setAttribute('aria-busy', 'true');
+      $('results').replaceChildren(el('div', { class: 'row muted' }, el('span', { class: 'spin' }), 'Searching archives…'));
+      $('panel').classList.add('open'); $('panelBtn').setAttribute('aria-expanded', 'true');
+      try {
+        const r = await fetch('api/search?' + p);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        S.scenes = d.scenes; S.data = d;
+        render();
+      } catch (e) {
+        S.scenes = [];
+        clearFootprints();
+        $('results').replaceChildren(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Search failed'), el('p', {}, String(e.message || e)),
+          $('source').value === 'pc' ? el('button', { class: 'btn', onclick: () => { $('source').value = 'es'; runSearch(); } }, 'Try Earth Search instead') : null));
+        setStatus('Search failed');
+      } finally { $('search').removeAttribute('aria-busy'); $('goBtn').removeAttribute('aria-busy'); }
+    }
+
+    function clearFootprints() { if (S.fp) { S.map.removeLayer(S.fp); S.fp = null; } }
+
+    function render() {
+      const d = S.data, list = $('results');
+      clearFootprints();
+      $('attrib').replaceChildren(el('span', {}, d.attribution + ' ' + (d.source === 'pc'
+        ? 'Search and tiles: Microsoft Planetary Computer (open data, no key). '
+        : 'Search: Element 84 Earth Search on AWS. Map tiles for Sentinel-2/NAIP are rendered by the public titiler.xyz demo service (best effort). ')));
+      if (!d.scenes.length) {
+        list.replaceChildren(el('div', { class: 'state' }, el('div', { class: 'h3' }, 'No scenes found'),
+          el('p', {}, 'Nothing matched this view and date range. Widen the dates, raise the cloud limit or try radar (Sentinel-1), which sees through cloud.')));
+        setStatus('0 scenes'); return;
+      }
+      const fc = { type: 'FeatureCollection', features: d.scenes.filter(s => s.geometry).map(s => ({ type: 'Feature', geometry: s.geometry, properties: { id: s.id } })) };
+      S.fp = L.geoJSON(fc, { style: { color: '#e8a33d', weight: 1, fillOpacity: 0.02, opacity: 0.7 }, onEachFeature: (f, l) => l.on('click', () => select(f.properties.id)) }).addTo(S.map);
+      list.replaceChildren(el('h2', {}, el('span', {}, `${d.count} scene${d.count === 1 ? '' : 's'}${d.matched ? ` of ${d.matched}` : ''}, newest first`),
+        el('span', { class: 'muted' }, d.source === 'pc' ? 'Planetary Computer' : 'Earth Search')),
+        ...d.scenes.map(sceneCard));
+      setStatus(`${d.count} scenes · ${d.start} to ${d.end}`);
+      markSel();
+    }
+
+    function sceneCard(s) {
+      const cloud = s.cloud_cover != null ? el('span', { class: 'badge ' + (s.cloud_cover > 50 ? 'warn' : 'ok') }, Math.round(s.cloud_cover) + '% cloud') : null;
+      const sar = s.sar ? el('span', { class: 'badge' }, [s.sar.mode, (s.sar.polarizations || []).join('+'), s.sar.orbit_state].filter(Boolean).join(' · ')) : null;
+      const noTiles = !s.tiles;
+      const img = s.thumbnail ? el('img', { class: 'th', src: s.thumbnail, loading: 'lazy', alt: 'Preview of scene ' + s.id, referrerpolicy: 'no-referrer', onerror: function () { this.style.visibility = 'hidden'; } }) : el('div', { class: 'th' });
+      return el('div', { class: 'scene', 'data-id': s.id },
+        img,
+        el('div', { class: 'meta' },
+          el('b', {}, fmtDate(s.datetime)), ' ', cloud, ' ', sar,
+          el('div', { class: 'muted' }, [s.platform, s.collection].filter(Boolean).join(' · ')),
+          el('div', { class: 'id' }, s.id),
+          el('div', { class: 'acts' },
+            el('button', { class: 'btn sm', onclick: () => select(s.id, true), disabled: noTiles, title: noTiles ? 'No map tiles from this source for this scene' : 'Show on map' }, 'Show'),
+            el('button', { class: 'btn sm', onclick: () => assign('A', s), disabled: noTiles }, 'Set A'),
+            el('button', { class: 'btn sm', onclick: () => assign('B', s), disabled: noTiles }, 'Set B')),
+          noTiles ? el('div', { class: 'tiny faint' }, 'Metadata only here. Use the Planetary Computer source to view it on the map.') : null,
+          el('div', { class: 'links' }, el('a', { href: s.browser, target: '_blank', rel: 'noopener noreferrer' }, 'Open in browser'), el('a', { href: s.stac_item, target: '_blank', rel: 'noopener noreferrer' }, 'STAC JSON'))));
+    }
+
+    function markSel() {
+      for (const c of document.querySelectorAll('.scene')) {
+        const id = c.dataset.id;
+        c.classList.toggle('sel', id === S.sel); c.classList.toggle('isA', !!S.A && S.A.id === id); c.classList.toggle('isB', !!S.B && S.B.id === id);
+      }
+    }
+
+    function tileLayer(s, z) {
+      const b = s.bbox || [-180, -85, 180, 85];
+      return L.tileLayer(s.tiles, { maxZoom: 19, maxNativeZoom: s.kind === 'naip' ? 18 : 14, bounds: L.latLngBounds([b[1], b[0]], [b[3], b[2]]), zIndex: z, attribution: s.source === 'pc' ? 'Imagery via Microsoft Planetary Computer' : 'Imagery via Element 84 / titiler.xyz' });
+    }
+
+    function select(id, zoom) {
+      const s = S.scenes.find(x => x.id === id); if (!s) return;
+      S.sel = id;
+      if (zoom && s.tiles) { assign('A', s, true); S.B = null; applyLayers(); }
+      markSel();
+      const card = document.querySelector(`.scene[data-id="${CSS.escape(id)}"]`); if (card) card.scrollIntoView({ block: 'nearest' });
+    }
+
+    function assign(slot, s, quiet) {
+      S[slot] = s; S.sel = s.id;
+      applyLayers();
+      if (S.A && s === S.A && !S.B) { const b = s.bbox; if (b) S.map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { maxZoom: 11 }); }
+      markSel();
+    }
+
+    function applyLayers() {
+      for (const k of ['A', 'B']) { if (S.layers[k]) { S.map.removeLayer(S.layers[k]); S.layers[k] = null; } }
+      if (S.A) S.layers.A = tileLayer(S.A, 400).addTo(S.map);
+      if (S.A && S.B) S.layers.B = tileLayer(S.B, 410).addTo(S.map);
+      else if (S.B && !S.A) S.layers.B = tileLayer(S.B, 410).addTo(S.map);
+      const cmp = !!(S.A && S.B);
+      $('cmpbar').style.display = (S.A || S.B) ? 'flex' : 'none';
+      $('lblA').textContent = S.A ? S.A.datetime.slice(0, 10) + ' ' + (S.A.kind === 's1' ? 'SAR' : '') : 'none';
+      $('lblB').textContent = S.B ? S.B.datetime.slice(0, 10) + ' ' + (S.B.kind === 's1' ? 'SAR' : '') : 'none';
+      $('swipe').disabled = !cmp; $('mSwipe').disabled = $('mBlend').disabled = !cmp;
+      updateCompare();
+    }
+
+    function updateCompare() {
+      const a = S.layers.A, b = S.layers.B, cmp = !!(S.A && S.B && a && b), pos = +$('swipe').value;
+      $('divider').style.display = cmp && S.mode === 'swipe' ? 'block' : 'none';
+      for (const l of [a, b]) if (l && l.getContainer()) { l.getContainer().style.clip = ''; }
+      if (a) a.setOpacity(1);
+      if (!cmp) { if (b) b.setOpacity(1); return; }
+      if (S.mode === 'blend') { a.setOpacity(1 - pos / 100); b.setOpacity(1); return; }
+      const sz = S.map.getSize(), nw = S.map.containerPointToLayerPoint([0, 0]), se = S.map.containerPointToLayerPoint(sz);
+      const cx = nw.x + sz.x * pos / 100;
+      a.getContainer().style.clip = `rect(${nw.y}px,${cx}px,${se.y}px,${nw.x}px)`;
+      b.getContainer().style.clip = `rect(${nw.y}px,${se.x}px,${se.y}px,${cx}px)`;
+      $('divider').style.left = (sz.x * pos / 100) + 'px';
+    }
+
+    $('mSwipe').onclick = () => { S.mode = 'swipe'; $('mSwipe').classList.add('on'); $('mBlend').classList.remove('on'); updateCompare(); };
+    $('mBlend').onclick = () => { S.mode = 'blend'; $('mBlend').classList.add('on'); $('mSwipe').classList.remove('on'); updateCompare(); };
+    $('swipe').oninput = updateCompare;
+    $('clearCmp').onclick = () => { S.A = S.B = null; applyLayers(); markSel(); };
+    $('search').onclick = $('goBtn').onclick = runSearch;
+    $('place').onchange = () => { const p = PLACES[$('place').value]; S.map.setView([p[0], p[1]], p[2]); };
+
+    (async () => {
+      const { map } = await OSNT.createMap('map');
+      S.map = map;
+      map.on('move zoom viewreset layeradd resize', updateCompare);
+      $('place').value = 'Suez Canal'; $('place').onchange();
+      $('kind').onchange();
+    })();
+  </script>
+</body>
+</html>

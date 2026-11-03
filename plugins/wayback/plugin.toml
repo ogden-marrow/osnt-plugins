@@ -1,0 +1,13 @@
+id = "wayback"
+name = "Imagery history (Wayback)"
+description = "Step through dated releases of Esri World Imagery to see how a place changed, and compare two dates side by side."
+grid = "Geospatial"
+port = 8124
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_WAYBACK_BIND = "127.0.0.1:{port}"
+OSNT_WAYBACK_STATE = "{state_dir}"

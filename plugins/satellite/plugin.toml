@@ -1,0 +1,20 @@
+id = "satellite"
+name = "Satellite scenes"
+description = "Search Sentinel-2, Sentinel-1 radar, Landsat and NAIP scenes by area, date and cloud cover, and view or compare them on the map."
+grid = "Geospatial"
+port = 8123
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_SATELLITE_BIND = "127.0.0.1:{port}"
+OSNT_SATELLITE_STATE = "{state_dir}"
+
+# Optional: the Planetary Computer works anonymously; a free subscription key only raises its rate limits.
+[[secret]]
+name = "PC_SDK_SUBSCRIPTION_KEY"
+label = "Planetary Computer subscription key (optional)"
+help_url = "https://planetarycomputer.microsoft.com/account/request"
+required = false

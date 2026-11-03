@@ -90,3 +90,24 @@ name = "Aircraft history (ADS-B)"
 description = "Pull just the window you need out of adsb.lol's daily global ADS-B archive (time, area, ICAO hex, callsign), keep it as a short-lived slice, and serve it as an API for other plugins."
 version = "0.1.0"
 path = "plugins/adsb-history"
+
+[[plugin]]
+id = "satellite"
+name = "Satellite scenes"
+description = "Search Sentinel-2, Sentinel-1 radar, Landsat and NAIP scenes by area, date and cloud cover, and view or compare them on the map."
+version = "0.1.0"
+path = "plugins/satellite"
+
+[[plugin]]
+id = "wayback"
+name = "Imagery history (Wayback)"
+description = "Step through dated releases of Esri World Imagery to see how a place changed, and compare two dates side by side."
+version = "0.1.0"
+path = "plugins/wayback"
+
+[[plugin]]
+id = "opendata"
+name = "Disaster imagery (Maxar Open Data)"
+description = "Browse Maxar's free event imagery for disasters and crises, and compare acquisitions before and after."
+version = "0.1.0"
+path = "plugins/opendata"
