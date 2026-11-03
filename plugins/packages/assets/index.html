@@ -63,10 +63,19 @@
     const progress = {}; // plugin id -> { text, state, keys }
 
     async function load(fresh = false) {
-      const r = await call('GET', 'api/packages' + (fresh ? '?fresh=1' : ''));
+      let r;
+      try { r = await call('GET', 'api/packages' + (fresh ? '?fresh=1' : '')); } catch { return loadFailed('The packages service did not respond.'); }
       if (r.status === 401) { top.location.href = '/login?next=/settings%23packages'; return; }
-      data = await r.json();
+      if (!r.ok) return loadFailed((await r.json().catch(() => ({}))).error || 'The packages service answered ' + r.status + '.');
+      try { data = await r.json(); } catch { return loadFailed('The packages service sent something unreadable.'); }
       render();
+    }
+
+    function loadFailed(msg) {
+      $('banner').innerHTML = ''; $('pkgs').innerHTML = '';
+      const d = document.createElement('div'); d.className = 'state error'; d.setAttribute('role', 'alert');
+      d.innerHTML = '<div class="h3">Could not load packages</div><p></p><button class="btn">Try again</button>';
+      d.querySelector('p').textContent = msg; d.querySelector('button').onclick = () => load(true); $('pkgs').append(d);
     }
 
     function render() {
@@ -136,7 +145,14 @@
     }
 
     async function confirmInstall(p) {
-      const deps = (p.missing_requires || []).map(r => data.packages.find(x => x.id === r)).filter(Boolean);
+      // Everything it needs that is not installed yet, dependencies before dependents (transitively).
+      const deps = [], seen = new Set([p.id]);
+      const visit = id => {
+        if (seen.has(id)) return; seen.add(id);
+        const x = data.packages.find(y => y.id === id); if (!x || x.status !== 'available') return;
+        (x.requires || []).forEach(visit); deps.push(x);
+      };
+      (p.missing_requires || []).forEach(visit);
       const steps = [...deps, p];
       const ds = await Promise.all(steps.map(details));
       const d = ds[ds.length - 1];
@@ -176,14 +192,17 @@
       const { kind, pkg } = step;
       const set = (text, state, keys) => { progress[pkg.id] = { text, state, keys }; render(); };
       set(kind === 'install' ? 'Starting' : 'Removing', 'running');
-      const r = await call('POST', kind === 'install' ? 'api/install' : 'api/remove', kind === 'install' ? { repo: pkg.repo, id: pkg.id, approved: step.approved || [] } : { id: pkg.id, purge: !!step.purge });
-      const j = await r.json();
+      let r, j;
+      try {
+        r = await call('POST', kind === 'install' ? 'api/install' : 'api/remove', kind === 'install' ? { repo: pkg.repo, id: pkg.id, approved: step.approved || [] } : { id: pkg.id, purge: !!step.purge });
+        j = await r.json();
+      } catch { set('The packages service did not answer. Nothing was changed.', 'failed'); return false; }
       if (!r.ok) { set(j.error || 'Could not start', 'failed'); return false; }
       const started = Date.now();
       for (;;) {
         await new Promise(res => setTimeout(res, 1000));
         let s;
-        try { s = await (await call('GET', 'api/jobs/' + j.job)).json(); } catch { continue; }
+        try { const jr = await call('GET', 'api/jobs/' + j.job); if (jr.status === 404) { set('The installer lost track of this job. Refresh to see the current state.', 'failed'); return false; } s = await jr.json(); } catch { if (Date.now() - started > 1800000) { set('Timed out waiting for the installer', 'failed'); return false; } continue; }
         if (s.state === 'done') { set(s.message, 'done', kind === 'install' && /asks for/i.test(s.message)); return true; }
         if (s.state === 'failed') { set(s.message, 'failed'); return false; }
         const waiting = s.state === 'queued' && Date.now() - started > 20000;
@@ -207,15 +226,15 @@
       for (const repo of data.repos) {
         const el = document.createElement('div'); el.className = 'card row spread';
         el.innerHTML = `<div class="grow"><div class="wrap-anywhere">${esc(repo.url.replace('https://github.com/', ''))}</div><div class="small ${repo.ok ? 'faint' : 'err'}">${repo.ok ? `${esc(repo.count)} packages${repo.published ? '' : ' &middot; no published build yet'}` : esc(repo.error)}</div></div><button class="btn danger ghost sm">Remove</button>`;
-        el.querySelector('button').onclick = async () => { await call('DELETE', 'api/repos?url=' + encodeURIComponent(repo.url)); load(true); };
+        el.querySelector('button').onclick = async () => { try { const r = await call('DELETE', 'api/repos?url=' + encodeURIComponent(repo.url)); if (!r.ok) $('msg').textContent = (await r.json().catch(() => ({}))).error || 'Could not remove that repository.'; } catch { $('msg').textContent = 'The packages service did not respond.'; } load(true); };
         box.append(el);
       }
     }
 
     $('addForm').onsubmit = async e => {
       e.preventDefault();
-      const res = await call('POST', 'api/repos', { url: $('url').value });
-      $('msg').textContent = res.ok ? '' : (await res.json()).error;
+      let res; try { res = await call('POST', 'api/repos', { url: $('url').value }); } catch { $('msg').textContent = 'The packages service did not respond.'; return; }
+      $('msg').textContent = res.ok ? '' : ((await res.json().catch(() => ({}))).error || 'Could not add that repository (' + res.status + ').');
       if (res.ok) { $('url').value = ''; await load(true); }
     };
     $('q').oninput = e => { query = e.target.value.trim().toLowerCase(); render(); };
@@ -225,7 +244,7 @@
     // ---- GitHub connection (device flow) ----
     let polling = false;
     async function ghStatus() {
-      const d = await (await call('GET', 'api/github')).json();
+      let d; try { d = await (await call('GET', 'api/github')).json(); } catch { $('gh').innerHTML = '<p class="muted small">GitHub connection status is unavailable right now.</p>'; return; }
       const box = $('gh');
       if (d.connected) {
         box.innerHTML = `<div class="row spread"><div class="grow"><b>Connected as ${esc(d.login)}</b><div class="small muted">Private repositories where the OSNT GitHub App is installed can be read.</div></div><button class="btn danger ghost sm">Disconnect</button></div>`;
@@ -236,15 +255,15 @@
       }
     }
     async function ghConnect() {
-      const r = await call('POST', 'api/github/start'); const d = await r.json();
-      if (!r.ok) { $('ghErr').textContent = d.error; return; }
+      let r, d; try { r = await call('POST', 'api/github/start'); d = await r.json(); } catch { $('ghErr').textContent = 'The packages service did not respond.'; return; }
+      if (!r.ok) { $('ghErr').textContent = d.error || 'Could not start the GitHub sign-in.'; return; }
       polling = true;
       $('gh').innerHTML = `<b>Enter this code on GitHub</b><div><code class="code-big">${esc(d.user_code)}</code></div>
         <p class="small muted" style="margin:0">Open <a href="${esc(d.verification_uri)}" target="_blank" rel="noopener noreferrer">${esc(d.verification_uri)}</a> on any device, type the code and approve. This page continues by itself.</p>`;
       let wait = Math.max(5, d.interval || 5); const deadline = Date.now() + (d.expires_in || 900) * 1000;
       while (Date.now() < deadline) {
         await new Promise(res => setTimeout(res, wait * 1000));
-        const p = await call('POST', 'api/github/poll'); const j = await p.json();
+        let p, j; try { p = await call('POST', 'api/github/poll'); j = await p.json(); } catch { continue; }
         if (!p.ok || j.status === 'failed') { polling = false; await ghStatus(); $('ghErr').textContent = j.error || ''; return; }
         if (j.status === 'connected') break;
         if (j.slow_down) wait += 5;

@@ -68,7 +68,7 @@
           <div class="row" style="margin-top:12px"><button class="btn sm" id="imp">Import case…</button><input type="file" id="impfile" accept="application/json,.json" hidden></div>
         </div>
       </section>
-      <section class="col" id="c-notes" aria-label="Notes"><div id="main"></div></section>
+      <section class="col" id="c-notes" aria-label="Notes"><div id="pinbox"></div><div id="main"></div></section>
       <section class="col" id="c-log" aria-label="Evidence and timeline"><div id="side"></div></section>
     </div>
   </main>
@@ -91,7 +91,7 @@
       const inline = t => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
         .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
       for (const l of lines) {
-        if (l.startsWith('```')) { out += code ? '</code></pre>' : '<pre><code>'; code = !code; continue; }
+        if (l.startsWith('```')) { if (list) { out += '</ul>'; list = false; } out += code ? '</code></pre>' : '<pre><code>'; code = !code; continue; }
         if (code) { out += esc(l) + '\n'; continue; }
         const li = l.match(/^\s*[-*]\s+(.*)/);
         if (li) { if (!list) { out += '<ul>'; list = true; } out += '<li>' + inline(li[1]) + '</li>'; continue; }
@@ -107,7 +107,7 @@
 
     async function loadCases() {
       const d = await api('api/cases');
-      $('cases').innerHTML = d.cases.length ? d.cases.map(c => `<button class="case-item" data-id="${esc(c.id)}" aria-current="${c.id === cur}"><b>${esc(c.title)}</b><span>${c.notes} notes · ${c.timeline} events · ${c.evidence} evidence · ${esc(day(c.updated))}</span></button>`).join('')
+      $('cases').innerHTML = d.cases.length ? d.cases.map(c => `<button class="case-item" data-id="${esc(c.id)}" aria-current="${c.id === cur}"><b>${esc(c.title)}</b><span>${c.notes} note${c.notes === 1 ? '' : 's'} · ${c.timeline} event${c.timeline === 1 ? '' : 's'} · ${c.evidence} evidence · ${esc(day(c.updated))}</span></button>`).join('')
         : '<div class="state"><div class="h3">No cases yet</div><p>Create one above, or pin a result from another plugin.</p></div>';
       $('cases').querySelectorAll('.case-item').forEach(b => b.onclick = guard(() => { open(b.dataset.id); $('ws').dataset.pane = 'notes'; syncSeg(); }));
       if (!cur) { $('main').innerHTML = '<div class="state"><div class="h3">Choose or create a case</div><p>Notes appear here; the evidence log and timeline sit beside them.</p></div>'; $('side').innerHTML = ''; }
@@ -164,7 +164,32 @@
         ${e.archive_url ? `<div><a href="${esc(e.archive_url)}" target="_blank" rel="noopener noreferrer">archive copy</a></div>` : ''}${e.note ? `<div class="muted">${esc(e.note)}</div>` : ''}
         <div class="tiny faint">entry hash <span class="mono">${esc(e.hash.slice(0, 16))}…</span> · ${esc(e.created.slice(0, 16).replace('T', ' '))} UTC</div></div>`;
     }
-    guard(loadCases)();
+
+    // ---- "Pin to case" intake: other pages link here with ?pin=<title>&url=<https url>&note=<text>&from=<plugin id>&kind=evidence|timeline&date=YYYY-MM-DD
+    // Nothing is written until the person confirms, so a link cannot add to a case by itself.
+    async function pinIntake() {
+      const q = new URLSearchParams(location.search); if (!q.has('pin')) return;
+      const box = $('pinbox'); const from = (q.get('from') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
+      const kind = q.get('kind') === 'timeline' ? 'timeline' : 'evidence';
+      let cs = []; try { cs = (await api('api/cases')).cases; } catch (e) { toast(e.message, 'err'); }
+      const today = new Date().toISOString().slice(0, 10);
+      box.innerHTML = `<div class="card" style="margin-bottom:12px;border-left:3px solid var(--accent)"><div class="card-head"><h3 class="h3">Pin to a case${from ? ` <span class="badge">from ${esc(from)}</span>` : ''}</h3><button type="button" class="btn ghost sm" id="pdis">Dismiss</button></div>
+        <form id="pf" class="stack-form">
+          <label class="small muted" for="pc">Case</label><select id="pc"><option value="">Inbox (created if needed)</option>${cs.filter(c => c.id !== 'inbox').map(c => `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join('')}</select>
+          <label class="small muted" for="pk">Add it as</label><select id="pk"><option value="evidence"${kind === 'evidence' ? ' selected' : ''}>Evidence log entry (hash-chained)</option><option value="timeline"${kind === 'timeline' ? ' selected' : ''}>Timeline event</option></select>
+          <label class="small muted" for="pt">Title</label><input id="pt" maxlength="300" required value="${esc((q.get('pin') || '').slice(0, 300))}">
+          <label class="small muted" for="pu">URL</label><input id="pu" type="url" maxlength="2000" placeholder="https://… (optional)" value="${esc(/^https?:\/\//i.test(q.get('url') || '') ? q.get('url') : '')}">
+          <label class="small muted" for="pd">Date (timeline only)</label><input id="pd" pattern="\\d{4}-\\d{2}-\\d{2}.*" value="${esc(/^\d{4}-\d{2}-\d{2}/.test(q.get('date') || '') ? q.get('date') : today)}">
+          <label class="small muted" for="pn">Note</label><textarea id="pn" rows="3" maxlength="5000">${esc((q.get('note') || '').slice(0, 5000))}</textarea>
+          <div class="row"><button class="btn primary sm" id="pgo">Pin</button></div></form></div>`;
+      $('ws').dataset.pane = 'notes'; syncSeg();
+      const done = () => { box.innerHTML = ''; try { history.replaceState(null, '', location.pathname); } catch {} };
+      $('pdis').onclick = done;
+      $('pf').onsubmit = guard(async e => { e.preventDefault(); $('pgo').disabled = true;
+        try { const r = await api('api/pin', 'POST', { case_id: $('pc').value || null, kind: $('pk').value, title: $('pt').value, url: $('pu').value, note: $('pn').value, date: $('pd').value, source_plugin: from || null });
+          toast('Pinned'); done(); cur = r.case_id; await loadCases(); await open(r.case_id); } finally { if ($('pgo')) $('pgo').disabled = false; } });
+    }
+    guard(async () => { await loadCases(); await pinIntake(); })();
   </script>
 </body>
 </html>

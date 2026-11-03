@@ -154,6 +154,21 @@ async fn merge_dedupes_remaps_ids_and_is_all_or_nothing() {
 }
 
 #[tokio::test]
+async fn skip_invalid_keeps_the_good_nodes_and_drops_bad_ones_with_their_edges() {
+    let (a, _d) = new_app();
+    let id = mk(&a).await;
+    let m = format!("/api/graphs/{id}/merge");
+    let body = json!({ "skip_invalid": true, "source": "transform:x", "nodes": [node("a", "domain", "example.com"), node("b", "domain", "not a domain!"), node("c", "ip", "192.0.2.1"), node("d", "person", "Someone")],
+        "edges": [{ "id": "e1", "from": "a", "to": "b", "label": "bad" }, { "id": "e2", "from": "a", "to": "c", "label": "A" }, { "id": "e3", "from": "a", "to": "d", "label": "x" }] });
+    let (st, v, _) = call(&a, "POST", &m, body, true).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!((v["added_nodes"].clone(), v["added_edges"].clone(), v["skipped"].clone()), (json!(2), json!(1), json!(4)));
+    // without the flag the same request is still rejected whole
+    let (st, _, _) = call(&a, "POST", &m, json!({ "nodes": [node("b", "domain", "not a domain!")] }), true).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn export_formats_and_json_round_trip() {
     let (a, _d) = new_app();
     let id = mk(&a).await;

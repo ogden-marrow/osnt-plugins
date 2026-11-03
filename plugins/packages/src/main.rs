@@ -23,7 +23,16 @@ const MAX_REPOS: usize = 50;
 /// The OSNT GitHub App's client ID (public, not a secret). Device flow needs no client secret.
 const DEFAULT_CLIENT_ID: &str = "Iv23liDg2ML1wL4BKjT5";
 /// The device code of a sign-in in progress; it stays on the server and is never sent to the browser.
-static PENDING: Mutex<Option<String>> = Mutex::new(None);
+static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
+
+/// A sign-in in progress. GitHub ignores approvals that arrive faster than its polling interval (it answers
+/// "slow_down" instead of the token), so the interval is enforced here for every client, the page included.
+#[derive(Clone)]
+struct Pending {
+    device: String,
+    interval: u64,
+    last_poll: Option<Instant>,
+}
 const MAX_INDEX_BYTES: u64 = 512 * 1024;
 
 #[derive(Deserialize)]
@@ -554,7 +563,7 @@ async fn github_start(method: Method, uri: Uri, headers: HeaderMap) -> Response 
     let r = tokio::task::spawn_blocking(|| github_form("https://github.com/login/device/code", &[("client_id", &client_id())])).await;
     match r {
         Ok(Ok(v)) if v["device_code"].is_string() => {
-            *PENDING.lock().unwrap() = v["device_code"].as_str().map(str::to_string);
+            *PENDING.lock().unwrap() = v["device_code"].as_str().map(|d| Pending { device: d.to_string(), interval: v["interval"].as_u64().unwrap_or(5).clamp(5, 60) + 1, last_poll: None });
             Json(json!({ "user_code": v["user_code"], "verification_uri": v["verification_uri"], "interval": v["interval"], "expires_in": v["expires_in"] })).into_response()
         }
         Ok(Ok(v)) => error(StatusCode::BAD_GATEWAY, v["error_description"].as_str().unwrap_or("GitHub refused the request. Is Device Flow enabled on the app?")),
@@ -568,8 +577,16 @@ async fn github_poll(method: Method, uri: Uri, headers: HeaderMap) -> Response {
     if !signed_in(&method, &uri, &headers) {
         return error(StatusCode::UNAUTHORIZED, "sign in required");
     }
-    let Some(device) = PENDING.lock().unwrap().clone() else {
-        return error(StatusCode::BAD_REQUEST, "no sign-in in progress");
+    let device = {
+        let mut guard = PENDING.lock().unwrap();
+        let Some(p) = guard.as_mut() else {
+            return error(StatusCode::BAD_REQUEST, "no sign-in in progress");
+        };
+        if p.last_poll.is_some_and(|t| t.elapsed() < Duration::from_secs(p.interval)) {
+            return Json(json!({ "status": "pending", "interval": p.interval })).into_response();
+        }
+        p.last_poll = Some(Instant::now());
+        p.device.clone()
     };
     let r = tokio::task::spawn_blocking(move || {
         github_form("https://github.com/login/oauth/access_token", &[("client_id", &client_id()), ("device_code", &device), ("grant_type", "urn:ietf:params:oauth:grant-type:device_code")])
@@ -590,7 +607,12 @@ async fn github_poll(method: Method, uri: Uri, headers: HeaderMap) -> Response {
     }
     match v["error"].as_str().unwrap_or("error") {
         "authorization_pending" => Json(json!({ "status": "pending" })).into_response(),
-        "slow_down" => Json(json!({ "status": "pending", "slow_down": true })).into_response(),
+        "slow_down" => {
+            if let Some(p) = PENDING.lock().unwrap().as_mut() {
+                p.interval = v["interval"].as_u64().unwrap_or(p.interval + 5).max(p.interval + 5);
+            }
+            Json(json!({ "status": "pending", "slow_down": true })).into_response()
+        }
         "expired_token" | "access_denied" => {
             *PENDING.lock().unwrap() = None;
             Json(json!({ "status": "failed", "error": "The code expired or was denied. Start again." })).into_response()

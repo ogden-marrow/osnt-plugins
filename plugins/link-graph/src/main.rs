@@ -124,6 +124,9 @@ pub struct MergeBody {
     /// Where the additions came from, e.g. "transform:lookup" or "case-notebook".
     #[serde(default)]
     source: String,
+    /// Drop nodes that fail validation (and their edges) instead of rejecting the request; used by transforms.
+    #[serde(default)]
+    skip_invalid: bool,
 }
 
 /// Add nodes and edges produced by a transform or an import. Existing nodes are reused; the request is all or nothing.
@@ -131,9 +134,9 @@ async fn merge_into(State(s): State<Shared>, Path(id): Path<String>, Json(b): Js
     let src: String = b.source.chars().filter(|c| c.is_ascii_alphanumeric() || ":-_".contains(*c)).take(60).collect();
     let _g = LOCK.lock().unwrap();
     let mut g = load(&s, &id)?;
-    let (an, ae) = merge(&mut g, b.nodes, b.edges, if src.is_empty() { "import" } else { &src }).map_err(bad)?;
+    let (an, ae, skipped) = merge_opt(&mut g, b.nodes, b.edges, if src.is_empty() { "import" } else { &src }, b.skip_invalid).map_err(bad)?;
     s.store.save(&g).map_err(internal)?;
-    Ok(Json(json!({ "added_nodes": an, "added_edges": ae, "graph": g })))
+    Ok(Json(json!({ "added_nodes": an, "added_edges": ae, "skipped": skipped, "graph": g })))
 }
 
 #[derive(Deserialize)]

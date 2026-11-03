@@ -4,35 +4,35 @@
 id = "adsb"
 name = "Aircraft (ADS-B)"
 description = "Live aircraft, military traffic and emergency squawks, with a recorded position history."
-version = "0.1.1"
+version = "0.1.2"
 path = "plugins/adsb"
 
 [[plugin]]
 id = "imagery"
 name = "Imagery timeline"
 description = "Compare NASA satellite imagery across dates, with fire and thermal detections."
-version = "0.1.1"
+version = "0.1.2"
 path = "plugins/imagery"
 
 [[plugin]]
 id = "lookup"
 name = "Domain & IP lookup"
 description = "DNS, registration (RDAP), reverse DNS and certificate-transparency names."
-version = "0.1.1"
+version = "0.1.2"
 path = "plugins/lookup"
 
 [[plugin]]
 id = "imgmeta"
 name = "Image forensics"
 description = "EXIF, hashes and editing/GPS flags for an image, plus reverse-image-search links."
-version = "0.1.1"
+version = "0.1.2"
 path = "plugins/imgmeta"
 
 [[plugin]]
 id = "cameras"
 name = "Live cameras"
 description = "Grid of live still-image camera feeds with map placement."
-version = "0.1.1"
+version = "0.1.2"
 path = "plugins/cameras"
 
 [[plugin]]
@@ -46,98 +46,98 @@ path = "plugins/example"
 id = "map"
 name = "Map"
 description = "Base maps, satellite, terrain and elevation layers streamed on demand."
-version = "0.1.1"
+version = "0.1.2"
 path = "plugins/map"
 
 [[plugin]]
 id = "credentials"
 name = "Credentials"
 description = "Store API keys on the Pi and hand each one only to the plugins that declare it."
-version = "0.2.1"
+version = "0.2.2"
 path = "plugins/credentials"
 
 [[plugin]]
 id = "provenance"
 name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback."
-version = "0.4.1"
+version = "0.4.2"
 path = "plugins/provenance"
 
 [[plugin]]
 id = "packages"
 name = "Packages"
 description = "Package repositories, and which of their plugins are installed on this hub."
-version = "0.2.0"
+version = "0.2.2"
 path = "plugins/packages"
 
 [[plugin]]
 id = "doppler"
 name = "Doppler flyby check"
 description = "Estimate speed, closest approach and distance of an aircraft or vehicle pass from the Doppler shift in a recording, to sanity-check a clip's claims."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/doppler"
 
 [[plugin]]
 id = "yt-mp3"
 name = "YouTube to MP3"
 description = "Paste a YouTube link, optionally trim it, and download an MP3."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/yt-mp3"
 
 [[plugin]]
 id = "adsb-history"
 name = "Aircraft history (ADS-B)"
 description = "Pull just the window you need out of adsb.lol's daily global ADS-B archive (time, area, ICAO hex, callsign), keep it as a short-lived slice, and serve it as an API for other plugins."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/adsb-history"
 
 [[plugin]]
 id = "satellite"
 name = "Satellite scenes"
 description = "Search Sentinel-2, Sentinel-1 radar, Landsat and NAIP scenes by area, date and cloud cover, and view or compare them on the map."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/satellite"
 
 [[plugin]]
 id = "wayback"
 name = "Imagery history (Wayback)"
 description = "Step through dated releases of Esri World Imagery to see how a place changed, and compare two dates side by side."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/wayback"
 
 [[plugin]]
 id = "opendata"
 name = "Disaster imagery (Maxar Open Data)"
 description = "Browse Maxar's free event imagery for disasters and crises, and compare acquisitions before and after."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/opendata"
 
 [[plugin]]
 id = "quake-tsunami"
 name = "Earthquakes & tsunami"
 description = "Recent and historical earthquakes (USGS, EMSC) on a map, plus live PTWC/NTWC tsunami bulletins."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/quake-tsunami"
 
 [[plugin]]
 id = "hazard-events"
 name = "Hazard events"
 description = "One map of active disasters: GDACS alerts, NASA EONET, NWS alerts, volcano reports, active storms."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/hazard-events"
 
 [[plugin]]
 id = "fire-watch"
 name = "Fire watch"
 description = "Active-fire detections as clusters with FRP statistics, daily trends and area watches that flag new fires."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/fire-watch"
 
 [[plugin]]
 id = "space-watch"
 name = "Launches & orbital objects"
 description = "Upcoming and past rocket launches with a pad map, and CelesTrak orbital elements and catalog data by name, NORAD ID or group."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/space-watch"
 
 [[plugin]]
@@ -151,7 +151,7 @@ path = "plugins/ip-intel"
 id = "asn-bgp"
 name = "ASN & BGP explorer"
 description = "Autonomous systems: holder, announced prefixes, upstream and downstream neighbours, route history and BGP state, PeeringDB and RIPE Atlas counts."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/asn-bgp"
 
 [[plugin]]
@@ -214,28 +214,28 @@ path = "plugins/media-verify"
 id = "case-notebook"
 name = "Case notebook"
 description = "Investigation cases with Markdown notes, a dated timeline and a tamper-evident evidence log; other plugins can pin results into a case."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/case-notebook"
 
 [[plugin]]
 id = "link-graph"
 name = "Link graph"
 description = "Maltego-style entity graph for domains, IPs, ASNs, organisations, vessels, aircraft, places and more. No person, username, email or phone nodes."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/link-graph"
 
 [[plugin]]
 id = "ais-vessels"
 name = "Vessels (AIS)"
 description = "Live ship positions and particulars by MMSI, IMO or name: Finland's Digitraffic AIS (Baltic) with no key, optional AISStream.io worldwide feed and Global Fishing Watch events. Vessels as objects only."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/ais-vessels"
 
 [[plugin]]
 id = "rail-live"
 name = "Trains (live)"
 description = "Live train positions and station boards from Finland (Digitraffic) and Norway (Entur), with an OpenRailwayMap track overlay. Trains as objects only."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/rail-live"
 
 [[plugin]]
@@ -256,21 +256,21 @@ path = "plugins/maritime-notices"
 id = "sec-edgar"
 name = "SEC filings"
 description = "US-listed companies at SEC EDGAR: profile, filing timeline, annual XBRL figures and subsidiary-list links."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/sec-edgar"
 
 [[plugin]]
 id = "sanctions-screen"
 name = "Sanctions screening"
 description = "Fuzzy name search over official sanctions lists (OFAC, EU, UN, UK, US CSL, SECO, BIS) for companies, vessels and aircraft."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/sanctions-screen"
 
 [[plugin]]
 id = "offshore-leaks"
 name = "Offshore Leaks"
 description = "Search ICIJ's Offshore Leaks database for companies, trusts and foundations: jurisdiction, status, source leak and a map. No individuals."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/offshore-leaks"
 
 [[plugin]]
@@ -291,56 +291,56 @@ path = "plugins/money-trail"
 id = "cve-watch"
 name = "Vulnerability watch"
 description = "CVE lookup merged from NVD, CISA KEV, EPSS, MITRE and OSV/GitHub advisories, with a recent-KEV feed, search and a product watchlist."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/cve-watch"
 
 [[plugin]]
 id = "threat-feeds"
 name = "Threat feeds"
 description = "Is this IP, network, domain, URL or hash on an open blocklist (Feodo, Spamhaus DROP, IPsum, Tor exits, OpenPhish, abuse.ch)? Shows since when and how fresh each feed is."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/threat-feeds"
 
 [[plugin]]
 id = "ioc-lookup"
 name = "IOC reputation lookup"
 description = "One IP, domain, URL or hash fanned out to urlscan, OTX, GreyNoise, mnemonic passive DNS, InternetDB and (with keys) VirusTotal and AbuseIPDB, one verdict per source."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/ioc-lookup"
 
 [[plugin]]
 id = "cidr-exposure"
 name = "Netblock exposure"
 description = "Passive exposure summary for a small IPv4 block (up to /22): open ports, products, CVEs and hostnames per address from Shodan InternetDB, as a heatmap. Sends nothing to the targets."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/cidr-exposure"
 
 [[plugin]]
 id = "site-fingerprint"
 name = "Site fingerprint"
 description = "Fingerprint one URL: redirect chain, server and technology hints, security-header scorecard, cookie flags, robots and sitemap, favicon hash and TLS certificate chain."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/site-fingerprint"
 
 [[plugin]]
 id = "sun-shadow"
 name = "Sun & shadow check"
 description = "Sun azimuth and altitude, shadow length and direction, time of day from a shadow, candidate locations from a shadow (ShadowFinder-style) and a weather cross-check."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/sun-shadow"
 
 [[plugin]]
 id = "osm-query"
 name = "OSM feature finder"
 description = "Find OpenStreetMap features (towers, bridges, rail crossings, fuel stations, military sites) by radius or box, with raw Overpass QL, geocoding, reverse geocoding and recent edits and notes for an area."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/osm-query"
 
 [[plugin]]
 id = "terrain-view"
 name = "Terrain & horizon"
 description = "Elevation at a point, elevation profile, line of sight with Earth curvature, horizon silhouette and a visible-from-here map, from decoded Terrarium elevation tiles."
-version = "0.1.0"
+version = "0.1.1"
 path = "plugins/terrain-view"
 
 [[plugin]]

@@ -3,7 +3,7 @@ name = "Link graph"
 description = "Maltego-style entity graph for domains, IPs, ASNs, organisations, vessels, aircraft, places and more. No person, username, email or phone nodes."
 grid = "Investigation"
 port = 8164
-version = "0.1.0"
+version = "0.1.1"
 provides = ["link-graph"]
 
 [service]

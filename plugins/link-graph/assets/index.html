@@ -12,7 +12,7 @@
     html, body { height: 100%; }
     body { display: flex; flex-direction: column; }
     .bar2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px var(--gutter); background: var(--surface); border-bottom: 1px solid var(--edge); }
-    .bar2 select { max-width: 220px; }
+    .bar2 select { max-width: min(320px, 100%); }
     .bar2 .grow { flex: 1 1 0; }
     .work { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
     .stage { position: relative; min-height: 360px; background: var(--bg); overflow: hidden; touch-action: none; }
@@ -29,7 +29,7 @@
     .zoom .btn { min-width: 36px; padding: 0; }
     .empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; pointer-events: none; }
     .empty .state { pointer-events: auto; max-width: 420px; background: var(--surface); }
-    .menu { position: fixed; z-index: 2000; min-width: 200px; max-width: calc(100vw - 16px); background: var(--surface); border: 1px solid var(--edge-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-float); padding: 4px; }
+    .menu { position: fixed; z-index: 2000; max-height: calc(100vh - 16px); overflow-y: auto; min-width: 200px; max-width: calc(100vw - 16px); background: var(--surface); border: 1px solid var(--edge-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-float); padding: 4px; }
     .menu button { display: block; width: 100%; text-align: left; padding: 8px 10px; min-height: 36px; border: 0; background: none; color: var(--ink); font: inherit; font-size: var(--fs-md); border-radius: 4px; cursor: pointer; }
     .menu button:hover:not(:disabled) { background: var(--surface-2); }
     .menu button:disabled { color: var(--ink-3); cursor: not-allowed; }
@@ -37,6 +37,7 @@
     .edge-row { display: flex; gap: 6px; align-items: center; justify-content: space-between; font-size: var(--fs-sm); padding: 4px 0; border-top: 1px solid var(--edge); overflow-wrap: anywhere; }
     .banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; }
     .hide { display: none !important; }
+    @media (max-width: 600px) { .hint-over .legend { display: none; } }
     @media (max-width: 860px) {
       .work { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(300px, 1fr) auto; overflow: auto; }
       .side { border-left: 0; border-top: 1px solid var(--edge); max-height: 55vh; }
@@ -81,7 +82,7 @@
   <script>
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 4500); }
+    function toast(msg, kind, sticky) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); if (!sticky) setTimeout(() => t.remove(), 4500); return t; }
     async function api(path, method = 'GET', body) {
       const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
       const d = await r.json().catch(() => ({}));
@@ -145,7 +146,8 @@
     function closeMenu() { menuEl?.remove(); menuEl = null; }
     function showMenu(x, y, items, title) {
       closeMenu(); const m = document.createElement('div'); m.className = 'menu'; m.setAttribute('role', 'menu');
-      m.innerHTML = (title ? `<div class="hd">${esc(title)}</div>` : '') + items.map((it, i) => `<button role="menuitem" data-i="${i}" ${it.disabled ? 'disabled' : ''}>${esc(it.label)}</button>`).join('');
+      m.innerHTML = (title ? `<div class="hd">${esc(title)}</div>` : '') + items.map((it, i) => it.rule ? '<hr style="margin:4px 0">' : `<button role="menuitem" data-i="${i}" ${it.disabled ? 'disabled' : ''}>${esc(it.label)}</button>`).join('');
+      m.onkeydown = e => { const bs = [...m.querySelectorAll('button:not(:disabled)')], i = bs.indexOf(document.activeElement); const k = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: bs.length - 1 }[e.key]; if (k !== undefined && bs.length) { e.preventDefault(); bs[(k + bs.length) % bs.length].focus(); } };
       document.body.appendChild(m); const r = m.getBoundingClientRect();
       m.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px'; m.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
       m.querySelectorAll('button').forEach(b => b.onclick = () => { closeMenu(); items[+b.dataset.i].run(); }); menuEl = m; m.querySelector('button:not(:disabled)')?.focus();
@@ -173,9 +175,9 @@
       } })), 'Import evidence URLs and hashes from');
     };
 
-    async function mergeNodes(nodes, edges, source, near) {
+    async function mergeNodes(nodes, edges, source, near, lenient) {
       if (dirty) await save();
-      const d = await api(`api/graphs/${gid}/merge`, 'POST', { nodes, edges, source });
+      const d = await api(`api/graphs/${gid}/merge`, 'POST', { nodes, edges, source, skip_invalid: !!lenient });
       const old = Object.fromEntries(G.nodes.map(n => [n.id, n])); G = d.graph;
       let i = 0; for (const n of G.nodes) { const o = old[n.id]; if (o) { n.x = o.x; n.y = o.y; n.pinned = o.pinned; } else { const a = Math.random() * 6.28, r = 60 + (i++ % 8) * 6; n.x = (near?.x || 0) + Math.cos(a) * r; n.y = (near?.y || 0) + Math.sin(a) * r; } }
       kick(1); updEmpty(); renderInsp(); draw(); changed(); return d;
@@ -222,7 +224,7 @@
       for (const e of G.edges) { const a = idx.get(e.from), b = idx.get(e.to); if (!a || !b) continue; const [x1, y1] = toScreen(a.x, a.y), [x2, y2] = toScreen(b.x, b.y); const hot = sel && (e.from === sel || e.to === sel);
         ctx.strokeStyle = hot ? acc : edge; ctx.lineWidth = hot ? 2 : 1.3; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
         const ang = Math.atan2(y2 - y1, x2 - x1), ex = x2 - Math.cos(ang) * (r + 3), ey = y2 - Math.sin(ang) * (r + 3); ctx.fillStyle = hot ? acc : edge; ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(ang - .45) * 7, ey - Math.sin(ang - .45) * 7); ctx.lineTo(ex - Math.cos(ang + .45) * 7, ey - Math.sin(ang + .45) * 7); ctx.fill();
-        if (e.label && view.k > .55) { ctx.fillStyle = ink2; ctx.fillText(e.label, (x1 + x2) / 2, (y1 + y2) / 2 - 3); } }
+        if (e.label && (G.edges.length < 30 ? view.k > .55 : (view.k > 1.4 || e.from === sel || e.to === sel))) { ctx.fillStyle = ink2; ctx.fillText(e.label, (x1 + x2) / 2, (y1 + y2) / 2 - 3); } }
       for (const n of G.nodes) { const [x, y] = toScreen(n.x, n.y); if (x < -40 || y < -40 || x > w + 40 || y > h + 40) continue;
         if (n.group) { shape(n, r + 5); ctx.strokeStyle = groupColor(n.group); ctx.lineWidth = 3; ctx.stroke(); }
         shape(n, r); ctx.fillStyle = TYPES[n.type][0]; ctx.fill(); ctx.lineWidth = n.id === sel ? 3 : 1.5; ctx.strokeStyle = n.id === sel ? acc : surf; ctx.stroke();
@@ -293,30 +295,110 @@
       el.querySelectorAll('[data-de]').forEach(b => b.onclick = () => { G.edges = G.edges.filter(x => x.id !== b.dataset.de); changed(); renderInsp(); draw(); });
     }
 
-    // ---- transforms: call sibling plugins in the browser; unavailable ones are shown disabled ----
-    const have = {}; const probe = async p => (have[p] ??= fetch(`/p/${p}/tools`).then(r => r.ok).catch(() => false));
-    const cap = (a, n) => a.slice(0, n);
+    // ---- transforms: call sibling plugins in the browser (with the signed-in user's own session) ----
+    // Each transform names the plugin it needs; one that is not installed shows disabled with a plain message.
+    // The server drops nodes that fail validation (skip_invalid), so messy upstream data cannot break a run.
+    const have = {}; const probe = p => { const h = have[p]; if (h && Date.now() - h.t < 30000) return h.v; const v = fetch(`/p/${p}/tools`).then(r => r.ok).catch(() => false); have[p] = { t: Date.now(), v }; return v; };
+    const cap = (a, n) => (a || []).slice(0, n);
     const domOf = s => String(s || '').replace(/\.$/, '').toLowerCase().split(/\s+/).pop();
+    const enc = encodeURIComponent;
+    // Collects the nodes and links one transform found; every new node is linked to the node it was run on.
+    function collect(n) {
+      const nodes = [], edges = [], seen = new Set();
+      return { nodes, edges, add(type, label, rel, rev) {
+        label = String(label ?? '').trim(); if (!label) return;
+        const k = type + '|' + label.toLowerCase(); if (seen.has(k)) return; seen.add(k);
+        const id = 'x' + nodes.length; nodes.push({ id, type, label });
+        edges.push({ id: 'y' + edges.length, from: rev ? id : n.id, to: rev ? n.id : id, label: rel }); } };
+    }
+    const orgName = s => { const t = String(s || '').trim(); const m = t.match(/^[A-Z0-9-]+ - (.+)$/); return (m ? m[1] : t).trim(); };
+    const vesselId = n => { const l = n.label; const m = l.match(/\b(\d{9})\b/) || l.match(/IMO\s*[:#]?\s*(\d{7})\b/i) || l.match(/^(\d{7})$/); if (!m) throw new Error('Put the MMSI (9 digits) or IMO (7 digits) in the vessel label, for example "VIKING GRACE (MMSI 230629000)".'); return m[1]; };
+    const aircraftKey = n => { const l = n.label.trim(); const hex = l.match(/\b([0-9a-f]{6})\b/i); const reg = l.match(/\b([A-Z0-9]{1,3}-?[A-Z0-9]{2,5})\b/); return /^[0-9a-f]{6}$/i.test(l) ? { hex: l.toLowerCase() } : reg ? { reg: reg[1] } : hex ? { hex: hex[1].toLowerCase() } : (() => { throw new Error('Use the registration (N628TS) or the ICAO hex (a835af) as the label.'); })(); };
+    const feedHits = (d, c) => { for (const f of d.feeds || []) if (f.status === 'hit') c.add('event', 'Listed on ' + f.name, 'listed on'); };
+    const iocHits = (d, c) => { for (const r of d.rows || []) if (r.status === 'hit') c.add('event', `${r.name}: ${r.summary}`.slice(0, 160), 'reported by'); };
+    const sanctions = (rows, c) => { for (const r of cap((rows || []).filter(r => r.score >= 0.9), 8)) c.add('event', `Sanctions: ${r.list_name || r.list} - ${r.name}`.slice(0, 200), 'sanctions match'); };
+
     const TRANSFORMS = [
-      { plugin: 'lookup', label: 'Resolve DNS records', types: ['domain'], run: async n => { const d = await get(`/p/lookup/api/lookup?q=${encodeURIComponent(n.label)}`); const nodes = [], edges = [];
-        for (const [t, rows] of Object.entries(d.dns || {})) for (const r of rows) { const v = domOf(r.data); if (t === 'A' || t === 'AAAA') { nodes.push({ id: 'x' + nodes.length, type: 'ip', label: r.data }); edges.push({ id: 'y' + edges.length, from: n.id, to: 'x' + (nodes.length - 1), label: t }); }
-          else if (t === 'NS' || t === 'MX' || t === 'CNAME') { nodes.push({ id: 'x' + nodes.length, type: 'domain', label: v }); edges.push({ id: 'y' + edges.length, from: n.id, to: 'x' + (nodes.length - 1), label: t }); } }
-        return { nodes: cap(nodes, 40), edges: cap(edges, 40) }; } },
-      { plugin: 'lookup', label: 'Names on certificates (CT logs)', types: ['domain'], run: async n => { const d = await get(`/p/lookup/api/certs?name=${encodeURIComponent(n.label)}`); const names = cap([...new Set(d.names || [])].filter(x => x && !x.includes('*') && x !== n.label), 40);
-        return { nodes: names.map((x, i) => ({ id: 'x' + i, type: 'domain', label: x })), edges: names.map((x, i) => ({ id: 'y' + i, from: n.id, to: 'x' + i, label: 'cert name' })) }; } },
-      { plugin: 'lookup', label: 'Reverse DNS (PTR)', types: ['ip'], run: async n => { const d = await get(`/p/lookup/api/lookup?q=${encodeURIComponent(n.label)}`); const ptr = [].concat(d.ptr || []).map(domOf).filter(Boolean);
-        return { nodes: ptr.map((x, i) => ({ id: 'x' + i, type: 'domain', label: x })), edges: ptr.map((x, i) => ({ id: 'y' + i, from: n.id, to: 'x' + i, label: 'PTR' })) }; } },
-      { plugin: 'web-archive', label: 'URLs the Internet Archive knows', types: ['domain'], run: async n => { const d = await get(`/p/web-archive/api/urls?domain=${encodeURIComponent(n.label)}&limit=60`); const us = cap(d.urls || [], 30);
-        return { nodes: us.map((u, i) => ({ id: 'x' + i, type: 'url', label: u.url })), edges: us.map((u, i) => ({ id: 'y' + i, from: n.id, to: 'x' + i, label: 'archived URL' })) }; } },
+      // domain
+      { plugin: 'lookup', label: 'Resolve DNS records', types: ['domain'], run: async n => { const d = await get(`/p/lookup/api/lookup?q=${enc(n.label)}`); const c = collect(n);
+        for (const [t, rows] of Object.entries(d.dns || {})) for (const r of rows) { if (t === 'A' || t === 'AAAA') c.add('ip', r.data, t); else if (t === 'NS' || t === 'MX' || t === 'CNAME') c.add('domain', domOf(r.data), t); }
+        return c; } },
+      { plugin: 'lookup', label: 'Names on certificates (CT logs)', types: ['domain'], run: async n => { const d = await get(`/p/lookup/api/certs?name=${enc(n.label)}`); const c = collect(n);
+        for (const x of cap([...new Set(d.names || [])].filter(x => x && !x.includes('*') && x !== n.label), 40)) c.add('domain', x, 'cert name'); return c; } },
+      { plugin: 'subdomain-enum', label: 'Find subdomains (passive, many sources)', types: ['domain'], run: async n => { const d = await get(`/p/subdomain-enum/api/find?domain=${enc(n.label)}`); const c = collect(n);
+        for (const x of cap((d.names || []).map(x => x.name).filter(x => x && !x.includes('*') && x !== n.label), 60)) c.add('domain', x, 'subdomain'); return c; } },
+      { plugin: 'ip-intel', label: 'Hosting: IPs and network owner', types: ['domain'], run: async n => { const d = await get(`/p/ip-intel/api/overview?q=${enc(n.label)}`); const c = collect(n);
+        for (const ip of cap(d.host?.ips, 8)) c.add('ip', ip, 'resolves to'); for (const a of d.owner?.asns || []) c.add('asn', 'AS' + a.asn, 'hosted on'); return c; } },
+      { plugin: 'domain-hygiene', label: 'Name servers and mail hosts (DNS over HTTPS)', types: ['domain'], run: async n => { const d = await get(`/p/domain-hygiene/api/records?name=${enc(n.label)}&types=NS,MX`); const c = collect(n);
+        for (const [t, v] of Object.entries(d.records || {})) for (const a of v.answers || []) c.add('domain', domOf(a.data), t); return c; } },
+      { plugin: 'web-archive', label: 'URLs the Internet Archive knows', types: ['domain'], run: async n => { const d = await get(`/p/web-archive/api/urls?domain=${enc(n.label)}&limit=60`); const c = collect(n);
+        for (const u of cap(d.urls, 30)) c.add('url', u.url, 'archived URL'); return c; } },
+      // ip
+      { plugin: 'lookup', label: 'Reverse DNS (PTR)', types: ['ip'], run: async n => { const d = await get(`/p/lookup/api/lookup?q=${enc(n.label)}`); const c = collect(n);
+        for (const x of [].concat(d.ptr || []).map(domOf).filter(Boolean)) c.add('domain', x, 'PTR'); return c; } },
+      { plugin: 'ip-intel', label: 'Network owner (ASN) and hostnames', types: ['ip'], run: async n => { const d = await get(`/p/ip-intel/api/overview?q=${enc(n.label)}`); const c = collect(n);
+        for (const a of d.owner?.asns || []) c.add('asn', 'AS' + a.asn, 'announced by'); for (const h of cap(d.exposure?.hostnames, 15)) c.add('domain', h, 'hostname'); return c; } },
+      { plugin: 'ip-intel', label: 'Known vulnerabilities on this IP (Shodan InternetDB)', types: ['ip'], run: async n => { const d = await get(`/p/ip-intel/api/exposure?ip=${enc(n.label)}`); const c = collect(n);
+        for (const v of cap(d.exposure?.vulns, 20)) c.add('event', v, 'exposed to'); return c; } },
+      // asn
+      { plugin: 'asn-bgp', label: 'Holder organisation', types: ['asn'], run: async n => { const d = await get(`/p/asn-bgp/api/overview?q=${enc(n.label)}`); const c = collect(n); if (d.holder) c.add('organisation', orgName(d.holder), 'held by'); return c; } },
+      { plugin: 'asn-bgp', label: 'BGP neighbours (upstream and downstream)', types: ['asn'], run: async n => { const d = await get(`/p/asn-bgp/api/neighbours?asn=${enc(n.label)}`); const c = collect(n);
+        for (const x of cap(d.neighbours?.upstream, 12)) c.add('asn', 'AS' + x.asn, 'upstream of', true); for (const x of cap(d.neighbours?.downstream, 12)) c.add('asn', 'AS' + x.asn, 'upstream of'); return c; } },
+      // organisation
+      { plugin: 'corp-registries', label: 'Matching legal entities (GLEIF)', types: ['organisation'], run: async n => { const d = await get(`/p/corp-registries/api/search?q=${enc(n.label)}&sources=gleif`); const c = collect(n);
+        for (const it of cap(d.sources?.[0]?.items, 8)) c.add('organisation', it.name, 'GLEIF match' + (it.country ? ' (' + it.country + ')' : '')); return c; } },
+      { plugin: 'corp-registries', label: 'Parents and subsidiaries (GLEIF, Wikidata)', types: ['organisation'], run: async n => {
+        const s = await get(`/p/corp-registries/api/search?q=${enc(n.label)}&sources=gleif`); const items = s.sources?.[0]?.items || [];
+        const it = items.find(i => i.name.toLowerCase() === n.label.toLowerCase()) || items[0]; if (!it) throw new Error('No legal entity with that name in GLEIF');
+        const d = await get(`/p/corp-registries/api/ownership?lei=${enc(it.id)}`); const c = collect(n), g = d.gleif || {};
+        for (const k of ['direct_parent', 'ultimate_parent']) { const p = g[k]?.parent; if (p?.name) c.add('organisation', p.name, k === 'direct_parent' ? 'direct parent' : 'ultimate parent', true); }
+        for (const x of cap(g.children, 25)) c.add('organisation', x.name, 'subsidiary');
+        for (const x of cap(d.wikidata?.parent_organisations, 8)) c.add('organisation', x.name, 'parent (Wikidata)', true);
+        for (const x of cap(d.wikidata?.subsidiaries, 15)) c.add('organisation', x.name, 'subsidiary (Wikidata)'); return c; } },
+      { plugin: 'offshore-leaks', label: 'Offshore Leaks entities with this name', types: ['organisation'], run: async n => { const d = await get(`/p/offshore-leaks/api/search?q=${enc(n.label)}`); const c = collect(n);
+        for (const r of cap((d.results || []).filter(r => r.kind === 'entity'), 10)) c.add('organisation', r.name, 'ICIJ: ' + (r.leak || 'Offshore Leaks')); return c; } },
+      { plugin: 'sanctions-screen', label: 'Screen against sanctions lists', types: ['organisation', 'vessel', 'aircraft'], run: async n => { const q = n.type === 'vessel' ? n.label.replace(/\(.*?\)/g, '').trim() : n.label; const d = await get(`/p/sanctions-screen/api/search?q=${enc(q)}`); const c = collect(n); sanctions(d.results, c); return c; } },
+      { plugin: 'sec-edgar', label: 'Recent SEC filings (needs SEC_CONTACT)', types: ['organisation'], run: async n => {
+        const co = await get(`/p/sec-edgar/api/company?q=${enc(n.label)}`); const cik = co.company?.cik; if (!cik) throw new Error('Not found at SEC EDGAR');
+        const d = await get(`/p/sec-edgar/api/filings?cik=${enc(cik)}&form=annual,current&limit=10`); const c = collect(n);
+        for (const f of cap(d.filings, 10)) c.add('document', `${f.form} ${f.filed} ${d.name || n.label}`.slice(0, 200), 'filed'); return c; } },
+      // vessel
+      { plugin: 'sanctions-screen', label: 'Check IMO/MMSI against sanctions lists', types: ['vessel'], run: async n => { const id = vesselId(n); const d = await get(`/p/sanctions-screen/api/identifier?${id.length === 7 ? 'imo' : 'mmsi'}=${id}`); const c = collect(n);
+        for (const m of cap(d.matches, 5)) c.add('event', `Sanctions: ${m.list_name || m.list} - ${m.name}`.slice(0, 200), 'sanctions match'); return c; } },
+      { plugin: 'ais-vessels', label: 'Last known AIS position', types: ['vessel'], run: async n => { const d = await get(`/p/ais-vessels/api/vessel/${vesselId(n)}`); const c = collect(n); const p = d.position;
+        if (p && isFinite(p.lat) && isFinite(p.lon)) c.add('place', `${(+p.lat).toFixed(4)}, ${(+p.lon).toFixed(4)}`, 'last seen'); return c; } },
+      // aircraft
+      { plugin: 'aircraft-registry', label: 'Registration, owner and country', types: ['aircraft'], run: async n => { const k = aircraftKey(n); const d = await get(k.hex ? `/p/aircraft-registry/api/hex/${k.hex}` : `/p/aircraft-registry/api/reg/${enc(k.reg)}`); const c = collect(n);
+        if (d.registration && d.registration.toLowerCase() !== n.label.toLowerCase()) c.add('aircraft', d.registration, 'registration'); if (d.hex && d.hex !== n.label.toLowerCase()) c.add('aircraft', d.hex, 'ICAO hex');
+        if (d.owner?.kind === 'organisation' && d.owner.name) c.add('organisation', d.owner.name, 'registered owner'); if (d.country?.name) c.add('place', d.country.name, 'registered in'); return c; } },
+      { plugin: 'aircraft-registry', label: 'Usual route for a callsign', types: ['aircraft'], run: async n => { if (!/^[A-Z]{3}\d/i.test(n.label.trim())) throw new Error('Label this node with a callsign such as UAL123.'); const d = await get(`/p/aircraft-registry/api/callsign/${enc(n.label.trim())}`); const c = collect(n);
+        if (d.origin?.name) c.add('place', d.origin.name, 'usually departs'); if (d.destination?.name) c.add('place', d.destination.name, 'usually arrives'); return c; } },
+      { plugin: 'sanctions-screen', label: 'Check registration against sanctions lists', types: ['aircraft'], run: async n => { const k = aircraftKey(n); if (!k.reg) throw new Error('Needs a registration (tail number) label.'); const d = await get(`/p/sanctions-screen/api/identifier?reg=${enc(k.reg)}`); const c = collect(n);
+        for (const m of cap(d.matches, 5)) c.add('event', `Sanctions: ${m.list_name || m.list} - ${m.name}`.slice(0, 200), 'sanctions match'); return c; } },
+      // indicators
+      { plugin: 'threat-feeds', label: 'Check threat feeds (listings)', types: ['domain', 'ip', 'url', 'hash'], run: async n => { const d = await get(`/p/threat-feeds/api/check?q=${enc(n.label)}`); const c = collect(n); feedHits(d, c); return c; } },
+      { plugin: 'ioc-lookup', label: 'Reputation sources (hits only)', types: ['domain', 'ip', 'url', 'hash'], run: async n => { const d = await get(`/p/ioc-lookup/api/lookup?q=${enc(n.label)}`); const c = collect(n); iocHits(d, c); return c; } },
+      // vulnerabilities
+      { plugin: 'cve-watch', label: 'CVE: KEV listing, advisories, vendor', types: ['event'], run: async n => { const id = (n.label.match(/\bCVE-\d{4}-\d{4,}\b/i) || [])[0]; if (!id) throw new Error('Only event nodes whose label contains a CVE id (CVE-2021-44228) can use this.'); const d = await get(`/p/cve-watch/api/cve?id=${enc(id.toUpperCase())}`); const c = collect(n);
+        if (d.kev?.listed) c.add('document', `CISA KEV: ${d.kev.name || id}`.slice(0, 200), 'known exploited'); for (const g of cap(d.ghsa, 5)) c.add('document', `${g.id}: ${g.summary || ''}`.slice(0, 200), 'advisory');
+        for (const a of cap(d.mitre?.affected, 3)) if (a.vendor) c.add('organisation', a.vendor, 'affected vendor'); return c; } },
     ];
-    async function get(u) { const r = await fetch(u), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status); return d; }
+    async function get(u) { const r = await fetch(u), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || (r.status === 404 ? 'that plugin is not installed or does not have this feature' : 'HTTP ' + r.status)); return d; }
+    async function runTransform(t, n) {
+      const tid = toast('Running: ' + t.label, '', true);
+      try {
+        const r = await t.run(n); tid.remove();
+        if (!r.nodes.length) return toast('Nothing found', 'warn');
+        const d = await mergeNodes([{ id: n.id, type: n.type, label: n.label }, ...r.nodes], r.edges, 'transform:' + t.plugin, n, true);
+        toast(d.added_nodes || d.added_edges ? `Added ${d.added_nodes} node${d.added_nodes === 1 ? '' : 's'}, ${d.added_edges} link${d.added_edges === 1 ? '' : 's'}${d.skipped ? ` (${d.skipped} unusable items skipped)` : ''}` : 'Everything it found is already in the graph', d.added_nodes || d.added_edges ? '' : 'warn');
+      } catch (e) { tid.remove(); toast('Transform failed: ' + e.message, 'err'); }
+    }
     async function nodeMenu(n, x, y) {
       sel = n.id; renderInsp(); draw();
       const ts = TRANSFORMS.filter(t => t.types.includes(n.type)); const avail = await Promise.all(ts.map(t => probe(t.plugin)));
-      const items = ts.map((t, i) => ({ label: avail[i] ? t.label : `${t.label} (needs ${t.plugin})`, disabled: !avail[i], run: async () => {
-        try { toast('Running: ' + t.label); const r = await t.run(n); if (!r.nodes.length) return toast('Nothing found', 'warn'); const d = await mergeNodes([{ id: n.id, type: n.type, label: n.label }, ...r.nodes], r.edges, 'transform:' + t.plugin, n); toast(`Added ${d.added_nodes} nodes, ${d.added_edges} links`); } catch (e) { toast('Transform failed: ' + e.message, 'err'); } } }));
+      const items = ts.map((t, i) => ({ label: avail[i] ? t.label : `${t.label} (plugin "${t.plugin}" not installed)`, disabled: !avail[i], run: () => runTransform(t, n) }));
       if (!items.length) items.push({ label: 'No transforms for this type yet', disabled: true, run() {} });
-      items.push({ label: 'Link to…', run: () => { linkFrom = n.id; renderInsp(); draw(); toast('Click the node to link to'); } }, { label: n.pinned ? 'Unpin' : 'Pin in place', run: () => { n.pinned = !n.pinned; changed(); renderInsp(); draw(); } }, { label: 'Remove', run: () => delNode(n) });
+      items.push({ rule: true }, { label: 'Link to…', run: () => { linkFrom = n.id; renderInsp(); draw(); toast('Click the node to link to'); } }, { label: n.pinned ? 'Unpin' : 'Pin in place', run: () => { n.pinned = !n.pinned; changed(); renderInsp(); draw(); } }, { label: 'Remove', run: () => delNode(n) });
       showMenu(x, y, items, n.label);
     }
 

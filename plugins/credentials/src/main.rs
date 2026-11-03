@@ -128,8 +128,17 @@ async fn put(method: Method, uri: Uri, headers: HeaderMap, Path(name): Path<Stri
         return unauthorized();
     }
     let value = body.value.trim().to_string();
-    if !valid_name(&name) || value.is_empty() || value.len() > 4096 || value.chars().any(char::is_control) {
-        return error(StatusCode::BAD_REQUEST, "name must be A-Z, 0-9, _ (max 64); value 1-4096 printable characters");
+    if !valid_name(&name) {
+        return error(StatusCode::BAD_REQUEST, "the name must be capital letters, digits and underscores (at most 64 characters)");
+    }
+    if value.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "the value is empty");
+    }
+    if value.len() > 4096 {
+        return error(StatusCode::BAD_REQUEST, "the value is too long (limit 4096 characters)");
+    }
+    if value.chars().any(char::is_control) {
+        return error(StatusCode::BAD_REQUEST, "the value contains line breaks or control characters; paste it as a single line (JSON key files are compacted automatically with From file)");
     }
     let _guard = WRITE_LOCK.lock().unwrap();
     let mut map = load();

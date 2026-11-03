@@ -3,7 +3,7 @@ name = "Case notebook"
 description = "Investigation cases with Markdown notes, a dated timeline and a tamper-evident evidence log; other plugins can pin results into a case."
 grid = "Investigation"
 port = 8163
-version = "0.1.0"
+version = "0.1.1"
 provides = ["case-notebook"]
 
 [service]

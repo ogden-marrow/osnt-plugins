@@ -3,7 +3,7 @@ name = "Packages"
 description = "Package repositories, and which of their plugins are installed on this hub."
 grid = "System"
 port = 8111
-version = "0.2.0"
+version = "0.2.2"
 
 [service]
 state_dir = true

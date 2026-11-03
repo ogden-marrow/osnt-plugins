@@ -205,12 +205,22 @@ pub fn validate(g: &mut Graph) -> Result<(), String> {
 }
 
 /// Merge validated additions into a graph (used by transforms and imports): nodes are matched by type and label,
-/// edges by endpoints and label. `adds` uses client ids that are remapped. Returns (nodes added, edges added).
-pub fn merge(g: &mut Graph, nodes: Vec<Node>, edges: Vec<Edge>, source: &str) -> Result<(usize, usize), String> {
+/// edges by endpoints and label. Client ids are remapped.
+/// Add nodes and edges to a graph, reusing existing nodes. With `skip_invalid` a node whose type or label fails validation (and any edge touching it) is
+/// dropped and counted instead of failing the whole request. Transforms use it: upstream data is messy.
+/// Returns (added nodes, added edges, skipped nodes and edges).
+pub fn merge_opt(g: &mut Graph, nodes: Vec<Node>, edges: Vec<Edge>, source: &str, skip_invalid: bool) -> Result<(usize, usize, usize), String> {
     let mut map: BTreeMap<String, String> = BTreeMap::new();
-    let (mut an, mut ae) = (0, 0);
+    let (mut an, mut ae, mut skipped) = (0, 0, 0);
     for mut n in nodes {
-        n.label = check_node(&n.kind, &n.label)?;
+        n.label = match check_node(&n.kind, &n.label) {
+            Ok(l) => l,
+            Err(_) if skip_invalid => {
+                skipped += 1;
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         let existing = g.nodes.iter().find(|x| x.kind == n.kind && x.label == n.label).map(|x| x.id.clone());
         let id = match existing {
             Some(id) => id,
@@ -227,7 +237,13 @@ pub fn merge(g: &mut Graph, nodes: Vec<Node>, edges: Vec<Edge>, source: &str) ->
         map.insert(n.id, id);
     }
     for e in edges {
-        let (Some(f), Some(t)) = (map.get(&e.from).cloned().or_else(|| g.nodes.iter().find(|n| n.id == e.from).map(|n| n.id.clone())), map.get(&e.to).cloned().or_else(|| g.nodes.iter().find(|n| n.id == e.to).map(|n| n.id.clone()))) else { return Err("an edge refers to a node that is not in the request".into()) };
+        let (Some(f), Some(t)) = (map.get(&e.from).cloned().or_else(|| g.nodes.iter().find(|n| n.id == e.from).map(|n| n.id.clone())), map.get(&e.to).cloned().or_else(|| g.nodes.iter().find(|n| n.id == e.to).map(|n| n.id.clone()))) else {
+            if skip_invalid {
+                skipped += 1;
+                continue;
+            }
+            return Err("an edge refers to a node that is not in the request".into());
+        };
         let label = short("edge label", &e.label, 80)?;
         if f == t || g.edges.iter().any(|x| x.from == f && x.to == t && x.label == label) {
             continue;
@@ -239,7 +255,7 @@ pub fn merge(g: &mut Graph, nodes: Vec<Node>, edges: Vec<Edge>, source: &str) ->
         ae += 1;
     }
     g.updated = now_iso();
-    Ok((an, ae))
+    Ok((an, ae, skipped))
 }
 
 pub struct Store {
