@@ -83,3 +83,10 @@ name = "YouTube to MP3"
 description = "Paste a YouTube link, optionally trim it, and download an MP3."
 version = "0.1.0"
 path = "plugins/yt-mp3"
+
+[[plugin]]
+id = "adsb-history"
+name = "Aircraft history (ADS-B)"
+description = "Pull just the window you need out of adsb.lol's daily global ADS-B archive (time, area, ICAO hex, callsign), keep it as a short-lived slice, and serve it as an API for other plugins."
+version = "0.1.0"
+path = "plugins/adsb-history"

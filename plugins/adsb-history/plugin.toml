@@ -1,0 +1,18 @@
+id = "adsb-history"
+name = "Aircraft history (ADS-B)"
+description = "Pull just the window you need out of adsb.lol's daily global ADS-B archive (time, area, ICAO hex, callsign), keep it as a short-lived slice, and serve it as an API for other plugins."
+grid = "Air & Sea"
+port = 8120
+version = "0.1.0"
+provides = ["adsb-history"]
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_ADSB_HISTORY_BIND = "127.0.0.1:{port}"
+OSNT_ADSB_HISTORY_STATE = "{state_dir}"
+# Slices expire this many hours after last use; the whole cache is capped (MB); one job may download at most this many MB.
+OSNT_ADSB_HISTORY_TTL_HOURS = "6"
+OSNT_ADSB_HISTORY_CACHE_MB = "300"
+OSNT_ADSB_HISTORY_MAX_DOWNLOAD_MB = "400"
