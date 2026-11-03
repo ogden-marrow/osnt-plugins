@@ -1,0 +1,14 @@
+id = "case-notebook"
+name = "Case notebook"
+description = "Investigation cases with Markdown notes, a dated timeline and a tamper-evident evidence log; other plugins can pin results into a case."
+grid = "Investigation"
+port = 8163
+version = "0.1.0"
+provides = ["case-notebook"]
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_CASE_NOTEBOOK_BIND = "127.0.0.1:{port}"
+OSNT_STATE_DIR = "{state_dir}"

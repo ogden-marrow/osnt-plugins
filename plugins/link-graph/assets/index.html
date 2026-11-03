@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Link graph · OSNT</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    html, body { height: 100%; }
+    body { display: flex; flex-direction: column; }
+    .bar2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px var(--gutter); background: var(--surface); border-bottom: 1px solid var(--edge); }
+    .bar2 select { max-width: 220px; }
+    .bar2 .grow { flex: 1 1 0; }
+    .work { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+    .stage { position: relative; min-height: 360px; background: var(--bg); overflow: hidden; touch-action: none; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+    canvas.dragging { cursor: grabbing; }
+    .side { border-left: 1px solid var(--edge); background: var(--surface); overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+    .side h3 { margin: 0 0 8px; }
+    .side form, .side .fld { display: grid; gap: 8px; }
+    .side input:not([type=checkbox]), .side select, .side textarea { width: 100%; }
+    .hint-over { position: absolute; left: 12px; bottom: 12px; right: 12px; pointer-events: none; display: flex; justify-content: space-between; gap: 8px; align-items: flex-end; }
+    .hint-over .legend { pointer-events: auto; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 10px; background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--edge); border-radius: var(--radius-sm); font-size: var(--fs-xs); color: var(--ink-2); max-width: 70%; }
+    .legend i { display: inline-block; width: 9px; height: 9px; margin-right: 4px; vertical-align: -1px; }
+    .zoom { pointer-events: auto; display: flex; flex-direction: column; gap: 4px; }
+    .zoom .btn { min-width: 36px; padding: 0; }
+    .empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; pointer-events: none; }
+    .empty .state { pointer-events: auto; max-width: 420px; background: var(--surface); }
+    .menu { position: fixed; z-index: 2000; min-width: 200px; max-width: calc(100vw - 16px); background: var(--surface); border: 1px solid var(--edge-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-float); padding: 4px; }
+    .menu button { display: block; width: 100%; text-align: left; padding: 8px 10px; min-height: 36px; border: 0; background: none; color: var(--ink); font: inherit; font-size: var(--fs-md); border-radius: 4px; cursor: pointer; }
+    .menu button:hover:not(:disabled) { background: var(--surface-2); }
+    .menu button:disabled { color: var(--ink-3); cursor: not-allowed; }
+    .menu .hd { padding: 6px 10px 2px; font-size: var(--fs-xs); color: var(--ink-3); }
+    .edge-row { display: flex; gap: 6px; align-items: center; justify-content: space-between; font-size: var(--fs-sm); padding: 4px 0; border-top: 1px solid var(--edge); overflow-wrap: anywhere; }
+    .banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; }
+    .hide { display: none !important; }
+    @media (max-width: 860px) {
+      .work { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(300px, 1fr) auto; overflow: auto; }
+      .side { border-left: 0; border-top: 1px solid var(--edge); max-height: 55vh; }
+      .hint-over .legend { max-width: 62%; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Link graph</h1>
+    <div class="bar-end"><span class="badge" id="saved" role="status">no graph</span></div>
+  </header>
+  <div class="bar2">
+    <label class="sr-only" for="gsel">Graph</label><select id="gsel"><option value="">No graphs yet</option></select>
+    <button class="btn sm" id="gnew">New graph</button>
+    <button class="btn sm" id="gren">Rename</button>
+    <button class="btn sm" id="gexp" aria-haspopup="menu">Export ▾</button>
+    <button class="btn sm" id="gimp">Import JSON</button><input type="file" id="gfile" accept="application/json,.json" hidden>
+    <button class="btn sm" id="gcase">From case notebook</button>
+    <span class="grow"></span>
+    <button class="btn sm" id="relayout">Re-layout</button>
+    <button class="btn sm danger" id="gdel">Delete graph</button>
+  </div>
+  <div class="work">
+    <div class="stage" id="stage">
+      <canvas id="cv" role="img" aria-label="Entity graph. Use the side panel to add and edit nodes."></canvas>
+      <div class="empty hide" id="empty"><div class="state"><div class="h3" id="emptyT">Start a graph</div><p id="emptyP">Create a graph, then add domains, IPs, ASNs, organisations, vessels, aircraft, places and more. Right-click (or long-press) a node to expand it with other plugins.</p></div></div>
+      <div class="hint-over"><div class="legend" id="legend" aria-label="Node types"></div><div class="zoom"><button class="btn sm" id="zin" aria-label="Zoom in">+</button><button class="btn sm" id="zout" aria-label="Zoom out">−</button><button class="btn sm" id="zfit" aria-label="Fit to view">⤢</button></div></div>
+    </div>
+    <aside class="side" id="side" aria-label="Inspector">
+      <section><h3 class="h3">Add node</h3>
+        <form id="addf"><label class="sr-only" for="at">Node type</label><select id="at"></select><label class="sr-only" for="al">Node value</label><input id="al" placeholder="example.com, 8.8.8.8, AS15169, …" autocomplete="off" spellcheck="false" maxlength="300"><button class="btn primary sm">Add</button></form>
+        <p class="hint">Entities only: there is no person, username, email or phone node type.</p></section>
+      <section id="insp"><h3 class="h3">Inspector</h3><p class="muted small">Select a node to edit it, link it to another node or run transforms.</p></section>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 4500); }
+    async function api(path, method = 'GET', body) {
+      const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || (r.status === 401 ? 'Sign in to the hub first' : 'HTTP ' + r.status));
+      return d;
+    }
+    const rid = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
+
+    // ---- node look: shape + colour per type (shape carries the meaning too, not colour alone) ----
+    const TYPES = {
+      domain: ['#2a78c9', 'circle'], ip: ['#1f9d7a', 'circle'], asn: ['#8a6bd1', 'circle'], certificate: ['#b07a1a', 'circle'], url: ['#3a8fb7', 'circle'], hash: ['#7a8791', 'circle'],
+      organisation: ['#d1593a', 'square'], document: ['#a05fa0', 'square'], vessel: ['#1b8ea6', 'diamond'], aircraft: ['#4f7fd1', 'diamond'], place: ['#5b9a2f', 'diamond'], event: ['#c9772a', 'diamond'],
+    };
+    $('at').innerHTML = Object.keys(TYPES).map(t => `<option>${t}</option>`).join('');
+    $('legend').innerHTML = Object.entries(TYPES).map(([t, [c, s]]) => `<span><i style="background:${c};border-radius:${s === 'circle' ? '50%' : s === 'square' ? '2px' : '0'};transform:${s === 'diamond' ? 'rotate(45deg) scale(.85)' : 'none'}"></i>${t}</span>`).join('');
+    const groupColor = g => { let h = 0; for (const c of g) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 70% 50%)`; };
+
+    // ---- state ----
+    let gid = null, G = null, graphs = [], sel = null, linkFrom = null, alpha = 0, dirty = false, saveTimer = null;
+    const view = { x: 0, y: 0, k: 1 };
+    const cv = $('cv'), ctx = cv.getContext('2d');
+    const byId = id => G.nodes.find(n => n.id === id);
+
+    function setSaved(state) { const b = $('saved'); b.className = 'badge ' + ({ saved: 'ok', saving: 'warn', error: 'err' }[state] || ''); b.textContent = { saved: 'saved', saving: 'saving…', error: 'not saved', none: 'no graph' }[state]; }
+    function changed() { if (!G) return; dirty = true; setSaved('saving'); clearTimeout(saveTimer); saveTimer = setTimeout(save, 800); updEmpty(); }
+    async function save() {
+      if (!G || !dirty) return; dirty = false;
+      try { await api('api/graphs/' + gid, 'PUT', { name: G.name, nodes: G.nodes.map(({ id, type, label, x, y, pinned, group, note, source }) => ({ id, type, label, x, y, pinned, group, note, source })), edges: G.edges }); if (!dirty) setSaved('saved'); }
+      catch (e) { setSaved('error'); dirty = true; toast('Could not save: ' + e.message, 'err'); }
+    }
+    window.addEventListener('beforeunload', e => { if (dirty) { save(); e.preventDefault(); } });
+
+    async function loadList(pick) {
+      const d = await api('api/graphs'); graphs = d.graphs;
+      $('gsel').innerHTML = graphs.length ? graphs.map(g => `<option value="${esc(g.id)}">${esc(g.name)} (${g.nodes} nodes)</option>`).join('') : '<option value="">No graphs yet</option>';
+      const want = pick || gid || graphs[0]?.id;
+      if (want && graphs.some(g => g.id === want)) { $('gsel').value = want; await openGraph(want); } else { G = null; gid = null; setSaved('none'); updEmpty(); draw(); renderInsp(); }
+    }
+    async function openGraph(id) {
+      if (dirty) await save();
+      G = await api('api/graphs/' + id); gid = id; sel = null; linkFrom = null; dirty = false; setSaved('saved');
+      const unplaced = G.nodes.every(n => !n.x && !n.y);
+      if (unplaced) G.nodes.forEach((n, i) => { const a = i * 2.4, r = 70 * Math.sqrt(i + 1); n.x = Math.cos(a) * r; n.y = Math.sin(a) * r; });
+      kick(unplaced ? 1 : 0); fit(); updEmpty(); renderInsp(); draw();
+    }
+    function updEmpty() {
+      const e = $('empty'); const none = !G, blank = G && !G.nodes.length;
+      e.classList.toggle('hide', !(none || blank));
+      $('emptyT').textContent = none ? 'Create a graph to begin' : 'This graph is empty';
+      $('emptyP').textContent = none ? 'Use “New graph”, then add domains, IPs, ASNs, organisations, vessels, aircraft, places and more.' : 'Add a node from the panel, or import items from a case in the case notebook. Right-click (long-press on touch) a node to expand it.';
+    }
+    $('gsel').onchange = () => $('gsel').value && openGraph($('gsel').value).catch(e => toast(e.message, 'err'));
+    $('gnew').onclick = async () => { const name = prompt('Graph name'); if (!name || !name.trim()) return; try { const g = await api('api/graphs', 'POST', { name }); await loadList(g.id); } catch (e) { toast(e.message, 'err'); } };
+    $('gren').onclick = () => { if (!G) return; const n = prompt('Graph name', G.name); if (n && n.trim()) { G.name = n.trim(); changed(); setTimeout(() => loadList(gid), 1200); } };
+    $('gdel').onclick = async () => { if (!G || !confirm(`Delete the graph "${G.name}"? Export it first if you may need it.`)) return; try { await api('api/graphs/' + gid, 'DELETE'); gid = null; dirty = false; await loadList(); } catch (e) { toast(e.message, 'err'); } };
+    $('gimp').onclick = () => $('gfile').click();
+    $('gfile').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const s = await api('api/import', 'POST', JSON.parse(await f.text())); toast(`Imported "${s.name}"`); await loadList(s.id); } catch (err) { toast('Import failed: ' + err.message, 'err'); } e.target.value = ''; };
+
+    // ---- export menu ----
+    let menuEl = null;
+    function closeMenu() { menuEl?.remove(); menuEl = null; }
+    function showMenu(x, y, items, title) {
+      closeMenu(); const m = document.createElement('div'); m.className = 'menu'; m.setAttribute('role', 'menu');
+      m.innerHTML = (title ? `<div class="hd">${esc(title)}</div>` : '') + items.map((it, i) => `<button role="menuitem" data-i="${i}" ${it.disabled ? 'disabled' : ''}>${esc(it.label)}</button>`).join('');
+      document.body.appendChild(m); const r = m.getBoundingClientRect();
+      m.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px'; m.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+      m.querySelectorAll('button').forEach(b => b.onclick = () => { closeMenu(); items[+b.dataset.i].run(); }); menuEl = m; m.querySelector('button:not(:disabled)')?.focus();
+    }
+    addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(); linkFrom = null; renderInsp(); draw(); } });
+    addEventListener('pointerdown', e => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); }, true);
+    $('gexp').onclick = e => { if (!G) return; if (dirty) save(); const r = e.currentTarget.getBoundingClientRect();
+      showMenu(r.left, r.bottom + 4, [['json', 'JSON (re-importable)'], ['graphml', 'GraphML'], ['gexf', 'GEXF'], ['mermaid', 'Mermaid'], ['md', 'Markdown report']].map(([f, l]) => ({ label: l, run: () => { const a = document.createElement('a'); a.href = `api/graphs/${gid}/export?format=${f}`; a.click(); } }))); };
+
+    // ---- import from the case notebook (browser-side, uses the hub sign-in) ----
+    $('gcase').onclick = async () => {
+      if (!G) return toast('Create a graph first', 'warn');
+      let cases; try { const r = await fetch('/p/case-notebook/api/cases'); if (!r.ok) throw 0; cases = (await r.json()).cases; } catch { return toast('The Case notebook plugin is not available', 'warn'); }
+      if (!cases.length) return toast('No cases to import from', 'warn');
+      const r = $('gcase').getBoundingClientRect();
+      showMenu(r.left, r.bottom + 4, cases.map(c => ({ label: `${c.title} (${c.evidence} evidence)`, run: async () => {
+        try {
+          const cs = (await (await fetch('/p/case-notebook/api/cases/' + c.id)).json()).case; const nodes = [], edges = [], seen = {};
+          const add = (type, label) => { const k = type + label; if (!seen[k]) { seen[k] = 'i' + rid(); nodes.push({ id: seen[k], type, label }); } return seen[k]; };
+          for (const e of cs.evidence) { let u = null; if (/^https?:\/\//.test(e.url)) u = add('url', e.url); const a = /^https?:\/\//.test(e.archive_url) ? add('url', e.archive_url) : null; const h = e.sha256 ? add('hash', e.sha256) : null;
+            if (u && a) edges.push({ id: 'e' + rid(), from: u, to: a, label: 'archived as' }); if (u && h) edges.push({ id: 'e' + rid(), from: u, to: h, label: 'content hash' }); }
+          if (!nodes.length) return toast('That case has no URLs or hashes to import', 'warn');
+          await mergeNodes(nodes, edges, 'case-notebook'); toast(`Imported from "${cs.title}"`);
+        } catch (err) { toast('Import failed: ' + err.message, 'err'); }
+      } })), 'Import evidence URLs and hashes from');
+    };
+
+    async function mergeNodes(nodes, edges, source, near) {
+      if (dirty) await save();
+      const d = await api(`api/graphs/${gid}/merge`, 'POST', { nodes, edges, source });
+      const old = Object.fromEntries(G.nodes.map(n => [n.id, n])); G = d.graph;
+      let i = 0; for (const n of G.nodes) { const o = old[n.id]; if (o) { n.x = o.x; n.y = o.y; n.pinned = o.pinned; } else { const a = Math.random() * 6.28, r = 60 + (i++ % 8) * 6; n.x = (near?.x || 0) + Math.cos(a) * r; n.y = (near?.y || 0) + Math.sin(a) * r; } }
+      kick(1); updEmpty(); renderInsp(); draw(); changed(); return d;
+    }
+
+    // ---- add node / link ----
+    $('addf').onsubmit = async e => { e.preventDefault(); if (!G) return toast('Create a graph first', 'warn'); const label = $('al').value.trim(); if (!label) return;
+      try { const d = await mergeNodes([{ id: 'n1', type: $('at').value, label }], [], 'user'); $('al').value = ''; toast(d.added_nodes ? 'Node added' : 'That node already exists'); } catch (err) { toast(err.message, 'err'); } };
+
+    // ---- force layout ----
+    function kick(a) { alpha = Math.max(alpha, a); requestAnimationFrame(loop); }
+    let running = false;
+    function loop() {
+      if (running) return; running = true;
+      (function step() {
+        if (G && alpha > 0.02) { tick(); draw(); alpha *= 0.985; requestAnimationFrame(step); } else { running = false; draw(); }
+      })();
+    }
+    function tick() {
+      const N = G.nodes, n = N.length; if (!n) return; const idx = new Map(N.map((v, i) => [v.id, i]));
+      const fx = new Float64Array(n), fy = new Float64Array(n);
+      const limit = n > 700 ? 25 : n; // for big graphs repel only against a sample of other nodes
+      for (let i = 0; i < n; i++) for (let s = 1; s <= limit; s++) { const j = n > 700 ? (i + 1 + Math.floor(Math.random() * (n - 1))) % n : (i + s) % n; if (j === i || (n <= 700 && j < i)) continue;
+        let dx = N[i].x - N[j].x, dy = N[i].y - N[j].y, d2 = dx * dx + dy * dy; if (d2 < 1) { dx = Math.random() - .5; dy = Math.random() - .5; d2 = 1; } const f = 14000 / d2, d = Math.sqrt(d2);
+        fx[i] += dx / d * f; fy[i] += dy / d * f; fx[j] -= dx / d * f; fy[j] -= dy / d * f; }
+      for (const e of G.edges) { const a = idx.get(e.from), b = idx.get(e.to); if (a == null || b == null) continue; const dx = N[b].x - N[a].x, dy = N[b].y - N[a].y, d = Math.hypot(dx, dy) || 1, f = (d - 150) * 0.02;
+        fx[a] += dx / d * f * 8; fy[a] += dy / d * f * 8; fx[b] -= dx / d * f * 8; fy[b] -= dy / d * f * 8; }
+      for (let i = 0; i < n; i++) { const v = N[i]; fx[i] -= v.x * 0.004; fy[i] -= v.y * 0.004; if (v.pinned || v === drag?.node) continue; const m = Math.hypot(fx[i], fy[i]) || 1, cap = Math.min(m, 12); v.x += fx[i] / m * cap * alpha; v.y += fy[i] / m * cap * alpha; }
+    }
+    $('relayout').onclick = () => { if (!G) return; G.nodes.forEach(n => { if (!n.pinned) { n.x += (Math.random() - .5) * 40; n.y += (Math.random() - .5) * 40; } }); kick(1); changed(); };
+
+    // ---- drawing ----
+    const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    function size() { const r = $('stage').getBoundingClientRect(), d = devicePixelRatio || 1; if (cv.width !== Math.round(r.width * d) || cv.height !== Math.round(r.height * d)) { cv.width = Math.round(r.width * d); cv.height = Math.round(r.height * d); } return { w: r.width, h: r.height, d }; }
+    const toScreen = (x, y) => [x * view.k + view.x, y * view.k + view.y];
+    const toWorld = (sx, sy) => [(sx - view.x) / view.k, (sy - view.y) / view.k];
+    function shape(n, r) { const [x, y] = toScreen(n.x, n.y), s = TYPES[n.type][1]; ctx.beginPath();
+      if (s === 'circle') ctx.arc(x, y, r, 0, 6.2832); else if (s === 'square') ctx.rect(x - r * .9, y - r * .9, r * 1.8, r * 1.8); else { ctx.moveTo(x, y - r * 1.2); ctx.lineTo(x + r * 1.2, y); ctx.lineTo(x, y + r * 1.2); ctx.lineTo(x - r * 1.2, y); ctx.closePath(); } }
+    function draw() {
+      const { w, h, d } = size(); ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, w, h); if (!G) return;
+      const ink = css('--ink'), ink2 = css('--ink-2'), edge = css('--edge-strong'), surf = css('--surface'), acc = css('--focus'); const r = 9 * Math.min(1.4, Math.max(.7, view.k));
+      ctx.lineWidth = 1.3; ctx.font = `${Math.max(10, 11.5 * Math.min(1.3, view.k))}px system-ui, sans-serif`; ctx.textAlign = 'center';
+      const idx = new Map(G.nodes.map(n => [n.id, n]));
+      for (const e of G.edges) { const a = idx.get(e.from), b = idx.get(e.to); if (!a || !b) continue; const [x1, y1] = toScreen(a.x, a.y), [x2, y2] = toScreen(b.x, b.y); const hot = sel && (e.from === sel || e.to === sel);
+        ctx.strokeStyle = hot ? acc : edge; ctx.lineWidth = hot ? 2 : 1.3; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        const ang = Math.atan2(y2 - y1, x2 - x1), ex = x2 - Math.cos(ang) * (r + 3), ey = y2 - Math.sin(ang) * (r + 3); ctx.fillStyle = hot ? acc : edge; ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(ang - .45) * 7, ey - Math.sin(ang - .45) * 7); ctx.lineTo(ex - Math.cos(ang + .45) * 7, ey - Math.sin(ang + .45) * 7); ctx.fill();
+        if (e.label && view.k > .55) { ctx.fillStyle = ink2; ctx.fillText(e.label, (x1 + x2) / 2, (y1 + y2) / 2 - 3); } }
+      for (const n of G.nodes) { const [x, y] = toScreen(n.x, n.y); if (x < -40 || y < -40 || x > w + 40 || y > h + 40) continue;
+        if (n.group) { shape(n, r + 5); ctx.strokeStyle = groupColor(n.group); ctx.lineWidth = 3; ctx.stroke(); }
+        shape(n, r); ctx.fillStyle = TYPES[n.type][0]; ctx.fill(); ctx.lineWidth = n.id === sel ? 3 : 1.5; ctx.strokeStyle = n.id === sel ? acc : surf; ctx.stroke();
+        if (n.pinned) { ctx.fillStyle = surf; ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.2832); ctx.fill(); }
+        if (n.id === linkFrom) { shape(n, r + 8); ctx.setLineDash([4, 3]); ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]); }
+        if (view.k > .4 || n.id === sel) { const t = n.label.length > 28 ? n.label.slice(0, 27) + '…' : n.label; ctx.lineWidth = 3.5; ctx.strokeStyle = surf; ctx.strokeText(t, x, y + r + 14); ctx.fillStyle = ink; ctx.fillText(t, x, y + r + 14); } }
+    }
+    function fit() { if (!G || !G.nodes.length) { view.x = size().w / 2; view.y = size().h / 2; view.k = 1; return; } const { w, h } = size(); let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const n of G.nodes) { x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x); y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y); }
+      const k = Math.min(1.6, Math.max(.15, Math.min((w - 140) / Math.max(1, x1 - x0), (h - 140) / Math.max(1, y1 - y0)))); view.k = k; view.x = w / 2 - (x0 + x1) / 2 * k; view.y = h / 2 - (y0 + y1) / 2 * k; }
+    function zoomAt(f, sx, sy) { const [wx, wy] = toWorld(sx, sy); view.k = Math.min(4, Math.max(.1, view.k * f)); view.x = sx - wx * view.k; view.y = sy - wy * view.k; draw(); }
+    $('zin').onclick = () => { const s = size(); zoomAt(1.25, s.w / 2, s.h / 2); }; $('zout').onclick = () => { const s = size(); zoomAt(0.8, s.w / 2, s.h / 2); }; $('zfit').onclick = () => { fit(); draw(); };
+    addEventListener('resize', () => draw()); matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+    new MutationObserver(draw).observe(document.documentElement, { attributes: true });
+
+    // ---- pointer interaction: drag node, pan, pinch zoom, click, long-press / right-click menu ----
+    let drag = null; const ptrs = new Map(); let pinch = null, press = null;
+    const hit = (sx, sy) => { if (!G) return null; const [wx, wy] = toWorld(sx, sy), rr = (12 / view.k) ** 2 * 1.6; let best = null, bd = rr; for (const n of G.nodes) { const d = (n.x - wx) ** 2 + (n.y - wy) ** 2; if (d < bd) { bd = d; best = n; } } return best; };
+    const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    cv.addEventListener('contextmenu', e => { e.preventDefault(); const [x, y] = pos(e), n = hit(x, y); if (n) nodeMenu(n, e.clientX, e.clientY); });
+    cv.addEventListener('pointerdown', e => {
+      cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, pos(e)); const [x, y] = pos(e);
+      if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), k: view.k }; drag = null; clearTimeout(press?.t); return; }
+      const n = hit(x, y); drag = { node: n, sx: x, sy: y, vx: view.x, vy: view.y, moved: false, wx: n?.x, wy: n?.y };
+      if (e.button === 0 || e.pointerType !== 'mouse') press = { t: setTimeout(() => { if (drag && !drag.moved && n) { nodeMenu(n, e.clientX, e.clientY); drag = null; } }, 550) };
+      cv.classList.add('dragging');
+    });
+    cv.addEventListener('pointermove', e => {
+      if (!ptrs.has(e.pointerId)) return; ptrs.set(e.pointerId, pos(e));
+      if (pinch && ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const nk = pinch.k * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d; zoomAt(nk / view.k, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2); return; }
+      if (!drag) return; const [x, y] = pos(e); if (Math.hypot(x - drag.sx, y - drag.sy) > 4) { drag.moved = true; clearTimeout(press?.t); }
+      if (!drag.moved) return;
+      if (drag.node) { drag.node.x = drag.wx + (x - drag.sx) / view.k; drag.node.y = drag.wy + (y - drag.sy) / view.k; kick(.25); } else { view.x = drag.vx + x - drag.sx; view.y = drag.vy + y - drag.sy; draw(); }
+    });
+    const up = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; clearTimeout(press?.t); cv.classList.remove('dragging');
+      if (!drag) return; const d = drag; drag = null;
+      if (!d.moved) { if (d.node && linkFrom && d.node.id !== linkFrom) finishLink(d.node); else { sel = d.node?.id || null; renderInsp(); draw(); } } else if (d.node) { d.node.pinned = true; changed(); renderInsp(); } };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    cv.addEventListener('wheel', e => { e.preventDefault(); const [x, y] = pos(e); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, x, y); }, { passive: false });
+    cv.tabIndex = 0;
+    cv.addEventListener('keydown', e => { if (!sel) return; const n = byId(sel); if (e.key === 'Delete') delNode(n); });
+
+    async function finishLink(to) {
+      const from = byId(linkFrom); linkFrom = null; const label = prompt(`Relationship from ${from.label} to ${to.label} (optional)`, '');
+      if (label === null) { draw(); return; }
+      try { await mergeNodes([{ id: from.id, type: from.type, label: from.label }, { id: to.id, type: to.type, label: to.label }], [{ id: 'e1', from: from.id, to: to.id, label: label.trim() }], 'user'); } catch (e) { toast(e.message, 'err'); }
+      renderInsp(); draw();
+    }
+    function delNode(n) { if (!confirm(`Remove ${n.label} and its links from this graph?`)) return; G.nodes = G.nodes.filter(x => x !== n); G.edges = G.edges.filter(e => e.from !== n.id && e.to !== n.id); sel = null; changed(); renderInsp(); draw(); }
+
+    // ---- inspector ----
+    function renderInsp() {
+      const el = $('insp'); const n = sel && G && byId(sel);
+      if (!n) { el.innerHTML = '<h3 class="h3">Inspector</h3><p class="muted small">Select a node to edit it, link it to another node or run transforms.</p>' + (linkFrom ? '<div class="notice info small">Click the node to link to (Esc cancels).</div>' : ''); return; }
+      const es = G.edges.filter(e => e.from === n.id || e.to === n.id);
+      el.innerHTML = `<h3 class="h3">${esc(n.type)}</h3><div class="wrap-anywhere" style="font-weight:600;margin-bottom:8px">${esc(n.label)}</div>
+        <div class="fld"><label class="check"><input type="checkbox" id="ipin" ${n.pinned ? 'checked' : ''}> Pinned in place</label>
+        <label class="field"><span class="label">Group</span><input id="igrp" value="${esc(n.group)}" maxlength="40" placeholder="e.g. suspected infrastructure"></label>
+        <label class="field"><span class="label">Your remark</span><textarea id="inote" rows="3" maxlength="1000">${esc(n.note)}</textarea></label>
+        <div class="row"><button class="btn sm" id="ilink">Link to…</button><button class="btn sm" id="iexp">Expand ▾</button><button class="btn sm danger" id="idel">Remove</button></div>
+        <div class="tiny faint">Source: ${esc(n.source || 'user')}</div></div>
+        <h3 class="h3" style="margin-top:14px">Links (${es.length})</h3>${es.map(e => { const o = byId(e.from === n.id ? e.to : e.from); return `<div class="edge-row"><span>${e.from === n.id ? '→' : '←'} ${esc(o?.label || '?')}${e.label ? ' · ' + esc(e.label) : ''}</span><button class="btn ghost sm" data-de="${e.id}" aria-label="Remove link">✕</button></div>`; }).join('') || '<p class="muted small">No links yet.</p>'}`;
+      $('ipin').onchange = e => { n.pinned = e.target.checked; changed(); draw(); };
+      $('igrp').onchange = e => { n.group = e.target.value.trim(); changed(); draw(); };
+      $('inote').onchange = e => { n.note = e.target.value.trim(); changed(); };
+      $('ilink').onclick = () => { linkFrom = n.id; renderInsp(); draw(); toast('Click the node to link to'); };
+      $('idel').onclick = () => delNode(n);
+      $('iexp').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); nodeMenu(n, r.left, r.bottom + 4); };
+      el.querySelectorAll('[data-de]').forEach(b => b.onclick = () => { G.edges = G.edges.filter(x => x.id !== b.dataset.de); changed(); renderInsp(); draw(); });
+    }
+
+    // ---- transforms: call sibling plugins in the browser; unavailable ones are shown disabled ----
+    const have = {}; const probe = async p => (have[p] ??= fetch(`/p/${p}/tools`).then(r => r.ok).catch(() => false));
+    const cap = (a, n) => a.slice(0, n);
+    const domOf = s => String(s || '').replace(/\.$/, '').toLowerCase().split(/\s+/).pop();
+    const TRANSFORMS = [
+      { plugin: 'lookup', label: 'Resolve DNS records', types: ['domain'], run: async n => { const d = await get(`/p/lookup/api/lookup?q=${encodeURIComponent(n.label)}`); const nodes = [], edges = [];
+        for (const [t, rows] of Object.entries(d.dns || {})) for (const r of rows) { const v = domOf(r.data); if (t === 'A' || t === 'AAAA') { nodes.push({ id: 'x' + nodes.length, type: 'ip', label: r.data }); edges.push({ id: 'y' + edges.length, from: n.id, to: 'x' + (nodes.length - 1), label: t }); }
+          else if (t === 'NS' || t === 'MX' || t === 'CNAME') { nodes.push({ id: 'x' + nodes.length, type: 'domain', label: v }); edges.push({ id: 'y' + edges.length, from: n.id, to: 'x' + (nodes.length - 1), label: t }); } }
+        return { nodes: cap(nodes, 40), edges: cap(edges, 40) }; } },
+      { plugin: 'lookup', label: 'Names on certificates (CT logs)', types: ['domain'], run: async n => { const d = await get(`/p/lookup/api/certs?name=${encodeURIComponent(n.label)}`); const names = cap([...new Set(d.names || [])].filter(x => x && !x.includes('*') && x !== n.label), 40);
+        return { nodes: names.map((x, i) => ({ id: 'x' + i, type: 'domain', label: x })), edges: names.map((x, i) => ({ id: 'y' + i, from: n.id, to: 'x' + i, label: 'cert name' })) }; } },
+      { plugin: 'lookup', label: 'Reverse DNS (PTR)', types: ['ip'], run: async n => { const d = await get(`/p/lookup/api/lookup?q=${encodeURIComponent(n.label)}`); const ptr = [].concat(d.ptr || []).map(domOf).filter(Boolean);
+        return { nodes: ptr.map((x, i) => ({ id: 'x' + i, type: 'domain', label: x })), edges: ptr.map((x, i) => ({ id: 'y' + i, from: n.id, to: 'x' + i, label: 'PTR' })) }; } },
+      { plugin: 'web-archive', label: 'URLs the Internet Archive knows', types: ['domain'], run: async n => { const d = await get(`/p/web-archive/api/urls?domain=${encodeURIComponent(n.label)}&limit=60`); const us = cap(d.urls || [], 30);
+        return { nodes: us.map((u, i) => ({ id: 'x' + i, type: 'url', label: u.url })), edges: us.map((u, i) => ({ id: 'y' + i, from: n.id, to: 'x' + i, label: 'archived URL' })) }; } },
+    ];
+    async function get(u) { const r = await fetch(u), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status); return d; }
+    async function nodeMenu(n, x, y) {
+      sel = n.id; renderInsp(); draw();
+      const ts = TRANSFORMS.filter(t => t.types.includes(n.type)); const avail = await Promise.all(ts.map(t => probe(t.plugin)));
+      const items = ts.map((t, i) => ({ label: avail[i] ? t.label : `${t.label} (needs ${t.plugin})`, disabled: !avail[i], run: async () => {
+        try { toast('Running: ' + t.label); const r = await t.run(n); if (!r.nodes.length) return toast('Nothing found', 'warn'); const d = await mergeNodes([{ id: n.id, type: n.type, label: n.label }, ...r.nodes], r.edges, 'transform:' + t.plugin, n); toast(`Added ${d.added_nodes} nodes, ${d.added_edges} links`); } catch (e) { toast('Transform failed: ' + e.message, 'err'); } } }));
+      if (!items.length) items.push({ label: 'No transforms for this type yet', disabled: true, run() {} });
+      items.push({ label: 'Link to…', run: () => { linkFrom = n.id; renderInsp(); draw(); toast('Click the node to link to'); } }, { label: n.pinned ? 'Unpin' : 'Pin in place', run: () => { n.pinned = !n.pinned; changed(); renderInsp(); draw(); } }, { label: 'Remove', run: () => delNode(n) });
+      showMenu(x, y, items, n.label);
+    }
+
+    loadList().catch(e => { toast(e.message, 'err'); updEmpty(); });
+    setSaved('none'); updEmpty(); fit(); draw();
+  </script>
+</body>
+</html>

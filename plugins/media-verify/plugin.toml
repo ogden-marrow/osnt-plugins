@@ -1,0 +1,16 @@
+id = "media-verify"
+name = "Media verification"
+description = "Video keyframes and metadata (ffprobe), YouTube thumbnail frames, perceptual-hash comparison, error-level analysis and a Content Credentials (C2PA) reader. No face or person matching."
+grid = "Media & Verification"
+port = 8162
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_MEDIA_VERIFY_BIND = "127.0.0.1:{port}"
+
+# Optional: without ffmpeg the plugin still does YouTube frames, image hashing, ELA and C2PA; only video keyframes and metadata need it.
+[system]
+apt = ["ffmpeg"]

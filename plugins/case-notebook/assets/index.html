@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Case notebook · OSNT</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    .ws { display: grid; grid-template-columns: 240px minmax(0, 1fr) 340px; gap: 12px; align-items: start; }
+    .col, .card { min-width: 0; }
+    .case-list { display: grid; gap: 6px; margin-top: 10px; }
+    .case-item { display: block; width: 100%; text-align: left; padding: 10px 12px; background: var(--surface); border: 1px solid var(--edge); border-radius: var(--radius-sm); color: var(--ink); cursor: pointer; font: inherit; }
+    .case-item:hover { background: var(--surface-2); }
+    .case-item[aria-current="true"] { border-color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
+    .case-item b { display: block; font-size: var(--fs-md); overflow-wrap: anywhere; }
+    .case-item span { font-size: var(--fs-xs); color: var(--ink-3); }
+    .mdview { line-height: 1.55; overflow-wrap: anywhere; }
+    .mdview h1, .mdview h2, .mdview h3 { margin: 12px 0 6px; line-height: 1.25; }
+    .mdview h1 { font-size: 20px; } .mdview h2 { font-size: 17px; } .mdview h3 { font-size: 15px; }
+    .mdview p { margin: 6px 0; } .mdview ul { margin: 6px 0; padding-left: 20px; }
+    .mdview pre { background: var(--surface-2); padding: 10px; border-radius: var(--radius-sm); overflow: auto; font: 12.5px/1.5 var(--font-mono); }
+    .mdview a { color: var(--link); }
+    textarea.ed { width: 100%; min-height: 180px; font: 13px/1.5 var(--font-mono); resize: vertical; }
+    .note { border-top: 1px solid var(--edge); padding: 12px 0; }
+    .note:first-child { border-top: 0; }
+    .note-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; }
+    .tl { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--edge-strong); }
+    .tl li { position: relative; padding: 0 0 12px 12px; overflow-wrap: anywhere; }
+    .tl li::before { content: ""; position: absolute; left: -20px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); }
+    .tl time { display: block; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+    .ev { border-top: 1px solid var(--edge); padding: 10px 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+    .ev:first-child { border-top: 0; }
+    .ev code { font-size: 11.5px; display: block; margin-top: 2px; }
+    .stack-form { display: grid; gap: 8px; margin-top: 10px; }
+    .stack-form input:not([type=checkbox]), .stack-form textarea { width: 100%; }
+    .stack-form .check { min-height: 0; }
+    .panes { display: none; margin-bottom: 12px; }
+    .hide { display: none !important; }
+    @media (max-width: 1000px) {
+      .ws { grid-template-columns: minmax(0, 1fr); }
+      .panes { display: block; }
+      .ws > .col { display: none; }
+      .ws[data-pane="cases"] > #c-cases, .ws[data-pane="notes"] > #c-notes, .ws[data-pane="log"] > #c-log { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Case notebook</h1>
+  </header>
+  <main class="page wide">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Case notebook</h2>
+      <p>Your own workspace. Notes are private unless you share them with the assistant. The evidence log is append-only and hash-chained, so later edits to it are detectable.</p></div></div>
+    <div class="panes"><div class="seg" role="group" aria-label="Section"><button data-pane="cases" class="on">Cases</button><button data-pane="notes">Notes</button><button data-pane="log">Evidence &amp; timeline</button></div></div>
+    <div class="ws" id="ws" data-pane="cases">
+      <section class="col" id="c-cases" aria-label="Cases">
+        <div class="card">
+          <div class="card-head"><h3 class="h3">Cases</h3></div>
+          <form id="newcase" class="row nowrap"><label class="sr-only" for="nc">New case title</label><input id="nc" class="grow" placeholder="New case title" maxlength="200" autocomplete="off"><button class="btn primary sm">Add</button></form>
+          <div class="case-list" id="cases"></div>
+          <div class="row" style="margin-top:12px"><button class="btn sm" id="imp">Import case…</button><input type="file" id="impfile" accept="application/json,.json" hidden></div>
+        </div>
+      </section>
+      <section class="col" id="c-notes" aria-label="Notes"><div id="main"></div></section>
+      <section class="col" id="c-log" aria-label="Evidence and timeline"><div id="side"></div></section>
+    </div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 4500); }
+    async function api(path, method = 'GET', body) {
+      const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || (r.status === 401 ? 'Sign in to the hub first' : 'HTTP ' + r.status));
+      return d;
+    }
+    const guard = fn => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, 'err'); } };
+
+    // Minimal, safe Markdown: everything is escaped first, then a small set of patterns is turned into tags.
+    function md(src) {
+      const lines = String(src || '').replace(/\r/g, '').split('\n'); let out = '', list = false, code = false;
+      const inline = t => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      for (const l of lines) {
+        if (l.startsWith('```')) { out += code ? '</code></pre>' : '<pre><code>'; code = !code; continue; }
+        if (code) { out += esc(l) + '\n'; continue; }
+        const li = l.match(/^\s*[-*]\s+(.*)/);
+        if (li) { if (!list) { out += '<ul>'; list = true; } out += '<li>' + inline(li[1]) + '</li>'; continue; }
+        if (list) { out += '</ul>'; list = false; }
+        const h = l.match(/^(#{1,3})\s+(.*)/);
+        if (h) out += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; else if (l.trim()) out += '<p>' + inline(l) + '</p>';
+      }
+      return out + (list ? '</ul>' : '') + (code ? '</code></pre>' : '');
+    }
+
+    let cur = null, data = null;
+    const day = t => (t || '').slice(0, 10);
+
+    async function loadCases() {
+      const d = await api('api/cases');
+      $('cases').innerHTML = d.cases.length ? d.cases.map(c => `<button class="case-item" data-id="${esc(c.id)}" aria-current="${c.id === cur}"><b>${esc(c.title)}</b><span>${c.notes} notes · ${c.timeline} events · ${c.evidence} evidence · ${esc(day(c.updated))}</span></button>`).join('')
+        : '<div class="state"><div class="h3">No cases yet</div><p>Create one above, or pin a result from another plugin.</p></div>';
+      $('cases').querySelectorAll('.case-item').forEach(b => b.onclick = guard(() => { open(b.dataset.id); $('ws').dataset.pane = 'notes'; syncSeg(); }));
+      if (!cur) { $('main').innerHTML = '<div class="state"><div class="h3">Choose or create a case</div><p>Notes appear here; the evidence log and timeline sit beside them.</p></div>'; $('side').innerHTML = ''; }
+    }
+    function syncSeg() { document.querySelectorAll('.panes button').forEach(b => b.classList.toggle('on', b.dataset.pane === $('ws').dataset.pane)); }
+    document.querySelectorAll('.panes button').forEach(b => b.onclick = () => { $('ws').dataset.pane = b.dataset.pane; syncSeg(); });
+
+    $('newcase').onsubmit = guard(async e => { e.preventDefault(); const t = $('nc').value.trim(); if (!t) return; const c = await api('api/cases', 'POST', { title: t }); $('nc').value = ''; cur = c.id; await loadCases(); await open(c.id); });
+    $('imp').onclick = () => $('impfile').click();
+    $('impfile').onchange = guard(async e => { const f = e.target.files[0]; if (!f) return; const c = await api('api/import', 'POST', JSON.parse(await f.text())); toast('Imported "' + c.title + '"'); cur = c.id; await loadCases(); await open(c.id); e.target.value = ''; });
+
+    async function open(id) { cur = id; data = await api('api/cases/' + id); draw(); loadCases(); }
+
+    function draw() {
+      const c = data.case, ch = data.chain;
+      $('main').innerHTML = `<div class="card">
+        <div class="card-head"><h3 class="h3" id="ctitle">${esc(c.title)}</h3><div class="row"><button class="btn sm" id="ren">Rename</button><a class="btn sm" href="api/cases/${c.id}/export?format=md" download>Markdown</a><a class="btn sm" href="api/cases/${c.id}/export?format=json" download>JSON</a><button class="btn sm danger" id="del">Delete case</button></div></div>
+        ${c.description ? `<p class="muted small">${esc(c.description)}</p>` : ''}${c.tags.length ? `<p>${c.tags.map(t => `<span class="badge">${esc(t)}</span>`).join(' ')}</p>` : ''}
+        <h4 class="h3" style="margin-top:14px">Notes</h4><div id="notes">${c.notes.length ? c.notes.map(noteHtml).join('') : '<p class="muted small">No notes yet.</p>'}</div>
+        <form id="nf" class="stack-form"><label class="sr-only" for="nt">Note title</label><input id="nt" placeholder="Note title (optional)" maxlength="200" autocomplete="off">
+          <label class="sr-only" for="nb">Note text</label><textarea id="nb" class="ed" placeholder="Markdown supported: # heading, **bold**, - list, [text](https://…)"></textarea>
+          <div class="row spread"><label class="check"><input type="checkbox" id="ns"> Let the assistant read this note</label><div class="row"><button type="button" class="btn sm" id="np">Preview</button><button class="btn primary sm">Add note</button></div></div><div id="npv" class="mdview well hide"></div></form></div>`;
+      $('ren').onclick = guard(async () => { const t = prompt('Case title', c.title); if (t && t.trim()) { await api('api/cases/' + c.id, 'PUT', { title: t, description: c.description, tags: c.tags }); await open(c.id); } });
+      $('del').onclick = guard(async () => { if (confirm('Delete this whole case, including its evidence log? Export it first if you may need it.')) { await api('api/cases/' + c.id, 'DELETE'); cur = null; data = null; await loadCases(); } });
+      $('np').onclick = () => { const p = $('npv'); p.classList.toggle('hide'); p.innerHTML = md($('nb').value) || '<span class="muted">Nothing to preview.</span>'; };
+      $('nf').onsubmit = guard(async e => { e.preventDefault(); await api(`api/cases/${c.id}/notes`, 'POST', { title: $('nt').value, body: $('nb').value, share_with_agent: $('ns').checked }); toast('Note added'); await open(c.id); });
+      document.querySelectorAll('[data-nd]').forEach(b => b.onclick = guard(async () => { if (confirm('Delete this note?')) { await api(`api/cases/${c.id}/notes/${b.dataset.nd}`, 'DELETE'); await open(c.id); } }));
+      document.querySelectorAll('[data-ns]').forEach(b => b.onclick = guard(async () => { const n = c.notes.find(x => x.id === b.dataset.ns); await api(`api/cases/${c.id}/notes/${n.id}`, 'PUT', { title: n.title, body: n.body, tags: n.tags, share_with_agent: !n.share_with_agent }); await open(c.id); }));
+      document.querySelectorAll('[data-ne]').forEach(b => b.onclick = guard(async () => { const n = c.notes.find(x => x.id === b.dataset.ne); const body = prompt('Edit note text', n.body); if (body !== null) { await api(`api/cases/${c.id}/notes/${n.id}`, 'PUT', { title: n.title, body, tags: n.tags, share_with_agent: n.share_with_agent }); await open(c.id); } }));
+
+      const tl = [...c.timeline].sort((a, b) => a.date.localeCompare(b.date));
+      $('side').innerHTML = `<div class="card"><div class="card-head"><h3 class="h3">Evidence log</h3><span class="badge ${ch.ok ? 'ok' : 'err'}">${ch.ok ? 'chain verified' : 'chain BROKEN'}</span></div>
+        ${ch.ok ? '' : `<div class="notice err small" role="alert">Entry ${ch.broken_at} fails verification: ${esc(ch.reason)}.</div>`}
+        <div>${c.evidence.length ? c.evidence.slice().reverse().map(evHtml).join('') : '<p class="muted small">Nothing recorded. Pin results from other plugins, or add an item.</p>'}</div>
+        <details style="margin-top:10px"><summary class="small">Add evidence</summary><form id="ef" class="stack-form">
+          <input id="et" placeholder="Title" maxlength="300" required><input id="eu" type="url" placeholder="URL (optional)"><input id="eh" placeholder="SHA-256 of your saved copy (optional)" pattern="[0-9a-fA-F]{64}" title="64 hex characters">
+          <input id="ea" type="url" placeholder="Archive URL (optional)"><textarea id="en" rows="2" placeholder="Note"></textarea><button class="btn primary sm">Append to log</button></form></details></div>
+        <div class="card" style="margin-top:12px"><div class="card-head"><h3 class="h3">Timeline</h3></div>
+        ${tl.length ? `<ul class="tl">${tl.map(e => `<li><time>${esc(e.date)}${e.origin !== 'user' ? ' · from ' + esc(e.origin.replace('plugin:', '')) : ''}</time><b>${esc(e.title)}</b>${e.detail ? `<div class="small muted">${esc(e.detail)}</div>` : ''}${/^https?:\/\//.test(e.source_url) ? `<div class="small"><a href="${esc(e.source_url)}" target="_blank" rel="noopener noreferrer">source</a></div>` : ''} <button class="btn ghost sm" data-td="${e.id}" aria-label="Delete event">Remove</button></li>`).join('')}</ul>` : '<p class="muted small">No events.</p>'}
+        <details style="margin-top:6px"><summary class="small">Add event</summary><form id="tf" class="stack-form"><input id="td" placeholder="Date, e.g. 2024-05-31" required pattern="\\d{4}-\\d{2}-\\d{2}.*"><input id="tt" placeholder="What happened" maxlength="200" required><textarea id="tx" rows="2" placeholder="Detail"></textarea><input id="ts" type="url" placeholder="Source URL (optional)"><button class="btn primary sm">Add to timeline</button></form></details></div>`;
+      $('ef').onsubmit = guard(async e => { e.preventDefault(); await api(`api/cases/${c.id}/evidence`, 'POST', { kind: 'manual', title: $('et').value, url: $('eu').value, sha256: $('eh').value, archive_url: $('ea').value, note: $('en').value, captured_at: new Date().toISOString() }); toast('Appended'); await open(c.id); });
+      $('tf').onsubmit = guard(async e => { e.preventDefault(); await api(`api/cases/${c.id}/timeline`, 'POST', { date: $('td').value, title: $('tt').value, detail: $('tx').value, source_url: $('ts').value }); await open(c.id); });
+      document.querySelectorAll('[data-td]').forEach(b => b.onclick = guard(async () => { await api(`api/cases/${c.id}/timeline/${b.dataset.td}`, 'DELETE'); await open(c.id); }));
+    }
+    function noteHtml(n) {
+      return `<article class="note"><div class="note-head"><b>${esc(n.title || 'Untitled')}</b><span class="row"><span class="badge ${n.share_with_agent ? 'warn' : ''}">${n.share_with_agent ? 'shared with assistant' : 'private'}</span>
+        <button class="btn ghost sm" data-ns="${n.id}">${n.share_with_agent ? 'Make private' : 'Share'}</button><button class="btn ghost sm" data-ne="${n.id}">Edit</button><button class="btn ghost sm" data-nd="${n.id}">Delete</button></span></div>
+        <div class="mdview">${md(n.body)}</div><div class="tiny faint">${esc(n.updated.slice(0, 16).replace('T', ' '))} UTC</div></article>`;
+    }
+    function evHtml(e) {
+      return `<div class="ev"><b>#${e.seq} ${esc(e.title)}</b> <span class="badge">${esc(e.origin === 'user' ? 'you' : e.origin.replace('plugin:', ''))}</span>
+        ${e.url ? `<div>${/^https?:\/\//.test(e.url) ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(e.url)}</a>` : esc(e.url)}</div>` : ''}
+        ${e.captured_at ? `<div class="muted">Captured ${esc(e.captured_at)}</div>` : ''}${e.sha256 ? `<code title="SHA-256">${esc(e.sha256)}</code>` : ''}
+        ${e.archive_url ? `<div><a href="${esc(e.archive_url)}" target="_blank" rel="noopener noreferrer">archive copy</a></div>` : ''}${e.note ? `<div class="muted">${esc(e.note)}</div>` : ''}
+        <div class="tiny faint">entry hash <span class="mono">${esc(e.hash.slice(0, 16))}…</span> · ${esc(e.created.slice(0, 16).replace('T', ' '))} UTC</div></div>`;
+    }
+    guard(loadCases)();
+  </script>
+</body>
+</html>

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Media verification · OSNT</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    .modes { margin-bottom: 14px; }
+    .urlrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .urlrow input { flex: 1 1 260px; min-height: 44px; font-size: 16px; }
+    .urlrow .btn { min-height: 44px; }
+    .opts { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 10px; font-size: var(--fs-sm); color: var(--ink-2); }
+    .opts label { display: inline-flex; align-items: center; gap: 6px; }
+    .opts select { min-height: 32px; }
+    #out { display: grid; gap: 12px; margin-top: 16px; }
+    #out:empty { display: none; }
+    #out > *, .card { min-width: 0; }
+    .grid-frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .fr { background: var(--surface); border: 1px solid var(--edge); border-radius: var(--radius-sm); overflow: hidden; display: flex; flex-direction: column; }
+    .fr img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--surface-2); cursor: zoom-in; }
+    .fr .meta { padding: 8px 10px; font-size: var(--fs-xs); color: var(--ink-2); display: grid; gap: 4px; }
+    .fr .meta .row { gap: 4px; }
+    .fr .links { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+    .viewer { display: grid; gap: 10px; }
+    .viewer .stage { position: relative; background: var(--surface-2); border-radius: var(--radius-sm); overflow: hidden; line-height: 0; touch-action: none; }
+    .viewer canvas { max-width: 100%; height: auto; display: block; }
+    .lens { position: absolute; width: 140px; height: 140px; border-radius: 50%; border: 2px solid var(--accent); box-shadow: var(--shadow-float); pointer-events: none; display: none; background-repeat: no-repeat; }
+    .ctl { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 16px; font-size: var(--fs-sm); color: var(--ink-2); }
+    .ctl label { display: grid; gap: 2px; }
+    .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+    .pair img, .imgbox img { display: block; width: 100%; height: auto; border-radius: var(--radius-sm); background: var(--surface-2); }
+    .pair figcaption { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 4px; }
+    .pair figure { margin: 0; }
+    code.h { display: block; overflow-wrap: anywhere; }
+    .dists { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 6px 0 10px; }
+    .dists b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+    .dists span { font-size: var(--fs-xs); color: var(--ink-3); }
+    .hide { display: none !important; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Media verification</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Check a video or picture</h2>
+      <p>Video metadata and keyframes, YouTube frames, near-duplicate comparison, error-level analysis and Content Credentials. For EXIF and GPS use Image forensics; for finding the original source use Image source finder. Nothing here identifies or matches people.</p></div></div>
+    <div id="ffnote" class="notice warn hide" style="margin-bottom:12px"><span><b>ffmpeg is not installed on this hub.</b> Video metadata and keyframes are unavailable; images, YouTube frames and comparison still work.</span></div>
+    <div class="seg modes" role="group" aria-label="Mode"><button data-m="file" class="on" aria-pressed="true">File or link</button><button data-m="yt" aria-pressed="false">YouTube</button><button data-m="cmp" aria-pressed="false">Compare two images</button></div>
+
+    <section id="m-file">
+      <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Choose a video or image"><strong>Drop a video or image here, or click to choose</strong><span class="small">Up to 150 MB. Analysed on your hub and not kept.</span><input id="file" type="file" accept="video/*,audio/*,image/*" hidden></div>
+      <form class="urlrow" id="urlf"><label class="sr-only" for="url">Direct link to a file</label><input id="url" type="url" placeholder="…or a direct link to a video or image (up to 100 MB)" autocomplete="off" spellcheck="false"><button class="btn primary">Inspect link</button></form>
+      <div class="opts"><label>Frames <select id="count"><option>6</option><option selected>12</option><option>24</option></select></label>
+        <label>Pick <select id="fmode"><option value="keyframes">keyframes (scene changes)</option><option value="even">evenly spaced</option></select></label>
+        <label class="check"><input type="checkbox" id="ela"> Error-level analysis (JPEG)</label></div>
+    </section>
+
+    <section id="m-yt" class="hide">
+      <form class="urlrow" id="ytf"><label class="sr-only" for="yurl">YouTube link</label><input id="yurl" placeholder="https://www.youtube.com/watch?v=… or youtu.be/…" autocomplete="off" spellcheck="false"><button class="btn primary">Get frames</button></form>
+    </section>
+
+    <section id="m-cmp" class="hide">
+      <div class="card"><p class="muted small" style="margin-top:0">Choose two pictures. The check finds copies, re-encodes, resizes and mirrored reposts of the same image. It cannot tell which is older.</p>
+        <div class="row"><label class="field grow"><span class="label">Image A</span><input type="file" id="fa" accept="image/*"></label><label class="field grow"><span class="label">Image B</span><input type="file" id="fb" accept="image/*"></label></div>
+        <div class="row" style="margin-top:10px"><button class="btn primary" id="cmpgo">Compare</button></div></div>
+    </section>
+
+    <div id="out" aria-live="polite" aria-busy="false"></div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const section = (t, h, id) => { const s = document.createElement('section'); s.className = 'card'; if (id) s.id = id; s.innerHTML = `<div class="card-head"><h3 class="h3">${esc(t)}</h3></div>${h}`; out.appendChild(s); return s; };
+    const rows = o => `<table class="kv">${o.filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length)).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
+    const busy = m => { out.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; out.setAttribute('aria-busy', 'true'); };
+    const fail = (t, m) => { out.setAttribute('aria-busy', 'false'); out.innerHTML = `<div class="state error" role="alert"><div class="h3">${esc(t)}</div><p>${esc(m)}</p></div>`; };
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 4500); }
+    async function call(path, opt) { const r = await fetch(path, opt), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status); return d; }
+    const size = n => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n > 1e3 ? (n / 1e3).toFixed(0) + ' kB' : n + ' B';
+    const dur = s => s == null ? '' : (s >= 60 ? Math.floor(s / 60) + ' min ' : '') + (s % 60).toFixed(1) + ' s';
+
+    // mode switch
+    document.querySelectorAll('.modes button').forEach(b => b.onclick = () => { document.querySelectorAll('.modes button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); }); for (const m of ['file', 'yt', 'cmp']) $('m-' + m).classList.toggle('hide', m !== b.dataset.m); out.innerHTML = ''; });
+    fetch('api/status').then(r => r.json()).then(s => { if (!s.ffmpeg || !s.ffprobe) $('ffnote').classList.remove('hide'); }).catch(() => {});
+
+    // file / link
+    let current = null; // { file } or { url }
+    const q = (extra = {}) => new URLSearchParams({ count: $('count').value, mode: $('fmode').value, ela: $('ela').checked ? '1' : '0', ...extra }).toString();
+    async function inspect(src) {
+      current = src; busy('Inspecting…');
+      try {
+        const d = src.file ? await call('api/analyze?' + q(), { method: 'POST', body: src.file }) : await call('api/analyze?' + q({ url: src.url }));
+        out.innerHTML = ''; out.setAttribute('aria-busy', 'false'); showAnalysis(d, src);
+      } catch (e) { fail('Could not inspect that file', e.message); }
+    }
+    function showAnalysis(d, src) {
+      const f = d.file;
+      section('File', rows([['name', esc(src.file?.name || f.name || src.url || '')], ['kind', esc(f.kind === 'media' ? 'video/audio' : f.kind)], ['size', size(f.bytes)], ['SHA-256', `<code class="h">${esc(f.sha256)}</code>`], ['dimensions', d.image && `${d.image.width} × ${d.image.height}`]]));
+      if (d.media) {
+        const m = d.media, v = m.streams.find(s => s.type === 'video'), a = m.streams.find(s => s.type === 'audio');
+        if (m.flags.length) section('Worth a closer look', m.flags.map(x => `<div class="notice warn" style="margin:4px 0">${esc(x)}</div>`).join(''));
+        section('Container and streams', rows([['container', esc(m.container)], ['duration', dur(m.duration_s)], ['created (container tag)', esc(m.created)], ['brand', esc(m.brand)], ['encoder', esc((m.encoders || []).join(', '))],
+          ['location tag', m.gps && `${m.gps.lat.toFixed(5)}, ${m.gps.lon.toFixed(5)} · <a target="_blank" rel="noopener noreferrer" href="https://www.openstreetmap.org/?mlat=${m.gps.lat}&mlon=${m.gps.lon}#map=15/${m.gps.lat}/${m.gps.lon}">OpenStreetMap</a>`],
+          ['video', v && esc(`${v.codec}${v.profile ? ' ' + v.profile : ''}, ${v.width}×${v.height}, ${v.fps ?? '?'} fps${v.rotation ? ', rotated ' + v.rotation + '°' : ''}`)], ['audio', a && esc(`${a.codec}, ${a.sample_rate || '?'} Hz, ${a.channels || '?'} ch`)]]) +
+          `<details style="margin-top:8px"><summary class="small">All container tags</summary>${rows(Object.entries(m.tags || {}).map(([k, v]) => [k, esc(v)])) || '<p class="muted small">None.</p>'}</details>`);
+        section('Keyframes', `<p class="muted small" style="margin-top:0">Pull still frames to magnify, compare and reverse-search by hand.</p><button class="btn primary" id="kf">Extract frames</button><div id="kfout" style="margin-top:12px"></div>`);
+        $('kf').onclick = () => frames(src);
+      }
+      if (d.image) {
+        section('Perceptual hashes', rows([['pHash', `<code>${esc(d.image.hashes.phash)}</code>`], ['dHash', `<code>${esc(d.image.hashes.dhash)}</code>`], ['aHash', `<code>${esc(d.image.hashes.ahash)}</code>`]]) + '<p class="muted small">Similar pictures have similar hashes. Use “Compare two images” to measure the distance.</p>');
+      }
+      if (d.ela) {
+        if (d.ela.image && src.file) section('Error-level analysis', `<div class="pair"><figure><img src="${URL.createObjectURL(src.file)}" alt="Original image"><figcaption>Original</figcaption></figure><figure><img src="${d.ela.image}" alt="Error-level analysis result"><figcaption>Recompression error (quality ${d.ela.quality}, ×${d.ela.scale}); max ${d.ela.max_error}, mean ${d.ela.mean_error}</figcaption></figure></div><div class="notice info small" style="margin-top:10px">${esc(d.ela.caveat)}</div>`);
+        else if (d.ela.image) section('Error-level analysis', `<img src="${d.ela.image}" alt="Error-level analysis result" style="max-width:100%"><div class="notice info small" style="margin-top:10px">${esc(d.ela.caveat)}</div>`);
+        else section('Error-level analysis', `<p class="muted">${esc(d.ela.unavailable)}</p>`);
+      }
+      showC2pa(d.c2pa);
+    }
+    function showC2pa(c) {
+      if (!c) return;
+      if (!c.present) return section('Content Credentials (C2PA)', `<span class="badge">none found</span><p class="muted small">${esc(c.note)}</p>`);
+      if (!c.readable) return section('Content Credentials (C2PA)', `<span class="badge warn">unreadable</span><p class="muted small">${esc(c.note)}</p>`);
+      section('Content Credentials (C2PA)', `<div class="row"><span class="badge ok">${c.manifest_count} manifest${c.manifest_count > 1 ? 's' : ''} present</span><span class="badge warn">signature not validated</span>${c.ai_generated_declared ? '<span class="badge warn">declares AI-generated content</span>' : ''}</div>` +
+        c.manifests.map(m => `<div style="margin-top:12px">${rows([['manifest', `<code>${esc(m.label)}</code>${m.active ? ' <span class="badge">active</span>' : ''}`], ['claim generator', esc(m.claim_generator)], ['title', esc(m.title)], ['format', esc(m.format)],
+          ['signed by', esc(m.signature?.signer_subject)], ['issuer', esc(m.signature?.signer_issuer)], ['algorithm', esc(m.signature?.algorithm)], ['ingredients', m.ingredients || ''],
+          ['actions', m.actions.map(a => esc([a.action, a.software_agent, a.when, a.digital_source_type && a.digital_source_type.split('/').pop()].filter(Boolean).join(' · '))).join('<br>')], ['assertions', esc(m.assertions.join(', '))]])}</div>`).join('') +
+        `<div class="notice info small" style="margin-top:12px">${esc(c.note)}</div>`);
+    }
+    async function frames(src, into = 'kfout') {
+      const box = $(into); box.innerHTML = '<div class="loading"><span class="spin"></span>Decoding frames (can take a minute for long videos)…</div>';
+      try {
+        const d = src.file ? await call('api/keyframes?' + q(), { method: 'POST', body: src.file }) : await call('api/keyframes?' + q({ url: src.url }));
+        box.innerHTML = `<p class="muted small">${d.count} frames · ${d.mode_used === 'keyframes' ? 'keyframes' : 'evenly spaced'} · ${d.near_duplicate_frames} near-duplicate${d.near_duplicate_frames === 1 ? '' : 's'}. ${esc(d.note)}</p><div class="grid-frames" id="gf"></div><div id="vw" style="margin-top:12px"></div>`;
+        $('gf').innerHTML = d.frames.map(f => `<figure class="fr" style="margin:0"><img src="${f.image}" alt="Frame ${f.index + 1} at ${f.time_s ?? '?'} s" data-i="${f.index}" tabindex="0"><div class="meta"><div class="row"><b>#${f.index + 1}</b><span>${f.time_s != null ? f.time_s.toFixed(1) + ' s' : ''}</span>${f.similar_to.length ? `<span class="badge warn">≈ #${f.similar_to[0] + 1}</span>` : ''}</div><code>${esc(f.phash)}</code></div></figure>`).join('');
+        $('gf').querySelectorAll('img').forEach(im => { const go = () => viewer(im.src, `Frame ${+im.dataset.i + 1}`); im.onclick = go; im.onkeydown = e => { if (e.key === 'Enter') go(); }; });
+        window.__frames = d.frames;
+      } catch (e) { box.innerHTML = `<div class="state error" role="alert"><div class="h3">No frames</div><p>${esc(e.message)}</p></div>`; }
+    }
+
+    // viewer: magnifier lens + contrast / brightness / sharpen / invert / grayscale, computed in-page on the pixels
+    function viewer(src, title) {
+      const box = $('vw') || (() => section('Viewer', '<div id="vw"></div>').querySelector('#vw'))();
+      box.innerHTML = `<div class="viewer"><div class="card-head"><b>${esc(title)}</b><span class="muted small">Move over the picture to magnify. Filters change what you see, not the file.</span></div>
+        <div class="stage" id="stg"><canvas id="cvs"></canvas><div class="lens" id="lens"></div></div>
+        <div class="ctl"><label>Zoom <input type="range" id="z" min="2" max="8" step=".5" value="3"></label><label>Contrast <input type="range" id="c" min="0.5" max="3" step=".05" value="1"></label><label>Brightness <input type="range" id="b" min="-80" max="80" step="1" value="0"></label>
+        <label>Sharpen <input type="range" id="s" min="0" max="3" step=".1" value="0"></label><label class="check"><input type="checkbox" id="inv"> Invert</label><label class="check"><input type="checkbox" id="gry"> Grayscale</label><button class="btn sm" id="rst">Reset</button></div></div>`;
+      const img = new Image(); img.onload = () => { const cv = $('cvs'); cv.width = img.naturalWidth; cv.height = img.naturalHeight; draw(); box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }; img.src = src;
+      const cv = $('cvs'), ctx = cv.getContext('2d', { willReadFrequently: true }), lens = $('lens');
+      function draw() {
+        ctx.drawImage(img, 0, 0); const con = +$('c').value, br = +$('b').value, sh = +$('s').value, inv = $('inv').checked, gr = $('gry').checked;
+        let id = ctx.getImageData(0, 0, cv.width, cv.height), d = id.data;
+        if (sh > 0) { const o = new Uint8ClampedArray(d), w = cv.width, h = cv.height, k = sh; for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) for (let c = 0; c < 3; c++) { const i = (y * w + x) * 4 + c; d[i] = o[i] * (1 + 4 * k) - k * (o[i - 4] + o[i + 4] + o[i - w * 4] + o[i + w * 4]); } }
+        for (let i = 0; i < d.length; i += 4) { let r = (d[i] - 128) * con + 128 + br, g = (d[i + 1] - 128) * con + 128 + br, b = (d[i + 2] - 128) * con + 128 + br; if (gr) r = g = b = .299 * r + .587 * g + .114 * b; if (inv) { r = 255 - r; g = 255 - g; b = 255 - b; } d[i] = r; d[i + 1] = g; d[i + 2] = b; }
+        ctx.putImageData(id, 0, 0); lens.style.backgroundImage = `url(${cv.toDataURL('image/png')})`;
+      }
+      ['c', 'b', 's', 'inv', 'gry'].forEach(i => $(i).oninput = draw);
+      $('rst').onclick = () => { $('c').value = 1; $('b').value = 0; $('s').value = 0; $('inv').checked = $('gry').checked = false; draw(); };
+      const move = e => { const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, z = +$('z').value; if (x < 0 || y < 0 || x > r.width || y > r.height) { lens.style.display = 'none'; return; }
+        const sr = $('stg').getBoundingClientRect(); lens.style.display = 'block'; lens.style.left = (e.clientX - sr.left - 70) + 'px'; lens.style.top = (e.clientY - sr.top - 70 - (e.pointerType === 'touch' ? 90 : 0)) + 'px';
+        lens.style.backgroundSize = `${r.width * z}px ${r.height * z}px`; lens.style.backgroundPosition = `${70 - x * z}px ${70 - y * z}px`; };
+      $('stg').onpointermove = move; $('stg').onpointerdown = move; $('stg').onpointerleave = () => lens.style.display = 'none'; $('stg').onpointerup = e => { if (e.pointerType === 'touch') lens.style.display = 'none'; };
+    }
+
+    $('drop').onclick = () => $('file').click();
+    $('drop').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } };
+    $('file').onchange = e => e.target.files[0] && inspect({ file: e.target.files[0] });
+    $('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
+    $('drop').ondragleave = () => $('drop').classList.remove('over');
+    $('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); e.dataTransfer.files[0] && inspect({ file: e.dataTransfer.files[0] }); };
+    $('urlf').onsubmit = e => { e.preventDefault(); const u = $('url').value.trim(); if (!/^https?:\/\//i.test(u)) return fail('Enter a direct link', 'The link must start with http:// or https:// and point at the file itself, not at a web page.'); inspect({ url: u }); };
+
+    // YouTube
+    const engines = u => { const e = encodeURIComponent(u); return [['Google Lens', `https://lens.google.com/uploadbyurl?url=${e}`], ['TinEye', `https://tineye.com/search?url=${e}`], ['Yandex', `https://yandex.com/images/search?rpt=imageview&url=${e}`], ['Bing', `https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:${e}`]]; };
+    $('ytf').onsubmit = async e => {
+      e.preventDefault(); busy('Looking up frames…');
+      try {
+        const d = await call('api/youtube?url=' + encodeURIComponent($('yurl').value)); out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+        section('YouTube frames', `<p class="muted small" style="margin-top:0">${esc(d.note)}</p><div class="grid-frames">${d.frames.map(f => `<figure class="fr" style="margin:0"><img src="${esc(f.src)}" alt="${esc(f.label)}" data-s="${esc(f.src)}" data-l="${esc(f.label)}" tabindex="0" onerror="this.alt='Not available for this video';this.style.minHeight='80px'"><div class="meta"><b>${esc(f.label)}</b><div class="links">${engines(f.public_url).map(([n, h]) => `<a target="_blank" rel="noopener noreferrer" href="${h}">${n}</a>`).join('')}</div></div></figure>`).join('')}</div><div id="vw" style="margin-top:12px"></div>`);
+        out.querySelectorAll('.fr img').forEach(im => { const go = () => viewer(im.dataset.s, im.dataset.l); im.onclick = go; im.onkeydown = ev => { if (ev.key === 'Enter') go(); }; });
+        section('More', `<ul class="list-plain"><li><a target="_blank" rel="noopener noreferrer" href="${esc(d.links.watch)}">Video page on YouTube</a> (upload date, description)</li><li><a target="_blank" rel="noopener noreferrer" href="${esc(d.links.wayback)}">Internet Archive captures of the video page</a></li></ul>`);
+      } catch (err) { fail('Could not get frames', err.message); }
+    };
+
+    // compare
+    $('cmpgo').onclick = async () => {
+      const a = $('fa').files[0], b = $('fb').files[0]; if (!a || !b) return toast('Choose both images', 'warn');
+      busy('Comparing…'); const fd = new FormData(); fd.append('a', a); fd.append('b', b);
+      try {
+        const d = await call('api/compare', { method: 'POST', body: fd }); out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+        const cls = { 'near-identical': 'ok', similar: 'warn', different: 'err' }[d.verdict];
+        section('Result', `<div class="row"><span class="badge ${cls}" style="font-size:13px">${esc(d.verdict)}</span>${d.mirrored_match ? '<span class="badge warn">matches when mirrored</span>' : ''}${d.identical_bytes ? '<span class="badge ok">byte-identical files</span>' : ''}</div>
+          <div class="dists"><div><b>${d.distance.phash}/64</b><span>pHash distance</span></div><div><b>${d.distance.dhash}/64</b><span>dHash distance</span></div><div><b>${d.distance.ahash}/64</b><span>aHash distance</span></div><div><b>${d.mean_pixel_difference_percent}%</b><span>mean pixel difference</span></div></div>
+          <div class="pair"><figure><img src="${URL.createObjectURL(a)}" alt="Image A"><figcaption>A · ${d.a.width}×${d.a.height}</figcaption></figure><figure><img src="${URL.createObjectURL(b)}" alt="Image B"><figcaption>B · ${d.b.width}×${d.b.height}</figcaption></figure><figure><img src="${d.heatmap}" alt="Difference heatmap"><figcaption>Where they differ (brighter = more)</figcaption></figure></div>
+          ${d.notes.map(n => `<div class="notice info small" style="margin-top:8px">${esc(n)}</div>`).join('')}
+          ${(d.c2pa.a || d.c2pa.b) ? `<div class="notice warn small" style="margin-top:8px">Content Credentials were found in ${d.c2pa.a ? 'A' : ''}${d.c2pa.a && d.c2pa.b ? ' and ' : ''}${d.c2pa.b ? 'B' : ''}. Inspect the file on the “File or link” tab.</div>` : ''}`);
+      } catch (err) { fail('Comparison failed', err.message); }
+    };
+  </script>
+</body>
+</html>

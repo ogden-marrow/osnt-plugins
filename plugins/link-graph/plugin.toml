@@ -1,0 +1,14 @@
+id = "link-graph"
+name = "Link graph"
+description = "Maltego-style entity graph for domains, IPs, ASNs, organisations, vessels, aircraft, places and more. No person, username, email or phone nodes."
+grid = "Investigation"
+port = 8164
+version = "0.1.0"
+provides = ["link-graph"]
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_LINK_GRAPH_BIND = "127.0.0.1:{port}"
+OSNT_STATE_DIR = "{state_dir}"

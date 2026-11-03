@@ -1,0 +1,25 @@
+id = "web-archive"
+name = "Web archives"
+description = "Internet Archive snapshots per URL, snapshot text diffs, domain URL harvest, Common Crawl lookups and an archive-and-record evidence capture."
+grid = "Media & Verification"
+port = 8161
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_WEB_ARCHIVE_BIND = "127.0.0.1:{port}"
+
+# Optional: Internet Archive S3-style keys raise the Save Page Now limits (https://archive.org/account/s3.php).
+[[secret]]
+name = "ARCHIVE_ORG_ACCESS"
+label = "Internet Archive access key (optional, higher Save Page Now limits)"
+help_url = "https://archive.org/account/s3.php"
+required = false
+
+[[secret]]
+name = "ARCHIVE_ORG_SECRET"
+label = "Internet Archive secret key (optional)"
+help_url = "https://archive.org/account/s3.php"
+required = false

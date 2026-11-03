@@ -195,3 +195,31 @@ name = "Conflict events"
 description = "Georeferenced armed-conflict events from UCDP (free token) and optionally ACLED, on a map with timeline and event-type breakdown."
 version = "0.1.0"
 path = "plugins/conflict-events"
+
+[[plugin]]
+id = "web-archive"
+name = "Web archives"
+description = "Internet Archive snapshots per URL, snapshot text diffs, domain URL harvest, Common Crawl lookups and an archive-and-record evidence capture."
+version = "0.1.0"
+path = "plugins/web-archive"
+
+[[plugin]]
+id = "media-verify"
+name = "Media verification"
+description = "Video keyframes and metadata (ffprobe), YouTube thumbnail frames, perceptual-hash comparison, error-level analysis and a Content Credentials (C2PA) reader. No face or person matching."
+version = "0.1.0"
+path = "plugins/media-verify"
+
+[[plugin]]
+id = "case-notebook"
+name = "Case notebook"
+description = "Investigation cases with Markdown notes, a dated timeline and a tamper-evident evidence log; other plugins can pin results into a case."
+version = "0.1.0"
+path = "plugins/case-notebook"
+
+[[plugin]]
+id = "link-graph"
+name = "Link graph"
+description = "Maltego-style entity graph for domains, IPs, ASNs, organisations, vessels, aircraft, places and more. No person, username, email or phone nodes."
+version = "0.1.0"
+path = "plugins/link-graph"

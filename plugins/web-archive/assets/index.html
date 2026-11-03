@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Web archives · OSNT</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 280px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .opts { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 10px 0 0; font-size: var(--fs-sm); color: var(--ink-2); }
+    .opts label { display: inline-flex; align-items: center; gap: 6px; }
+    .opts select, .opts input { min-height: 32px; }
+    #out { display: grid; gap: 12px; margin-top: 16px; }
+    #out:empty { display: none; }
+    #out > *, .card { min-width: 0; }
+    table.data td:last-child { white-space: nowrap; }
+    .cal { min-width: 330px; }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 4px 0 12px; }
+    .stat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+    .stat span { font-size: var(--fs-xs); color: var(--ink-3); }
+    .cal { display: grid; grid-template-columns: 44px repeat(12, minmax(18px, 1fr)); gap: 3px; align-items: center; font-size: var(--fs-xs); color: var(--ink-3); }
+    .cal .yr { font-variant-numeric: tabular-nums; }
+    .cal button { aspect-ratio: 1.3; min-height: 18px; border: 0; border-radius: 3px; background: var(--surface-2); cursor: pointer; padding: 0; position: relative; }
+    .cal button.has { background: var(--accent); }
+    .cal button.chg::after { content: ""; position: absolute; right: 2px; top: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 1px var(--surface); }
+    .cal button.sel { outline: 2px solid var(--focus); outline-offset: 1px; }
+    .cal .mh { text-align: center; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: var(--fs-xs); color: var(--ink-3); align-items: center; }
+    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--accent); vertical-align: -1px; margin-right: 4px; }
+    .legend i.w { background: var(--warn); border-radius: 50%; width: 7px; height: 7px; }
+    .pick { display: inline-flex; gap: 4px; }
+    .pick button { min-width: 26px; min-height: 26px; padding: 0 6px; font: 600 var(--fs-xs)/1 var(--font); border: 1px solid var(--edge-strong); background: var(--surface); color: var(--ink-2); border-radius: 4px; cursor: pointer; }
+    .pick button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+    tr.row-sel td { background: var(--accent-soft); }
+    .diff { font: 12.5px/1.5 var(--font-mono); border: 1px solid var(--edge); border-radius: var(--radius-sm); overflow: auto; max-height: 520px; }
+    .diff .l { display: block; padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .diff .l.add { background: var(--ok-soft); color: var(--ink); }
+    .diff .l.del { background: var(--err-soft); color: var(--ink); }
+    .diff .l.ctx { color: var(--ink-3); }
+    .diff .l::before { display: inline-block; width: 1.4em; font-weight: 700; }
+    .diff .l.add::before { content: "+"; color: var(--ok); }
+    .diff .l.del::before { content: "−"; color: var(--err); }
+    .diff .l.ctx::before { content: " "; }
+    .diff .sepr { display: block; padding: 2px 10px; background: var(--surface-2); color: var(--ink-3); font-size: 11px; }
+    .urls { max-height: 420px; overflow: auto; font: 12.5px/1.7 var(--font-mono); background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; overflow-wrap: anywhere; }
+    .urls a { color: var(--ink); }
+    code.hash { display: block; overflow-wrap: anywhere; }
+    .tabbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+    .hide { display: none !important; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Web archives</h1>
+  </header>
+  <main class="page">
+    <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Internet Archive and Common Crawl</h2>
+      <p>See how a page changed, harvest the URLs an archive knows for a domain, and capture a page with a recorded hash and time.</p></div></div>
+    <form id="f" role="search"><label class="sr-only" for="q">URL or domain</label>
+      <input id="q" placeholder="https://example.com/page or example.com" autofocus autocomplete="off" spellcheck="false">
+      <button class="btn primary" id="b-snap" type="submit">Snapshots</button>
+      <button class="btn" id="b-urls" type="button">Domain URLs</button>
+      <button class="btn" id="b-cc" type="button">Common Crawl</button>
+      <button class="btn" id="b-save" type="button" title="Ask the Internet Archive to capture this page now">Save page now</button>
+    </form>
+    <div class="opts">
+      <label>Order <select id="order"><option value="earliest">earliest first</option><option value="latest">most recent</option></select></label>
+      <label>Max <select id="limit"><option>200</option><option selected>1000</option><option>5000</option></select></label>
+      <label>Status <select id="status"><option value="">any</option><option>200</option><option>301</option><option>302</option><option>404</option></select></label>
+      <label class="check"><input type="checkbox" id="scope"> whole domain</label>
+      <a id="atoday" href="#" target="_blank" rel="noopener noreferrer" class="small">archive.today (opens in a new tab)</a>
+    </div>
+    <div id="out" aria-live="polite" aria-busy="false"></div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const section = (title, html, id) => { const s = document.createElement('section'); s.className = 'card'; if (id) s.id = id; s.innerHTML = `<div class="card-head"><h3 class="h3">${esc(title)}</h3></div>${html}`; out.appendChild(s); return s; };
+    const busy = msg => { out.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(msg)}</div>`; out.setAttribute('aria-busy', 'true'); };
+    const fail = (title, msg) => { out.setAttribute('aria-busy', 'false'); out.innerHTML = `<div class="state error" role="alert"><div class="h3">${esc(title)}</div><p>${esc(msg)}</p></div>`; };
+    function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('toasts').appendChild(t); setTimeout(() => t.remove(), 5000); }
+    async function api(path, opt) {
+      const r = await fetch(path, opt), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || (r.status === 401 ? 'Sign in to the hub first' : 'HTTP ' + r.status));
+      return d;
+    }
+    const day = t => (t || '').slice(0, 10);
+    const hex = ts => ts.length === 14 ? ts : '';
+    let snaps = [], target = '', A = null, B = null, monthFilter = null;
+
+    const params = () => new URLSearchParams({ url: $('q').value.trim(), limit: $('limit').value, order: $('order').value, status: $('status').value, scope: $('scope').checked ? 'domain' : '' });
+    $('q').addEventListener('input', () => { const v = $('q').value.trim(); $('atoday').href = v ? 'https://archive.ph/' + encodeURIComponent(v).replace(/%3A/g, ':').replace(/%2F/g, '/') : '#'; });
+
+    $('f').onsubmit = async e => {
+      e.preventDefault(); if (!$('q').value.trim()) return fail('Enter a URL', 'Type a page address or a domain first.');
+      busy('Asking the Internet Archive…'); A = B = monthFilter = null;
+      try { const d = await api('api/snapshots?' + params()); target = d.query.url; snaps = d.snapshots; renderSnaps(d); }
+      catch (err) { fail('Could not list snapshots', err.message); }
+    };
+
+    function renderSnaps(d) {
+      out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+      if (!d.count) { out.innerHTML = '<div class="state"><div class="h3">No captures found</div><p>The archive has no snapshots for this exact URL. Try the domain-wide switch, a different scheme or the harvest button.</p></div>'; return; }
+      const stat = (v, l) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`;
+      section('Overview', `<div class="stats">${stat(d.count + (d.capped ? '+' : ''), 'captures')}${stat(day(d.first_seen), 'first seen')}${stat(day(d.last_seen), 'last seen')}${stat(d.distinct_versions, 'distinct versions')}${stat(d.content_changes, 'content changes')}</div>
+        ${d.capped ? '<div class="notice warn small" style="margin-bottom:12px">The result hit the limit, so history may continue beyond what is shown. Raise the limit or switch the order.</div>' : ''}
+        <div class="table-wrap"><div class="cal" id="cal"></div></div>
+        <div class="legend"><span><i></i>month with captures (click to filter)</span><span><i class="w"></i>page content changed</span></div>`);
+      drawCal(d);
+      section('Compare two captures', `<p class="muted small" style="margin:0 0 10px">Mark one capture A and another B in the table, then compare their visible text.</p>
+        <div class="row"><span id="ab" class="small muted">A and B not chosen</span><button class="btn sm primary" id="cmp" disabled>Compare A and B</button></div><div id="diffout" style="margin-top:12px"></div>`, 'cmpcard');
+      $('cmp').onclick = runDiff;
+      section('Captures', `<div id="tbl"></div>`);
+      drawTable();
+    }
+
+    function drawCal(d) {
+      const byM = Object.fromEntries(d.months.map(m => [m.month, m])), years = [...new Set(d.months.map(m => m.month.slice(0, 4)))].sort();
+      const max = Math.max(...d.months.map(m => m.captures));
+      let h = '<span></span>' + 'JFMAMJJASOND'.split('').map(c => `<span class="mh">${c}</span>`).join('');
+      for (const y of years) {
+        h += `<span class="yr">${y}</span>`;
+        for (let m = 1; m <= 12; m++) {
+          const key = y + String(m).padStart(2, '0'), v = byM[key];
+          h += v ? `<button class="has${v.changes ? ' chg' : ''}${monthFilter === key ? ' sel' : ''}" data-m="${key}" style="opacity:${0.35 + 0.65 * v.captures / max}" title="${key.slice(0, 4)}-${key.slice(4)}: ${v.captures} capture${v.captures > 1 ? 's' : ''}${v.changes ? ', ' + v.changes + ' with changed content' : ''}" aria-label="${key.slice(0, 4)}-${key.slice(4)}: ${v.captures} captures"></button>` : '<button disabled aria-hidden="true" tabindex="-1"></button>';
+        }
+      }
+      $('cal').innerHTML = h;
+      $('cal').querySelectorAll('button[data-m]').forEach(b => b.onclick = () => { monthFilter = monthFilter === b.dataset.m ? null : b.dataset.m; drawCal(d); drawTable(); });
+    }
+
+    function drawTable() {
+      const rows = snaps.filter(s => !monthFilter || s.timestamp.startsWith(monthFilter));
+      $('tbl').innerHTML = `<div class="table-wrap"><table class="data"><thead><tr><th>Compare</th><th>Captured (UTC)</th><th>Status</th><th>Type</th><th class="num">Bytes</th><th></th></tr></thead><tbody>${rows.slice(0, 600).map(s =>
+        `<tr class="${s.timestamp === A || s.timestamp === B ? 'row-sel' : ''}"><td><span class="pick"><button data-p="A" data-t="${s.timestamp}" class="${s.timestamp === A ? 'on' : ''}" aria-label="Use as A">A</button><button data-p="B" data-t="${s.timestamp}" class="${s.timestamp === B ? 'on' : ''}" aria-label="Use as B">B</button></span></td>
+         <td>${esc(s.time.replace('T', ' ').replace('Z', ''))} ${s.changed ? '<span class="badge warn">changed</span>' : ''}</td><td>${esc(s.status)}</td><td>${esc(s.mime)}</td><td class="num">${s.length ?? ''}</td>
+         <td><a href="${esc(s.archive_url)}" target="_blank" rel="noopener noreferrer">open</a> · <a href="#" data-e="${s.timestamp}">evidence</a></td></tr>`).join('')}</tbody></table></div>${rows.length > 600 ? `<p class="muted small">Showing 600 of ${rows.length}. Use the calendar to narrow it down.</p>` : ''}`;
+      $('tbl').querySelectorAll('[data-p]').forEach(b => b.onclick = () => { const t = b.dataset.t; if (b.dataset.p === 'A') A = A === t ? null : t; else B = B === t ? null : t; drawTable(); updAB(); });
+      $('tbl').querySelectorAll('[data-e]').forEach(a => a.onclick = e => { e.preventDefault(); showEvidence(a.dataset.e); });
+      updAB();
+    }
+    function updAB() { if (!$('ab')) return; $('ab').textContent = `A: ${A ? A : '—'}   B: ${B ? B : '—'}`; $('cmp').disabled = !(A && B && A !== B); }
+
+    async function runDiff() {
+      const box = $('diffout'); box.innerHTML = '<div class="loading"><span class="spin"></span>Fetching both captures…</div>';
+      try {
+        const [a, b] = A < B ? [A, B] : [B, A];
+        const d = await api('api/diff?' + new URLSearchParams({ url: target, a, b }));
+        const st = d.stats;
+        let h = `<div class="stats"><div class="stat"><b>${st.added}</b><span>lines added</span></div><div class="stat"><b>${st.removed}</b><span>lines removed</span></div><div class="stat"><b>${Math.round(st.similarity * 100)}%</b><span>text similarity</span></div></div>
+          <table class="kv"><tr><th>A</th><td>${esc(d.a.time)} · <a href="${esc(d.a.archive_url)}" target="_blank" rel="noopener noreferrer">open</a> · ${d.a.bytes.toLocaleString()} bytes ${d.title_a ? '· ' + esc(d.title_a) : ''}</td></tr>
+          <tr><th>B</th><td>${esc(d.b.time)} · <a href="${esc(d.b.archive_url)}" target="_blank" rel="noopener noreferrer">open</a> · ${d.b.bytes.toLocaleString()} bytes ${d.title_b ? '· ' + esc(d.title_b) : ''}</td></tr></table>`;
+        if (d.identical_bytes) h += '<div class="notice ok" style="margin-top:10px">The two captures are byte-for-byte identical.</div>';
+        else if (d.identical_text) h += '<div class="notice info" style="margin-top:10px">The visible text is identical; only markup, scripts or styles differ.</div>';
+        else h += '<div class="diff" style="margin-top:12px" tabindex="0" aria-label="Text differences">' + d.hunks.map(hk => hk.lines.map(l => `<span class="l ${l.kind}">${esc(l.text)}</span>`).join('')).join('<span class="sepr">…</span>') + '</div>' + (d.truncated ? '<p class="muted small">Diff truncated.</p>' : '');
+        if (d.links_added.length || d.links_removed.length) h += `<details style="margin-top:12px"><summary class="small">Links changed (${d.links_added.length} added, ${d.links_removed.length} removed)</summary><div class="urls">${d.links_added.map(l => '<div>+ ' + esc(l) + '</div>').join('')}${d.links_removed.map(l => '<div>− ' + esc(l) + '</div>').join('')}</div></details>`;
+        box.innerHTML = h;
+      } catch (err) { box.innerHTML = `<div class="state error" role="alert"><div class="h3">Comparison failed</div><p>${esc(err.message)}</p></div>`; }
+    }
+
+    // ---- evidence record + pin to case-notebook (browser-side, so the hub's sign-in applies) ----
+    let ev = null;
+    async function showEvidence(ts) {
+      document.getElementById('evcard')?.remove();
+      const card = section('Evidence record', '<div class="loading"><span class="spin"></span>Hashing the archived copy…</div>', 'evcard'); card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      try { ev = await api('api/evidence?' + new URLSearchParams({ url: target || $('q').value.trim(), ts })); drawEvidence(card); }
+      catch (err) { card.innerHTML = `<div class="state error" role="alert"><div class="h3">No evidence record</div><p>${esc(err.message)}</p></div>`; }
+    }
+    function drawEvidence(card) {
+      card.innerHTML = `<div class="card-head"><h3 class="h3">Evidence record</h3><span class="badge ok">archived copy hashed</span></div>
+        <table class="kv"><tr><th>Page</th><td>${esc(ev.url)}</td></tr><tr><th>Captured</th><td>${esc(ev.captured_at)}</td></tr><tr><th>SHA-256</th><td><code class="hash">${esc(ev.sha256)}</code></td></tr>
+        <tr><th>Size</th><td>${ev.bytes.toLocaleString()} bytes${ev.truncated ? ' (hash covers the first 25 MB only)' : ''}</td></tr>
+        <tr><th>Archive URL</th><td><a href="${esc(ev.archive_url)}" target="_blank" rel="noopener noreferrer">${esc(ev.archive_url)}</a></td></tr></table>
+        <p class="muted small">${esc(ev.note)}</p>
+        <div class="row"><button class="btn sm" id="evcopy">Copy JSON</button><span id="pinbox" class="row"></span></div>`;
+      $('evcopy').onclick = () => navigator.clipboard?.writeText(JSON.stringify(ev, null, 2)).then(() => toast('Copied'), () => toast('Copy failed', 'err'));
+      pinUi();
+    }
+    async function pinUi() {
+      const box = $('pinbox'); if (!box) return;
+      let cases = null;
+      try { const r = await fetch('/p/case-notebook/api/cases'); if (r.ok) cases = await r.json(); } catch {}
+      if (!cases) { box.innerHTML = '<span class="muted small">Install the Case notebook plugin to pin evidence to a case.</span>'; return; }
+      box.innerHTML = `<label class="sr-only" for="pincase">Case</label><select id="pincase"><option value="">Inbox (new items)</option>${(cases.cases || cases).map(c => `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join('')}</select><button class="btn sm primary" id="pin">Pin to case</button>`;
+      $('pin').onclick = async () => {
+        try {
+          await api('/p/case-notebook/api/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ case_id: $('pincase').value || null, kind: 'evidence', title: ev.title, url: ev.url, captured_at: ev.captured_at, sha256: ev.sha256, archive_url: ev.archive_url, note: ev.note, source_plugin: 'web-archive' }) });
+          toast('Pinned to the case notebook');
+        } catch (err) { toast('Could not pin: ' + err.message, 'err'); }
+      };
+    }
+
+    // ---- Save Page Now ----
+    $('b-save').onclick = async () => {
+      const u = $('q').value.trim(); if (!/^https?:\/\//i.test(u)) return fail('Enter a full URL', 'Save Page Now needs an address starting with http:// or https://.');
+      if (!confirm('Ask the Internet Archive to capture this page now? The page will become publicly visible in the archive.\n\n' + u)) return;
+      busy('Asking the Internet Archive to capture the page (up to a minute)…'); $('b-save').disabled = true;
+      try {
+        let d = await api('api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: u }) });
+        for (let i = 0; d.status === 'pending' && d.job_id && i < 30; i++) { await new Promise(r => setTimeout(r, 4000)); d = await api('api/save/status?job=' + encodeURIComponent(d.job_id)); }
+        if (d.status !== 'success') throw new Error(d.message || 'The capture did not finish. Check the archive later.');
+        target = u; out.setAttribute('aria-busy', 'false'); out.innerHTML = '';
+        section('Captured', `<div class="notice ok">Captured at ${esc(d.time)}. <a href="${esc(d.archive_url)}" target="_blank" rel="noopener noreferrer">Open the archived page</a></div><p class="muted small">Next: record the hash and time as evidence.</p><button class="btn primary" id="mkev">Create evidence record</button>`);
+        $('mkev').onclick = () => showEvidence(d.timestamp);
+      } catch (err) { fail('Could not capture the page', err.message); }
+      $('b-save').disabled = false;
+    };
+
+    // ---- domain harvest ----
+    $('b-urls').onclick = async () => {
+      if (!$('q').value.trim()) return fail('Enter a domain', 'Type a domain such as example.com first.');
+      busy('Harvesting archived URLs (this can take a while for large sites)…');
+      try {
+        const d = await api('api/urls?' + new URLSearchParams({ domain: $('q').value.trim(), limit: $('limit').value }));
+        out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+        if (!d.count) { out.innerHTML = '<div class="state"><div class="h3">No URLs found</div><p>The archive has no 200-status captures under this domain.</p></div>'; return; }
+        section(`${d.count.toLocaleString()} URLs under ${d.domain}${d.capped ? ' (limit reached)' : ''}`, `<div class="row" style="margin-bottom:10px"><label class="sr-only" for="uf">Filter</label><input id="uf" placeholder="Filter, e.g. .pdf or /admin" style="flex:1 1 220px"><button class="btn sm" id="ucopy">Copy list</button><button class="btn sm" id="udl">Download .txt</button></div>
+          <div class="muted small" id="ucount" style="margin-bottom:6px"></div><div class="urls" id="ulist" tabindex="0"></div>`);
+        section('Hosts', `<table class="data"><thead><tr><th>Host</th><th class="num">URLs</th></tr></thead><tbody>${d.hosts.map(h => `<tr><td>${esc(h.host)}</td><td class="num">${h.urls}</td></tr>`).join('')}</tbody></table>`);
+        const draw = () => { const f = $('uf').value.toLowerCase(), l = d.urls.filter(u => u.url.toLowerCase().includes(f)); $('ucount').textContent = `${l.length.toLocaleString()} shown`; $('ulist').innerHTML = l.slice(0, 1500).map(u => `<div><a href="https://web.archive.org/web/2/${esc(u.url)}" target="_blank" rel="noopener noreferrer">${esc(u.url)}</a></div>`).join('') + (l.length > 1500 ? '<div class="faint">… narrow the filter to see more</div>' : ''); return l; };
+        $('uf').oninput = draw; draw();
+        $('ucopy').onclick = () => navigator.clipboard?.writeText(draw().map(u => u.url).join('\n')).then(() => toast('Copied'), () => toast('Copy failed', 'err'));
+        $('udl').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([draw().map(u => u.url).join('\n')], { type: 'text/plain' })); a.download = d.domain + '-archived-urls.txt'; a.click(); };
+      } catch (err) { fail('Harvest failed', err.message); }
+    };
+
+    // ---- Common Crawl ----
+    $('b-cc').onclick = async () => {
+      if (!$('q').value.trim()) return fail('Enter a URL or domain', 'Type an address first.');
+      busy('Asking Common Crawl…');
+      try {
+        const d = await api('api/commoncrawl?' + new URLSearchParams({ url: $('q').value.trim(), limit: '200', crawls: '2', scope: $('scope').checked ? 'domain' : '' }));
+        out.innerHTML = ''; out.setAttribute('aria-busy', 'false');
+        for (const r of d.results) section(`Crawl ${r.crawl}`, r.captures.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>URL</th><th>Captured</th><th>Status</th><th>Type</th></tr></thead><tbody>${r.captures.map(c => `<tr><td>${esc(c.url)}</td><td>${esc(day(c.time))}</td><td>${esc(c.status)}</td><td>${esc(c.mime)}</td></tr>`).join('')}</tbody></table></div><p class="muted small">Each row points into a WARC file (${esc(r.captures[0].warc)}…). Common Crawl serves the raw archives, not a page viewer.</p>` : '<p class="muted">No captures in this crawl.</p>');
+      } catch (err) { fail('Common Crawl lookup failed', err.message); }
+    };
+    fetch('api/info').then(r => r.json()).then(i => { $('b-save').title += ' (' + i.save_mode + ' mode)'; }).catch(() => {});
+    const qs = new URLSearchParams(location.search).get('url'); if (qs) { $('q').value = qs; $('f').requestSubmit(); }
+  </script>
+</body>
+</html>
