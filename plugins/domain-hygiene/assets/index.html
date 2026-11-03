@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Domain hygiene · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 260px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .stackv { display: grid; gap: var(--gap); margin-top: 16px; }
+    .stackv:empty { display: none; }
+    .stackv > *, .cols3 > *, .cols2 > * { min-width: 0; }
+    .score { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+    .score .big { font: 700 44px/1 var(--font); letter-spacing: -.02em; }
+    .score .big small { font-size: 18px; color: var(--ink-3); font-weight: 500; }
+    .bar { flex: 1 1 200px; height: 10px; border-radius: 6px; background: var(--surface-2); overflow: hidden; display: flex; }
+    .bar i { display: block; height: 100%; }
+    .bar .p { background: var(--ok); } .bar .w { background: var(--warn); } .bar .f { background: var(--err); }
+    ul.checks { list-style: none; margin: 0; padding: 0; }
+    ul.checks > li { border-top: 1px solid var(--edge); padding: 10px 0; display: grid; grid-template-columns: 74px 1fr; gap: 4px 12px; align-items: start; }
+    ul.checks > li:first-child { border-top: 0; }
+    .st { justify-self: start; justify-content: center; min-width: 62px; text-transform: uppercase; letter-spacing: .03em; }
+    .ttl { font-weight: 600; }
+    .sum { color: var(--ink-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+    details { grid-column: 2; margin-top: 4px; }
+    summary { cursor: pointer; font-size: var(--fs-xs); color: var(--link); min-height: 24px; }
+    pre.raw { margin: 6px 0 0; padding: 10px; background: var(--surface-2); border-radius: var(--radius-sm); font: 12px/1.5 var(--font-mono); overflow: auto; max-height: 280px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .tree { font: 12.5px/1.6 var(--font-mono); margin: 6px 0 0; padding-left: 0; list-style: none; }
+    .tree ul { list-style: none; padding-left: 16px; border-left: 1px solid var(--edge-strong); margin: 2px 0 2px 4px; }
+    .tree .m { color: var(--ink-2); } .tree .e { color: var(--err); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { min-height: 30px; padding: 0 10px; font-size: var(--fs-sm); }
+    .mini { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+    @media (max-width: 520px) { ul.checks > li { grid-template-columns: 1fr; } details { grid-column: 1; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Domain hygiene</h1>
+  </header>
+  <main class="page">
+    <div class="page-head">
+      <div><h2 class="h2" style="font-size:22px;margin:0">Check a domain's DNS, mail and policy setup</h2>
+      <p>A scored checklist: SPF, DMARC, DKIM, MTA-STS, DNSSEC, name servers, CAA and security.txt. Passive lookups only; mailbox names are never shown.</p></div>
+    </div>
+    <form id="f" role="search"><label class="sr-only" for="q">Domain</label><input id="q" placeholder="example.com" autofocus autocomplete="off" spellcheck="false"><button class="btn primary" id="go">Check</button></form>
+    <div id="out" class="stackv" aria-live="polite" aria-busy="false"></div>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const GROUPS = [['mail', 'Mail policy'], ['dnssec', 'DNSSEC'], ['dns', 'DNS health'], ['web', 'Web policy files']];
+    const LAB = { pass: 'ok', warn: 'warn', fail: 'err', info: '', unknown: '' };
+    let data = {}, domain = '', ticket = 0;
+    async function api(path) { const r = await fetch(path), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status); return d; }
+
+    function treeHtml(n) {
+      if (!n) return '';
+      if (n.error) return `<li><span class="e">${esc(n.domain)}: ${esc(n.error)}</span></li>`;
+      const ms = (n.mechanisms || []).map(m => `<span class="m">${esc((m.q === '+' ? '' : m.q || '') + m.kind + (m.arg ? ':' + m.arg : ''))}</span>`).join(' ');
+      return `<li><b>${esc(n.domain)}</b> ${ms}${(n.children || []).length ? `<ul>${n.children.map(treeHtml).join('')}</ul>` : ''}</li>`;
+    }
+    function extra(c) {
+      if (c.id === 'spf' && c.data?.tree) return `<details open><summary>SPF include tree</summary><ul class="tree">${treeHtml(c.data.tree)}</ul></details>`;
+      if (c.data == null) return '';
+      return `<details><summary>Raw data</summary><pre class="raw">${esc(JSON.stringify(c.data, null, 2))}</pre></details>`;
+    }
+    function row(c) {
+      return `<li><span class="badge st ${LAB[c.status] || ''}">${esc(c.status)}</span><div><div class="ttl">${esc(c.title)}</div><div class="sum">${esc(c.summary)}</div></div>${extra(c)}</li>`;
+    }
+    function score(checks) {
+      let e = 0, t = 0, p = 0, w = 0, f = 0;
+      checks.forEach(c => { const x = c.weight ?? 1; if (c.status === 'pass') { e += x; t += x; p++; } else if (c.status === 'warn') { e += x / 2; t += x; w++; } else if (c.status === 'fail') { t += x; f++; } });
+      return { score: t ? Math.round(100 * e / t) : null, p, w, f };
+    }
+    function draw() {
+      const all = GROUPS.flatMap(([id]) => data[id]?.checks || []), s = score(all);
+      const pending = GROUPS.filter(([id]) => !data[id]).length, tot = Math.max(1, s.p + s.w + s.f);
+      let h = `<section class="card"><div class="score"><div class="big">${s.score ?? '–'}<small>/100</small></div><div style="flex:1 1 220px"><div class="h3">${esc(domain)}</div>
+        <div class="bar" role="img" aria-label="${s.p} pass, ${s.w} warn, ${s.f} fail"><i class="p" style="width:${100 * s.p / tot}%"></i><i class="w" style="width:${100 * s.w / tot}%"></i><i class="f" style="width:${100 * s.f / tot}%"></i></div>
+        <div class="muted small" style="margin-top:6px">${s.p} pass · ${s.w} warn · ${s.f} fail${pending ? ` · <span class="loading"><span class="spin" style="width:12px;height:12px"></span>${pending} section${pending > 1 ? 's' : ''} still running</span>` : ''}</div></div>
+        <button class="btn sm" id="copy" type="button">Copy JSON</button></div>
+        <p class="mini">Score: pass counts 1, warn 0.5, fail 0, weighted (SPF, DMARC, DNSSEC and name servers count double). Optional items (BIMI, TLS-RPT, robots, wildcard) are informational and not scored.</p></section>`;
+      for (const [id, title] of GROUPS) {
+        const g = data[id];
+        h += `<section class="card"><div class="card-head"><h3 class="h3">${title}</h3></div>${g ? (g.error ? `<div class="state error" role="alert"><p>${esc(g.error)}</p></div>` : `<ul class="checks">${g.checks.map(row).join('')}</ul>`) : '<div class="loading"><span class="spin" aria-hidden="true"></span>Checking…</div>'}</section>`;
+      }
+      h += `<section class="card" id="rec"><div class="card-head"><h3 class="h3">Raw records</h3></div><div class="chips" role="group" aria-label="Record type">${['A', 'AAAA', 'NS', 'MX', 'TXT', 'SOA', 'CAA', 'CNAME', 'DS', 'DNSKEY', 'HTTPS'].map(t => `<button type="button" class="btn chip" data-t="${t}">${t}</button>`).join('')}</div><div id="recout" class="small" style="margin-top:10px"></div></section>`;
+      h += `<section class="card"><h3 class="h3" style="margin-bottom:8px">Sources and notes</h3><ul class="list-plain small muted">
+        <li>DNS answers come from Google Public DNS over HTTPS (dns.google), with DNSSEC validation. security.txt, robots.txt and the MTA-STS policy are fetched once from the domain itself through an SSRF-guarded client (public addresses only).</li>
+        <li>DKIM is probed at ${24} common selector names only; absence does not prove a domain has no DKIM. Nothing is brute-forced.</li>
+        <li>Checks follow RFC 7208 (SPF), RFC 7489 (DMARC), RFC 8461 (MTA-STS), RFC 8460 (TLS-RPT), RFC 8659 (CAA), RFC 9116 (security.txt). Results are cached for minutes.</li></ul></section>`;
+      const keep = $('recout')?.innerHTML; out.innerHTML = h; if (keep) $('recout').innerHTML = keep;
+      $('copy').onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify({ domain, groups: data }, null, 2)); toast('JSON copied'); } catch { toast('Copy failed'); } };
+      out.querySelectorAll('[data-t]').forEach(b => b.onclick = () => loadRec(b.dataset.t));
+    }
+    function toast(m) { let t = $('toasts'); if (!t) { t = document.createElement('div'); t.id = 'toasts'; t.className = 'toasts'; document.body.appendChild(t); } const e = document.createElement('div'); e.className = 'toast'; e.textContent = m; t.appendChild(e); setTimeout(() => e.remove(), 3000); }
+    async function loadRec(t) {
+      $('recout').innerHTML = '<span class="loading"><span class="spin"></span>Loading…</span>';
+      try {
+        const r = await api(`api/records?name=${encodeURIComponent(domain)}&types=${t}`), x = r.records[t];
+        $('recout').innerHTML = `<div class="muted small" style="margin-bottom:6px">${esc(t)} · ${esc(x.status)}${r.ad ? ' · authenticated (AD)' : ''}</div>` + (x.answers.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th class="num">TTL</th><th>Data</th></tr></thead><tbody>${x.answers.map(a => `<tr><td class="mono">${esc(a.name)}</td><td class="num">${a.ttl}</td><td class="mono">${esc(a.data)}</td></tr>`).join('')}</tbody></table></div>` : '<span class="muted">No records of this type.</span>');
+      } catch (e) { $('recout').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    }
+    async function run(d) {
+      d = d.trim(); if (!d) return; const my = ++ticket; data = {}; domain = d;
+      history.replaceState(null, '', '?q=' + encodeURIComponent(d));
+      out.setAttribute('aria-busy', 'true'); draw();
+      await Promise.all(GROUPS.map(async ([id]) => {
+        try { const r = await api(`api/section?section=${id}&domain=${encodeURIComponent(d)}`); if (my !== ticket) return; domain = r.domain; data[id] = r; }
+        catch (e) {
+          if (my !== ticket) return;
+          if (!Object.keys(data).length && /valid|enter/.test(e.message)) { out.innerHTML = `<div class="state error" role="alert"><div class="h3">Check failed</div><p>${esc(e.message)}</p></div>`; ticket++; return; }
+          data[id] = { error: e.message };
+        }
+        if (my === ticket) draw();
+      }));
+      if (my === ticket) out.setAttribute('aria-busy', 'false');
+    }
+    $('f').onsubmit = e => { e.preventDefault(); run($('q').value); };
+    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); }
+  </script>
+</body>
+</html>

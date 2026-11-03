@@ -1,0 +1,20 @@
+id = "asn-bgp"
+name = "ASN & BGP explorer"
+description = "Autonomous systems: holder, announced prefixes, upstream and downstream neighbours, route history and BGP state, PeeringDB and RIPE Atlas counts."
+grid = "Network & Infrastructure"
+port = 8131
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_ASN_BGP_BIND = "127.0.0.1:{port}"
+OSNT_ASN_BGP_DB = "{state_dir}/cache.redb"
+
+# Optional: PeeringDB throttles anonymous API calls harder than keyed ones.
+[[secret]]
+name = "PEERINGDB_API_KEY"
+label = "PeeringDB API key (optional, raises the anonymous rate limit)"
+help_url = "https://www.peeringdb.com/profile"
+required = false

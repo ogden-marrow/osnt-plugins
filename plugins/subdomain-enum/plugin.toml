@@ -1,0 +1,33 @@
+id = "subdomain-enum"
+name = "Subdomain discovery"
+description = "Passive subdomain discovery from certificate logs, passive DNS and web archives, with DNS liveness and dangling-CNAME flags."
+grid = "Network & Infrastructure"
+port = 8132
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_SUBDOMAIN_ENUM_BIND = "127.0.0.1:{port}"
+OSNT_SUBDOMAIN_ENUM_DB = "{state_dir}/cache.redb"
+# The lookup plugin supplies the crt.sh source (optional; the source reports "unavailable" when it is not installed).
+OSNT_LOOKUP = "127.0.0.1:8103"
+
+[[secret]]
+name = "CERTSPOTTER_API_KEY"
+label = "Certspotter API key (optional, more pages and a higher rate limit)"
+help_url = "https://sslmate.com/ct_search_api"
+required = false
+
+[[secret]]
+name = "VIRUSTOTAL_API_KEY"
+label = "VirusTotal API key (optional, enables the VirusTotal source)"
+help_url = "https://www.virustotal.com/gui/my-apikey"
+required = false
+
+[[secret]]
+name = "OTX_API_KEY"
+label = "AlienVault OTX key (optional, enables the OTX passive-DNS source; anonymous access is refused)"
+help_url = "https://otx.alienvault.com/settings"
+required = false

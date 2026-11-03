@@ -1,0 +1,26 @@
+id = "ip-intel"
+name = "IP intelligence"
+description = "One IP or hostname: owner, routing, exposed ports, geolocation cross-check and blocklist membership, from open sources."
+grid = "Network & Infrastructure"
+port = 8130
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_IP_INTEL_BIND = "127.0.0.1:{port}"
+OSNT_IP_INTEL_DB = "{state_dir}/cache.redb"
+
+# Optional: adds a Censys host view. Not verified against the live service (needs a Censys account).
+[[secret]]
+name = "CENSYS_API_ID"
+label = "Censys API ID (optional, adds a Censys host view)"
+help_url = "https://search.censys.io/account/api"
+required = false
+
+[[secret]]
+name = "CENSYS_API_SECRET"
+label = "Censys API secret (optional)"
+help_url = "https://search.censys.io/account/api"
+required = false

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>IP intelligence · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <style>
+    :root { --c-ripe: #0b6a8f; --c-ipwho: #b3261e; --c-ipapi: #8a5a00; }
+    :root:not([data-theme="light"]) { }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --c-ripe: #6cc4ee; --c-ipwho: #f2877f; --c-ipapi: #e8bd4c; } }
+    :root[data-theme="dark"] { --c-ripe: #6cc4ee; --c-ipwho: #f2877f; --c-ipapi: #e8bd4c; }
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 260px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .results { display: grid; gap: var(--gap); margin-top: 16px; }
+    .results:empty { display: none; }
+    .cols { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); align-items: start; }
+    .summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+    .summary .ip { font: 600 22px/1.2 var(--font-mono); overflow-wrap: anywhere; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .chip { font: 12.5px/1 var(--font-mono); padding: 6px 10px; min-height: 30px; }
+    .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pills .badge { font-family: var(--font-mono); font-weight: 500; }
+    #map { height: 300px; border-radius: var(--radius-sm); border: 1px solid var(--edge); }
+    .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 0; font-size: var(--fs-sm); color: var(--ink-2); }
+    .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+    .mini { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+    .cve { display: inline-block; margin: 0 8px 4px 0; font: 12.5px/1.4 var(--font-mono); }
+    .scroll { max-height: 140px; overflow: auto; }
+    .head-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    h4.sub { margin: 14px 0 6px; font-size: var(--fs-sm); color: var(--ink-2); font-weight: 600; }
+    .sources li { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>IP intelligence</h1>
+  </header>
+  <main class="page">
+    <div class="page-head">
+      <div><h2 class="h2" style="font-size:22px;margin:0">Look up an IP address or hostname</h2>
+      <p>Who owns it, how it is routed, what is exposed, where sources place it, and whether it is on a blocklist. Open sources only; nothing is scanned.</p></div>
+    </div>
+    <form id="f" role="search"><label class="sr-only" for="q">IP address or hostname</label><input id="q" placeholder="8.8.8.8, 2606:4700:4700::1111 or example.com" autofocus autocomplete="off" spellcheck="false"><button class="btn primary" id="go">Look up</button></form>
+    <p class="hint">Private and reserved addresses have no public data and are refused. A hostname is resolved first; click another address to switch.</p>
+    <div id="out" class="results" aria-live="polite" aria-busy="false"></div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const SRC = { ripe: ['RIPEstat (MaxMind GeoLite)', 'var(--c-ripe)'], ipwho: ['ipwho.is', 'var(--c-ipwho)'], ipapi: ['ipapi.co', 'var(--c-ipapi)'] };
+    let last = null, map = null, mapTried = false;
+
+    function toast(msg, kind) {
+      const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg;
+      $('toasts').appendChild(t); setTimeout(() => t.remove(), 3500);
+    }
+    const rows = list => { const r = list.filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length));
+      return r.length ? `<table class="kv">${r.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v instanceof Object && v.html ? v.html : esc(Array.isArray(v) ? v.join(', ') : v)}</td></tr>`).join('')}</table>` : '<span class="muted small">No data.</span>'; };
+    const H = html => ({ html });
+    const card = (title, body, extra = '') => `<section class="card"><div class="card-head"><h3 class="h3">${esc(title)}</h3>${extra}</div>${body}</section>`;
+    const errNote = (e, k) => e && e[k] ? `<div class="notice warn small" style="margin-bottom:8px">${esc(e[k])}</div>` : '';
+    const when = t => t ? new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+
+    async function api(path) {
+      const r = await fetch(path), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      return d;
+    }
+
+    async function run(q) {
+      q = q.trim(); if (!q) return;
+      history.replaceState(null, '', '?q=' + encodeURIComponent(q));
+      out.setAttribute('aria-busy', 'true'); $('go').setAttribute('aria-busy', 'true');
+      out.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>Asking RIPEstat, InternetDB, ipwho.is, ipapi.co, Tor and Spamhaus (a few seconds)…</div>`;
+      try { last = await api('api/overview?q=' + encodeURIComponent(q)); render(last); }
+      catch (e) { out.innerHTML = `<div class="state error" role="alert"><div class="h3">Lookup failed</div><p>${esc(e.message)}</p></div>`; }
+      out.setAttribute('aria-busy', 'false'); $('go').removeAttribute('aria-busy');
+    }
+
+    function render(d) {
+      const e = d.errors || {}, o = d.owner || {}, x = d.exposure || {}, g = d.geo || {}, l = d.lists || {}, rb = d.robtex || {};
+      const asn0 = (o.asns || [])[0];
+      const badges = [];
+      if (l.tor_exit?.listed) badges.push('<span class="badge warn">Tor exit node</span>');
+      if (l.spamhaus_drop?.listed) badges.push('<span class="badge err">Spamhaus DROP</span>');
+      if (x.has_data) badges.push(`<span class="badge">${x.ports.length} open port${x.ports.length === 1 ? '' : 's'}</span>`);
+      if (x.vuln_count) badges.push(`<span class="badge err">${x.vuln_count} CVE${x.vuln_count === 1 ? '' : 's'} listed</span>`);
+      if (g.max_disagreement_km != null) badges.push(`<span class="badge ${g.disagree ? 'warn' : 'ok'}">geo sources differ by ${g.max_disagreement_km} km</span>`);
+      if (!badges.length && !Object.keys(e).length) badges.push('<span class="badge ok">nothing flagged</span>');
+      let html = `<section class="card"><div class="summary"><span class="ip">${esc(d.ip)}</span><span class="badge">IPv${d.version}</span>
+        ${asn0 ? `<span class="muted">AS${esc(asn0.asn)} · ${esc(asn0.holder)}</span>` : ''}
+        <span class="head-actions" style="margin-left:auto"><button class="btn sm" id="copy" type="button">Copy JSON</button></span></div>
+        <div class="pills" style="margin-top:10px">${badges.join('')}</div>`;
+      if (d.host) html += `<div class="chips" aria-label="Addresses of ${esc(d.host.name)}"><span class="muted small" style="align-self:center">${esc(d.host.name)} →</span>${d.host.ips.map(i => `<button type="button" class="btn chip${i === d.ip ? ' on' : ''}" data-ip="${esc(i)}">${esc(i)}</button>`).join('')}</div>`;
+      html += '</section><div class="cols">';
+
+      // Owner
+      const wf = Object.fromEntries((o.whois || []).map(f => [f.key.toLowerCase(), f.value]));
+      html += card('Owner', errNote(e, 'owner') + rows([
+        ['Holder', asn0 && `AS${asn0.asn} ${asn0.holder}`], ['Other origin ASNs', (o.asns || []).slice(1).map(a => `AS${a.asn}`)],
+        ['Announced prefix', o.prefix && `${o.prefix}${o.announced ? '' : ' (not announced)'}`],
+        ['Network name', wf.netname], ['Organisation', wf.orgname || wf['org-name'] || wf.organization], ['Range', wf.netrange || wf.inetnum || wf.inet6num],
+        ['Country', wf.country], ['Status', wf.status], ['Registry', o.rir && o.rir.toUpperCase()], ['Abuse role contact', o.abuse_role_contacts],
+      ]) + (o.whois_error ? `<p class="mini">Whois: ${esc(o.whois_error)}</p>` : '') + `<p class="mini">Source: RIPEstat (prefix-overview, whois, abuse-contact-finder). Person and contact records are not shown.</p>`);
+
+      // Routing
+      const rb2 = rb.route ? rows([['Route (Robtex)', rb.route], ['AS (Robtex)', rb.asn && `AS${rb.asn} ${rb.as_name || ''}`.trim()], ['AS description', rb.as_description], ['Route holder', rb.route_description || rb.whois_description],
+        ['Cross-check', d.asn_agree == null ? null : (d.asn_agree ? 'RIPEstat and Robtex agree on the origin AS' : 'RIPEstat and Robtex name different origin ASNs')]]) : '<span class="muted small">No Robtex route data.</span>';
+      html += card('Routing', errNote(e, 'robtex') + errNote(e, 'owner') + rows([['Announced', o.announced == null ? null : (o.announced ? 'yes' : 'no')], ['Prefix (RIPEstat)', o.prefix], ['Block', o.block]]) + '<hr>' + rb2 +
+        (asn0 ? `<p class="mini"><a href="../asn-bgp/?q=AS${esc(asn0.asn)}">Open AS${esc(asn0.asn)} in the ASN explorer</a> (if installed)</p>` : ''));
+
+      // Exposure
+      let ex = errNote(e, 'exposure');
+      if (d.exposure) {
+        if (!x.has_data) ex += '<p class="muted small" style="margin:0">Shodan InternetDB has no record of this address.</p>';
+        else {
+          ex += `<h4 class="sub" style="margin-top:0">Ports</h4><div class="pills">${x.ports.map(p => `<span class="badge">${p}</span>`).join('') || '<span class="muted small">none listed</span>'}</div>`;
+          if (x.vuln_count) ex += `<h4 class="sub">CVEs (${x.vuln_count})</h4><div class="scroll">${x.vulns.map(c => `<a class="cve" href="https://nvd.nist.gov/vuln/detail/${esc(c)}" target="_blank" rel="noopener noreferrer">${esc(c)}</a>`).join('')}</div>`;
+          if (x.tags.length) ex += `<h4 class="sub">Tags</h4><div class="pills">${x.tags.map(t => `<span class="badge">${esc(t)}</span>`).join('')}</div>`;
+          if (x.hostnames.length) ex += `<h4 class="sub">Hostnames</h4><div class="scroll mono">${x.hostnames.map(esc).join('<br>')}</div>`;
+          if (x.cpes.length) ex += `<h4 class="sub">CPEs</h4><div class="scroll mono">${x.cpes.map(esc).join('<br>')}</div>`;
+        }
+      }
+      html += card('Exposure', ex + '<p class="mini">Source: Shodan InternetDB, free for non-commercial use. This is what a scanner saw earlier, not a live scan; CVE ids are inferred from banners and may be wrong.</p>');
+
+      // Reputation
+      const t = l.tor_exit || {}, dr = l.spamhaus_drop || {};
+      const rep = row => `<tr><th>${row[0]}</th><td>${row[1]}</td></tr>`;
+      html += card('Reputation', `<table class="kv">` +
+        rep(['Tor exit list', t.error ? `<span class="err">${esc(t.error)}</span>` : t.listed ? '<span class="badge warn">listed</span> is a Tor exit relay address' : `<span class="badge ok">not listed</span> <span class="faint small">${t.entries} exits, fetched ${when(t.fetched)}</span>`]) +
+        rep(['Spamhaus DROP', dr.error ? `<span class="err">${esc(dr.error)}</span>` : dr.listed ? `<span class="badge err">listed</span> inside ${esc(dr.match.cidr)}${dr.match.url ? ` · <a href="${esc(dr.match.url)}" target="_blank" rel="noopener noreferrer">${esc(dr.match.sblid)}</a>` : ''}` : `<span class="badge ok">not listed</span> <span class="faint small">${dr.entries} netblocks, fetched ${when(dr.fetched)}</span>`]) +
+        `</table><p class="mini">Tor Project bulk exit list; Spamhaus DROP — ${esc((dr.copyright || '© Spamhaus Project').replace(/^\((c)\)/i, '©'))}, <a href="https://www.spamhaus.org/drop/terms/" target="_blank" rel="noopener noreferrer">terms</a>. Absence from a list is not proof of a clean address.</p>`);
+
+      // Censys
+      if (d.censys) {
+        html += card('Censys host view', `<div class="pills">${(d.censys.services || []).map(s => `<span class="badge">${esc(s.port)}/${esc(s.transport || '')} ${esc(s.service || '')}</span>`).join('') || '<span class="muted small">no services</span>'}</div>` +
+          rows([['Labels', d.censys.labels], ['AS', d.censys.as], ['Updated', d.censys.last_updated]]) + `<p class="mini"><a href="${esc(d.censys.link)}" target="_blank" rel="noopener noreferrer">Open on Censys</a>. Optional source, not verified against the live service.</p>`);
+      } else if (e.censys) html += card('Censys host view', errNote(e, 'censys'));
+      html += '</div>';
+
+      // Geo
+      const srcs = (g.sources || []);
+      const geoRows = srcs.map(s => s.error ? `<tr><td><span class="sw" style="background:var(--edge-strong)"></span>${esc(s.source)}</td><td colspan="2" class="err small">${esc(s.error)}</td></tr>`
+        : `<tr><td><span class="sw" style="background:${SRC[s.id]?.[1] || 'var(--ink-3)'}"></span>${esc(s.source)}</td><td>${esc([s.city, s.region, s.country].filter(Boolean).join(', ') || '(no city)')}</td><td class="num mono">${s.lat.toFixed(2)}, ${s.lon.toFixed(2)}</td></tr>`).join('');
+      html += card('Geolocation cross-check', errNote(e, 'geo') + `<div id="map" role="img" aria-label="Map of the geolocation estimates from each source"></div>
+        <div class="table-wrap"><table class="data" style="margin-top:10px"><thead><tr><th>Source</th><th>Place</th><th class="num">Lat, lon</th></tr></thead><tbody>${geoRows}</tbody></table></div>` +
+        (g.max_disagreement_km != null ? `<p class="mini">Largest gap between sources: <b>${g.max_disagreement_km} km</b>${g.disagree ? ' (over 100 km: treat the location as unreliable)' : ''}. ` : '<p class="mini">') +
+        'IP geolocation locates a network, usually only to a city or region, and says nothing about who is behind it. Contains GeoLite data created by MaxMind.</p>');
+
+      html += `<section class="card"><h3 class="h3" style="margin-bottom:8px">Sources and licences</h3><ul class="list-plain sources small muted">
+        <li>RIPEstat Data API (RIPE NCC): prefix, whois, abuse contact and MaxMind GeoLite lookups. <a href="https://stat.ripe.net/docs/02.data-api/" target="_blank" rel="noopener noreferrer">Terms</a></li>
+        <li>Shodan InternetDB: ports, CPEs, hostnames, tags and CVEs; free for non-commercial use.</li>
+        <li>ipwho.is and ipapi.co: free-tier IP geolocation (ipapi.co allows about 1,000 requests a day, results are cached 12 h).</li>
+        <li>Tor Project bulk exit list and Spamhaus DROP; Robtex free API for route and AS names.</li>
+        <li>Results are cached on this device (hours); no data is stored about who looked up what.</li></ul></section>`;
+      out.innerHTML = html;
+      $('copy').onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(last, null, 2)); toast('JSON copied'); } catch { toast('Copy failed: the browser blocked clipboard access', 'err'); } };
+      out.querySelectorAll('[data-ip]').forEach(b => b.onclick = () => { $('q').value = b.dataset.ip; run(b.dataset.ip); });
+      drawMap(srcs);
+    }
+
+    async function drawMap(srcs) {
+      const el = $('map'), pts = srcs.filter(s => !s.error);
+      if (!pts.length) { el.outerHTML = '<div class="state"><div class="h3">No location</div><p>None of the sources returned coordinates for this address.</p></div>'; return; }
+      try {
+        if (map) { map.remove(); map = null; }
+        map = (await OSNT.createMap('map')).map;
+        const colour = id => getComputedStyle(document.documentElement).getPropertyValue('--c-' + id).trim() || '#0b6a8f';
+        const ll = [];
+        pts.forEach(s => {
+          const m = L.circleMarker([s.lat, s.lon], { radius: 9, color: '#fff', weight: 2, fillColor: colour(s.id), fillOpacity: .95 }).addTo(map);
+          m.bindPopup(`<b>${esc(s.source)}</b><br>${esc([s.city, s.region, s.country].filter(Boolean).join(', ') || 'no city')}<br>${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}`);
+          ll.push([s.lat, s.lon]);
+        });
+        if (ll.length > 1) { L.polyline(ll, { color: '#888', weight: 1.5, dashArray: '4 6' }).addTo(map); map.fitBounds(ll, { padding: [40, 40], maxZoom: 9 }); }
+        else map.setView(ll[0], 8);
+      } catch { el.outerHTML = '<div class="notice warn small">The map could not load (the hub map configuration is unavailable). The table above has the coordinates.</div>'; }
+    }
+
+    $('f').onsubmit = e => { e.preventDefault(); run($('q').value); };
+    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); }
+  </script>
+</body>
+</html>

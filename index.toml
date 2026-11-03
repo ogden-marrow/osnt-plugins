@@ -139,3 +139,31 @@ name = "Launches & orbital objects"
 description = "Upcoming and past rocket launches with a pad map, and CelesTrak orbital elements and catalog data by name, NORAD ID or group."
 version = "0.1.0"
 path = "plugins/space-watch"
+
+[[plugin]]
+id = "ip-intel"
+name = "IP intelligence"
+description = "One IP or hostname: owner, routing, exposed ports, geolocation cross-check and blocklist membership, from open sources."
+version = "0.1.0"
+path = "plugins/ip-intel"
+
+[[plugin]]
+id = "asn-bgp"
+name = "ASN & BGP explorer"
+description = "Autonomous systems: holder, announced prefixes, upstream and downstream neighbours, route history and BGP state, PeeringDB and RIPE Atlas counts."
+version = "0.1.0"
+path = "plugins/asn-bgp"
+
+[[plugin]]
+id = "subdomain-enum"
+name = "Subdomain discovery"
+description = "Passive subdomain discovery from certificate logs, passive DNS and web archives, with DNS liveness and dangling-CNAME flags."
+version = "0.1.0"
+path = "plugins/subdomain-enum"
+
+[[plugin]]
+id = "domain-hygiene"
+name = "Domain hygiene"
+description = "Scored checklist for a domain: DNS records, SPF/DMARC/DKIM/MTA-STS, DNSSEC, delegation, CAA and security.txt."
+version = "0.1.0"
+path = "plugins/domain-hygiene"

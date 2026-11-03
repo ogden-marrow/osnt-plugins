@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>ASN &amp; BGP explorer · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 260px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .stackv { display: grid; gap: var(--gap); margin-top: 16px; }
+    .stackv:empty { display: none; }
+    .stackv > *, .cols3 > *, .cols2 > * { min-width: 0; }
+    .cols3 { display: grid; gap: var(--gap); grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+    @media (max-width: 820px) { .cols3 { grid-template-columns: 1fr; } }
+    .cols2 { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); align-items: start; }
+    .head-asn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+    .head-asn .n { font: 650 24px/1.2 var(--font-mono); }
+    .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .nb { display: flex; flex-direction: column; gap: 4px; max-height: 420px; overflow: auto; padding-right: 2px; }
+    .nbi { display: block; text-align: left; width: 100%; padding: 6px 10px; background: var(--surface); border: 1px solid var(--edge); border-radius: var(--radius-sm); cursor: pointer; font: inherit; color: var(--ink); position: relative; overflow: hidden; min-height: 44px; padding-bottom: 10px; }
+    .nbi:hover { background: var(--surface-2); border-color: var(--edge-strong); }
+    .nbi { padding-bottom: 12px; }
+    .nbi .bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); opacity: .7; }
+    .nbi b { font-family: var(--font-mono); }
+    .nbi span.nm { display: block; font-size: var(--fs-xs); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 16px; }
+    .coltitle { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+    tr.pick { cursor: pointer; } tr.pick:hover td { background: var(--surface-2); } tr.pick.sel td { background: var(--accent-soft); }
+    .tl { display: grid; grid-template-columns: 88px 1fr; gap: 6px 10px; align-items: center; margin: 10px 0; }
+    .tl .lab { font: 12.5px/1.2 var(--font-mono); overflow: hidden; text-overflow: ellipsis; }
+    .track { position: relative; height: 18px; background: var(--surface-2); border-radius: 4px; }
+    .seg2 { position: absolute; top: 0; bottom: 0; border-radius: 3px; min-width: 3px; opacity: .92; }
+    .axis { grid-column: 2; display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--ink-3); }
+    .o0 { background: var(--accent); } .o1 { background: #b3261e; } .o2 { background: #8a5a00; } .o3 { background: #0b6a8f; } .o4 { background: #6b4fa0; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .o1 { background: #f2877f; } :root:not([data-theme="light"]) .o2 { background: #e8bd4c; } :root:not([data-theme="light"]) .o3 { background: #6cc4ee; } :root:not([data-theme="light"]) .o4 { background: #b9a2f0; } }
+    :root[data-theme="dark"] .o1 { background: #f2877f; } :root[data-theme="dark"] .o2 { background: #e8bd4c; } :root[data-theme="dark"] .o3 { background: #6cc4ee; } :root[data-theme="dark"] .o4 { background: #b9a2f0; }
+    .path { font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+    .scroll { max-height: 360px; overflow: auto; }
+    .mini { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+    .filter { max-width: 240px; min-height: 36px; }
+    table.data td:nth-child(2), table.data td:nth-child(3) { white-space: nowrap; }
+    @media (max-width: 520px) { table.data tr.pick td:nth-child(4), table.data tr.pick ~ th { display: none; } table.data th:nth-child(4) { display: none; } }
+    .events li { margin: 3px 0; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>ASN &amp; BGP explorer</h1>
+  </header>
+  <main class="page">
+    <div class="page-head">
+      <div><h2 class="h2" style="font-size:22px;margin:0">Explore an autonomous system</h2>
+      <p>Holder, announced prefixes, upstream and downstream neighbours, route history, PeeringDB and RIPE Atlas probe counts.</p></div>
+    </div>
+    <form id="f" role="search"><label class="sr-only" for="q">AS number, IP address or prefix</label><input id="q" placeholder="AS15169, 8.8.8.8 or 193.0.0.0/21" autofocus autocomplete="off" spellcheck="false"><button class="btn primary" id="go">Explore</button></form>
+    <p class="hint">An IP or prefix is mapped to the AS that currently originates it. All data comes live from open registries and is cached for a few hours.</p>
+    <div id="out" class="stackv" aria-live="polite" aria-busy="false"></div>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id), out = $('out');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const card = (id, title, body = '<div class="loading"><span class="spin" aria-hidden="true"></span>Loading…</div>', extra = '') => `<section class="card" id="${id}"><div class="card-head"><h3 class="h3">${esc(title)}</h3>${extra}</div><div class="body">${body}</div></section>`;
+    const setBody = (id, html) => { const b = document.querySelector('#' + id + ' .body'); if (b) b.innerHTML = html; };
+    const fail = (id, m) => setBody(id, `<div class="state error" role="alert"><p>${esc(m)}</p></div>`);
+    const rows = list => { const r = list.filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length)); return r.length ? `<table class="kv">${r.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v && v.html ? v.html : esc(Array.isArray(v) ? v.join(', ') : v)}</td></tr>`).join('')}</table>` : '<span class="muted small">No data.</span>'; };
+    const fmtD = s => s ? String(s).slice(0, 10) : '';
+    async function api(path) { const r = await fetch(path), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status); return d; }
+    let ticket = 0, prefixRows = [];
+
+    async function run(q) {
+      q = q.trim(); if (!q) return; const my = ++ticket;
+      history.replaceState(null, '', '?q=' + encodeURIComponent(q));
+      out.setAttribute('aria-busy', 'true');
+      out.innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>Resolving…</div>`;
+      let o;
+      try { o = await api('api/overview?q=' + encodeURIComponent(q)); } catch (e) { out.innerHTML = `<div class="state error" role="alert"><div class="h3">Lookup failed</div><p>${esc(e.message)}</p></div>`; out.setAttribute('aria-busy', 'false'); return; }
+      if (my !== ticket) return;
+      const asn = o.asn, r = o.resolved || {};
+      out.innerHTML = `<section class="card"><div class="head-asn"><span class="n">AS${asn}</span><span>${esc(o.holder)}</span></div>
+        <div class="pills"><span class="badge ${o.announced ? 'ok' : 'warn'}">${o.announced ? 'announcing prefixes' : 'not announcing'}</span>
+        ${r.kind && r.kind !== 'asn' ? `<span class="badge">${esc(r.input)} is originated by AS${asn}${r.prefix && r.prefix !== r.input ? ' via ' + esc(r.prefix) : ''}</span>` : ''}
+        ${(r.all_asns || []).length > 1 ? `<span class="badge warn">multiple origins: ${r.all_asns.map(a => 'AS' + a).join(', ')}</span>` : ''}
+        <span class="badge" id="b-pfx"></span><span class="badge" id="b-atlas"></span></div>
+        <p class="mini" style="margin-top:10px">${esc(o.block?.name || '')}${o.block?.desc ? ' · ' + esc(o.block.desc) : ''}</p></section>`
+        + card('c-nb', 'Neighbours', undefined, '<span class="muted small">upstream = seen before this AS in paths</span>')
+        + card('c-pfx', 'Announced prefixes', undefined, '<input class="filter" id="pf" placeholder="Filter prefixes" aria-label="Filter prefixes" autocomplete="off">')
+        + `<div id="c-route"></div>`
+        + `<div class="cols2">${card('c-pdb', 'PeeringDB')}${card('c-atlas', 'RIPE Atlas probes')}</div>`
+        + `<section class="card"><h3 class="h3" style="margin-bottom:8px">Sources and licences</h3><ul class="list-plain small muted">
+          <li>RIPEstat Data API (RIPE NCC): as-overview, asn-neighbours, announced-prefixes, routing-history, bgp-state, prefix-overview. Based on RIPE RIS route collectors.</li>
+          <li>PeeringDB (CC BY 4.0 data, <a href="https://www.peeringdb.com/aup" target="_blank" rel="noopener noreferrer">acceptable use</a>): networks, exchange points and facilities. Contact records are not read.</li>
+          <li>RIPE Atlas public API: probe and anchor counts only; individual probes are not listed or located.</li></ul></section>`;
+      out.setAttribute('aria-busy', 'false');
+      loadNeighbours(asn, my); loadPrefixes(asn, my); loadPdb(asn, my); loadAtlas(asn, my);
+    }
+
+    async function loadNeighbours(asn, my) {
+      try {
+        const d = await api('api/neighbours?asn=' + asn); if (my !== ticket) return;
+        const cols = [['upstream', 'Upstream'], ['uncertain', 'Peer / uncertain'], ['downstream', 'Downstream']];
+        const max = Math.max(1, ...cols.flatMap(([k]) => (d.neighbours[k] || []).map(n => n.power || 0)));
+        setBody('c-nb', `<div class="cols3">${cols.map(([k, t]) => `<div><div class="coltitle"><b>${t}</b><span class="faint small">${d.counts[k]}${d.counts[k] > (d.neighbours[k] || []).length ? ', top ' + d.neighbours[k].length : ''}</span></div><div class="nb">${
+          (d.neighbours[k] || []).map(n => `<button type="button" class="nbi" data-asn="${n.asn}"><b>AS${n.asn}</b> <span class="faint small">path power ${n.power}</span><span class="nm" data-nm="${n.asn}">&nbsp;</span><i class="bar" style="width:${Math.max(2, 100 * (n.power || 0) / max)}%"></i></button>`).join('') || '<span class="muted small">none</span>'}</div></div>`).join('')}</div>
+          <p class="mini">RIPEstat classifies neighbours from observed AS paths as of ${esc(fmtD(d.as_of))}. "Uncertain" neighbours appear on both sides of this AS, which is typical of peers and transit relationships alike. Click one to open it.</p>`);
+        document.querySelectorAll('.nbi').forEach(b => b.onclick = () => { $('q').value = 'AS' + b.dataset.asn; run('AS' + b.dataset.asn); scrollTo({ top: 0 }); });
+        const ids = [...new Set(cols.flatMap(([k]) => (d.neighbours[k] || []).slice(0, 8).map(n => n.asn)))];
+        for (let i = 0; i < ids.length; i += 25) {
+          api('api/names?asns=' + ids.slice(i, i + 25).join(',')).then(m => { if (my === ticket) for (const [a, h] of Object.entries(m)) document.querySelectorAll(`[data-nm="${a}"]`).forEach(e => e.textContent = h || ''); }).catch(() => {});
+        }
+      } catch (e) { fail('c-nb', e.message); }
+    }
+
+    async function loadPrefixes(asn, my) {
+      try {
+        const d = await api('api/prefixes?asn=' + asn); if (my !== ticket) return;
+        prefixRows = d.prefixes; $('b-pfx').textContent = `${d.total} prefixes (${d.v4} v4, ${d.v6} v6)`;
+        const draw = () => {
+          const f = ($('pf')?.value || '').trim().toLowerCase(), list = prefixRows.filter(p => !f || p.prefix.includes(f));
+          setBody('c-pfx', `<div class="scroll table-wrap"><table class="data"><thead><tr><th>Prefix</th><th>First seen</th><th>Last seen</th><th></th></tr></thead><tbody>${list.slice(0, 500).map(p => `<tr class="pick" data-p="${esc(p.prefix)}" tabindex="0"><td class="mono">${esc(p.prefix)}</td><td>${esc(fmtD(p.first))}</td><td>${esc(fmtD(p.last))}</td><td><span class="faint small">history</span></td></tr>`).join('') || '<tr><td colspan="4" class="muted">No prefixes match.</td></tr>'}</tbody></table></div>
+            <p class="mini">${list.length > 500 ? `Showing 500 of ${list.length} matches; narrow the filter. ` : ''}${d.truncated ? `List capped at ${d.prefixes.length} of ${d.total}. ` : ''}Click a prefix for its routing history and current BGP state. First/last seen are within the recent visibility window, not registration dates.</p>`);
+          document.querySelectorAll('tr.pick').forEach(tr => { const go = () => openPrefix(tr.dataset.p, tr); tr.onclick = go; tr.onkeydown = e => { if (e.key === 'Enter') go(); }; });
+        };
+        draw(); $('pf').oninput = draw;
+      } catch (e) { fail('c-pfx', e.message); $('b-pfx').remove(); }
+    }
+
+    async function openPrefix(p, tr, years = 3) {
+      document.querySelectorAll('tr.pick.sel').forEach(x => x.classList.remove('sel')); tr?.classList.add('sel');
+      const host = $('c-route');
+      host.innerHTML = card('c-hist', 'Route history · ' + p, undefined, `<span class="seg" role="group" aria-label="History length">${[1, 3, 10].map(y => `<button type="button" data-y="${y}" aria-pressed="${y === years}">${y} y</button>`).join('')}</span>`) + `<div style="height:16px"></div>` + card('c-state', 'Current BGP view · ' + p);
+      host.querySelectorAll('[data-y]').forEach(b => b.onclick = () => openPrefix(p, tr, +b.dataset.y));
+      host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      api(`api/history?prefix=${encodeURIComponent(p)}&years=${years}`).then(h => {
+        const t0 = Date.parse(h.from + 'T00:00:00Z'), t1 = Date.now(), span = t1 - t0, pos = s => Math.min(100, Math.max(0, 100 * (Date.parse(s + 'Z') - t0) / span));
+        if (!h.origins.length) return setBody('c-hist', '<div class="state"><div class="h3">No announcements in this window</div><p>RIPE RIS saw no origin for this prefix with enough visibility.</p></div>');
+        setBody('c-hist', (h.multiple_origins_now ? `<div class="notice warn" style="margin-bottom:10px"><span><b>Several origin ASes are announcing this prefix now</b> (${h.current_origins.map(o => 'AS' + o).join(', ')}). That happens with anycast, multi-homing or a hijack; check who they are before concluding.</span></div>` : '')
+          + `<div class="tl">${h.origins.map((o, i) => `<div class="lab" title="AS${esc(o.origin)}">AS${esc(o.origin)}</div><div class="track" role="img" aria-label="AS${esc(o.origin)} announced ${esc(fmtD(o.first))} to ${esc(fmtD(o.last))}">${o.segments.map(s => `<i class="seg2 o${i % 5}" style="left:${pos(s.start)}%;width:${Math.max(0.4, pos(s.end) - pos(s.start))}%" title="${esc(fmtD(s.start))} to ${esc(fmtD(s.end))}, ${Math.round(s.peers)} full-feed peers"></i>`).join('')}</div>`).join('')}
+            <div class="axis"><span>${esc(h.from)}</span><span>today</span></div></div>`
+          + `<ul class="list-plain events small">${h.events.map(e => `<li>${esc(e.date)} · AS${esc(e.origin)} ${e.kind === 'appeared' ? 'starts announcing' : 'last seen announcing'}</li>`).join('')}</ul>`
+          + `<p class="mini">From RIPEstat routing-history (RIS, routes seen by at least 10 full-feed peers). An origin change is a lead, not proof of a hijack: re-homing, mergers and DDoS scrubbing look the same.</p>`);
+      }).catch(e => fail('c-hist', e.message));
+      api('api/state?prefix=' + encodeURIComponent(p)).then(s => {
+        setBody('c-state', rows([['Seen by', `${s.peers_seeing} RIS peers`], ['Origins', s.origins.map(o => `AS${o.asn} (${o.peers})`)], ['Last hops before origin', s.last_hops.slice(0, 8).map(o => `AS${o.asn} (${o.peers})`)], ['As of', s.as_of]])
+          + `<h4 style="margin:12px 0 6px;font-size:13px;color:var(--ink-2)">Sample AS paths</h4><div class="scroll path">${s.sample_paths.map(x => `${esc(x.collector || '')} · ${x.path.map(a => 'AS' + a).join(' → ')}`).join('<br>') || 'none'}</div>`);
+      }).catch(e => fail('c-state', e.message));
+    }
+
+    async function loadPdb(asn, my) {
+      try {
+        const d = await api('api/peeringdb?asn=' + asn); if (my !== ticket) return;
+        if (!d.found) return setBody('c-pdb', '<span class="muted small">This AS has no PeeringDB record.</span>');
+        const n = d.net;
+        setBody('c-pdb', rows([['Name', n.name], ['Also known as', n.aka], ['Type', n.type], ['Scope', n.scope], ['Peering policy', n.policy ? { html: esc(n.policy) + (n.policy_url ? ` · <a href="${esc(n.policy_url)}" target="_blank" rel="noopener noreferrer">policy</a>` : '') } : null], ['Traffic ratio', n.traffic_ratio], ['Prefixes (self-declared)', (n.prefixes4 || n.prefixes6) ? `${n.prefixes4 || 0} v4, ${n.prefixes6 || 0} v6` : null], ['IRR as-set', n.irr_as_set], ['Website', n.website ? { html: `<a href="${esc(n.website)}" target="_blank" rel="noopener noreferrer">${esc(n.website)}</a>` } : null], ['Looking glass', n.looking_glass]])
+          + `<h4 style="margin:12px 0 6px;font-size:13px;color:var(--ink-2)">Exchange points (${d.ixs.length})</h4><div class="scroll table-wrap"><table class="data"><thead><tr><th>IX</th><th class="num">Ports</th><th class="num">Speed</th><th>RS</th></tr></thead><tbody>${d.ixs.map(x => `<tr><td><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.name)}</a></td><td class="num">${x.ports}</td><td class="num">${x.speed_mbps >= 1000 ? (x.speed_mbps / 1000) + ' G' : x.speed_mbps + ' M'}</td><td>${x.route_server ? 'yes' : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">none</td></tr>'}</tbody></table></div>`
+          + `<h4 style="margin:12px 0 6px;font-size:13px;color:var(--ink-2)">Facilities (${d.facilities.length})</h4><div class="scroll small">${d.facilities.map(f => `${esc(f.name)} <span class="faint">${esc([f.city, f.country].filter(Boolean).join(', '))}</span>`).join('<br>') || 'none'}</div>`
+          + `<p class="mini"><a href="${esc(n.link)}" target="_blank" rel="noopener noreferrer">Open on PeeringDB</a>. Self-declared data.</p>`);
+      } catch (e) { fail('c-pdb', e.message); }
+    }
+
+    async function loadAtlas(asn, my) {
+      const draw = (d, label) => `<div class="pills" style="margin-top:0">${Object.entries(d.counts).map(([k, v]) => `<span class="badge">${v} ${esc(k.replace('_', ' '))}</span>`).join('')}</div><p class="mini">${esc(label)} · ${esc(d.note)}</p>
+        <form id="cf" class="row" style="margin-top:10px"><label class="sr-only" for="cc">Country code</label><input id="cc" maxlength="2" placeholder="NL" style="width:72px;text-transform:uppercase" autocomplete="off"><button class="btn sm">Count by country</button></form><div id="cres" class="small" style="margin-top:8px"></div>`;
+      try {
+        const d = await api('api/atlas?asn=' + asn); if (my !== ticket) return;
+        $('b-atlas').textContent = `${d.counts.connected_v4 + 0} v4 / ${d.counts.connected_v6 + 0} v6 Atlas probes`;
+        setBody('c-atlas', draw(d, d.scope));
+        $('cf').onsubmit = async e => { e.preventDefault(); const c = $('cc').value.trim(); if (!c) return; $('cres').textContent = 'Counting…'; try { const r = await api('api/atlas?country=' + encodeURIComponent(c)); $('cres').innerHTML = `<b>${esc(r.scope)}</b>: ` + Object.entries(r.counts).map(([k, v]) => `${v} ${esc(k)}`).join(', '); } catch (er) { $('cres').innerHTML = `<span class="err">${esc(er.message)}</span>`; } };
+      } catch (e) { fail('c-atlas', e.message); $('b-atlas').remove(); }
+    }
+
+    $('f').onsubmit = e => { e.preventDefault(); run($('q').value); };
+    const init = new URLSearchParams(location.search).get('q'); if (init) { $('q').value = init; run(init); }
+  </script>
+</body>
+</html>

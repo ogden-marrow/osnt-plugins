@@ -1,0 +1,13 @@
+id = "domain-hygiene"
+name = "Domain hygiene"
+description = "Scored checklist for a domain: DNS records, SPF/DMARC/DKIM/MTA-STS, DNSSEC, delegation, CAA and security.txt."
+grid = "Network & Infrastructure"
+port = 8133
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_DOMAIN_HYGIENE_BIND = "127.0.0.1:{port}"
+OSNT_DOMAIN_HYGIENE_DB = "{state_dir}/cache.redb"

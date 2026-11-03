@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Subdomain discovery · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #f { display: flex; flex-wrap: wrap; gap: 8px; }
+    #q { flex: 1 1 260px; min-height: 44px; font-size: 16px; }
+    #f .btn { min-height: 44px; }
+    .stackv { display: grid; gap: var(--gap); margin-top: 16px; }
+    .stackv > *, .cols3 > *, .cols2 > * { min-width: 0; }
+    .srcs { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+    .src { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface); }
+    .src.off { opacity: .6; }
+    .src .t { font-weight: 600; font-size: var(--fs-sm); }
+    .src .s { font-size: var(--fs-xs); color: var(--ink-3); overflow-wrap: anywhere; }
+    .src .s.err { color: var(--err); }
+    .src label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; flex: 1; min-width: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .chip { min-height: 30px; padding: 0 10px; font-size: var(--fs-sm); }
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .tools .check { white-space: nowrap; }
+    .tools input[type=text], .tools input:not([type]) { flex: 1 1 180px; max-width: 300px; }
+    .scroll { max-height: 560px; overflow: auto; }
+    td.n { font: 12.5px/1.4 var(--font-mono); }
+    .srcdots { display: flex; flex-wrap: wrap; gap: 4px; }
+    .mini { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Subdomain discovery</h1>
+  </header>
+  <main class="page">
+    <div class="page-head">
+      <div><h2 class="h2" style="font-size:22px;margin:0">Find subdomains of a domain you are allowed to assess</h2>
+      <p>Passive only: names are merged from certificate logs, passive DNS and web archives, then checked with DNS-over-HTTPS. Nothing is brute-forced and no zone transfers are attempted.</p></div>
+    </div>
+    <form id="f" role="search"><label class="sr-only" for="q">Domain</label><input id="q" placeholder="example.com" autofocus autocomplete="off" spellcheck="false"><button class="btn primary" id="go">Discover</button></form>
+    <div class="stackv">
+      <section class="card"><div class="card-head"><h3 class="h3">Sources</h3><span class="muted small">tick the ones to use; each reports its own progress</span></div><div class="srcs" id="srcs"><div class="loading"><span class="spin"></span>Loading…</div></div></section>
+      <div id="res" aria-live="polite"></div>
+      <section class="card"><h3 class="h3" style="margin-bottom:8px">Sources and licences</h3><ul class="list-plain small muted">
+        <li>Certspotter (SSLMate) and crt.sh certificate transparency logs; mnemonic passive DNS (free API, fair use); urlscan.io public scans; Internet Archive CDX index; optional HackerTarget, AlienVault OTX and VirusTotal with their own terms and free-tier limits.</li>
+        <li>Liveness uses Google Public DNS over HTTPS. A name that does not resolve may still exist internally; a "dangling" flag is a lead to verify, never an invitation to claim a service.</li>
+        <li>Only assess domains you own or are authorised to review. Results are cached for hours.</li></ul></section>
+    </div>
+  </main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const toast = (m, k) => { const t = document.createElement('div'); t.className = 'toast ' + (k || ''); t.textContent = m; $('toasts').appendChild(t); setTimeout(() => t.remove(), 3500); };
+    async function api(path) { const r = await fetch(path), d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status); return d; }
+    let sources = [], picked = new Set(), found = new Map(), status = {}, domain = '', filter = new Set(), text = '', onlyLive = false, resolved = {}, ticket = 0, wildcard = null;
+
+    async function init() {
+      try {
+        sources = await api('api/sources');
+        sources.filter(s => s.default && s.available).forEach(s => picked.add(s.id));
+        drawSources();
+      } catch (e) { $('srcs').innerHTML = `<div class="state error" role="alert"><p>${esc(e.message)}</p></div>`; }
+      const q = new URLSearchParams(location.search).get('q'); if (q) { $('q').value = q; run(q); }
+    }
+    function drawSources() {
+      $('srcs').innerHTML = sources.map(s => { const st = status[s.id] || {};
+        return `<div class="src ${s.available ? '' : 'off'}"><label><input type="checkbox" data-id="${s.id}" ${picked.has(s.id) ? 'checked' : ''} ${s.available ? '' : 'disabled'}>
+          <span><span class="t">${esc(s.name)}</span><br><span class="s ${st.state === 'error' ? 'err' : ''}">${st.state === 'run' ? '<span class="spin" style="width:10px;height:10px;vertical-align:-1px"></span> querying…' : st.state === 'ok' ? `${st.count} names${st.truncated ? ' (partial)' : ''} · ${(st.ms / 1000).toFixed(1)} s${st.note ? ' · ' + esc(st.note) : ''}` : st.state === 'error' ? esc(st.msg) : s.available ? esc(s.note) : 'needs key: ' + esc(s.key_name) + ' on the Credentials page'}</span></span></label></div>`; }).join('');
+      document.querySelectorAll('#srcs input').forEach(i => i.onchange = () => { i.checked ? picked.add(i.dataset.id) : picked.delete(i.dataset.id); });
+    }
+
+    async function run(d) {
+      const my = ++ticket; domain = d.trim(); if (!domain) return;
+      if (!picked.size) return toast('Pick at least one source', 'warn');
+      history.replaceState(null, '', '?q=' + encodeURIComponent(domain));
+      found = new Map(); status = {}; resolved = {}; wildcard = null; filter = new Set(); text = '';
+      $('go').setAttribute('aria-busy', 'true'); $('go').disabled = true;
+      [...picked].forEach(id => status[id] = { state: 'run' }); drawSources(); draw();
+      await Promise.all([...picked].map(async id => {
+        const t0 = performance.now();
+        try {
+          const r = await api(`api/source?domain=${encodeURIComponent(domain)}&source=${id}`); if (my !== ticket) return;
+          domain = r.domain; status[id] = { state: 'ok', count: r.count, truncated: r.truncated, note: r.note, ms: performance.now() - t0 };
+          r.names.forEach(n => { if (!found.has(n)) found.set(n, new Set()); found.get(n).add(id); });
+        } catch (e) { if (my === ticket) status[id] = { state: 'error', msg: e.message }; }
+        if (my === ticket) { drawSources(); draw(); }
+      }));
+      if (my !== ticket) return;
+      $('go').removeAttribute('aria-busy'); $('go').disabled = false;
+      resolveAll(my);
+    }
+
+    async function resolveAll(my) {
+      const names = [...found.keys()];
+      for (let i = 0; i < names.length; i += 25) {
+        if (my !== ticket) return;
+        try {
+          const r = await api(`api/resolve?domain=${encodeURIComponent(domain)}&names=${names.slice(i, i + 25).map(encodeURIComponent).join(',')}`);
+          wildcard = r.wildcard; r.results.forEach(x => resolved[x.name] = x);
+        } catch (e) { names.slice(i, i + 25).forEach(n => resolved[n] = { status: 'error', error: e.message }); }
+        draw();
+      }
+    }
+
+    const label = { live: ['ok', 'live'], dead: ['', 'no record'], dangling: ['err', 'dangling CNAME'], 'cname-no-address': ['warn', 'CNAME, no address'], 'no-address': ['', 'no A/AAAA'], error: ['warn', 'DNS error'] };
+    function draw() {
+      const res = $('res');
+      const any = Object.keys(status).length;
+      if (!any) { res.innerHTML = ''; return; }
+      const rows = [...found.entries()].sort((a, b) => a[0].split('.').reverse().join('.').localeCompare(b[0].split('.').reverse().join('.')));
+      const vis = rows.filter(([n, s]) => (!filter.size || [...filter].some(f => s.has(f))) && (!text || n.includes(text)) && (!onlyLive || resolved[n]?.status === 'live'));
+      const done = Object.keys(resolved).length, live = Object.values(resolved).filter(x => x.status === 'live').length, dang = Object.values(resolved).filter(x => x.status === 'dangling').length;
+      const active = Object.values(status).some(s => s.state === 'run');
+      res.innerHTML = `<section class="card"><div class="card-head"><h3 class="h3">${found.size} names for ${esc(domain)}</h3>
+        <span class="chips">${active ? '<span class="badge"><span class="spin" style="width:10px;height:10px"></span> sources running</span>' : done < found.size ? `<span class="badge">resolving ${done}/${found.size}</span>` : '<span class="badge ok">done</span>'}
+        ${live ? `<span class="badge ok">${live} live</span>` : ''}${dang ? `<span class="badge err">${dang} dangling</span>` : ''}${wildcard?.wildcard ? '<span class="badge warn">wildcard DNS</span>' : ''}</span></div>
+        ${wildcard?.wildcard ? `<div class="notice warn small" style="margin-bottom:10px"><span>Random names under this domain resolve (${esc((wildcard.ips || []).join(', '))}), so "live" does not prove a host exists.</span></div>` : ''}
+        <div class="tools"><input id="tf" placeholder="Filter names" aria-label="Filter names" value="${esc(text)}" autocomplete="off">
+          <label class="check"><input type="checkbox" id="ol" ${onlyLive ? 'checked' : ''}> live only</label>
+          <span class="chips" role="group" aria-label="Filter by source">${sources.filter(s => status[s.id]?.state === 'ok').map(s => `<button type="button" class="btn chip${filter.has(s.id) ? ' on' : ''}" aria-pressed="${filter.has(s.id)}" data-f="${s.id}">${esc(s.name.split(' (')[0])}</button>`).join('')}</span>
+          <button type="button" class="btn sm" id="csv" style="margin-left:auto" ${found.size ? '' : 'disabled'}>Export CSV</button></div>
+        ${found.size ? `<div class="scroll table-wrap"><table class="data"><thead><tr><th>Name</th><th>Seen by</th><th>Resolves to</th><th>Status</th></tr></thead><tbody>${vis.slice(0, 1500).map(([n, s]) => { const r = resolved[n]; const l = r ? label[r.status] || ['', r.status] : null;
+          return `<tr><td class="n">${esc(n)}</td><td><span class="srcdots">${[...s].map(x => `<span class="badge">${esc(x)}</span>`).join('')}</span></td><td class="n">${r ? esc((r.ips || []).slice(0, 3).join(', ') + ((r.ips || []).length > 3 ? ' …' : '')) + (r.cname ? `<div class="faint small">CNAME ${esc(r.cname)}</div>` : '') : ''}</td>
+          <td>${r ? `<span class="badge ${l[0]}" ${r.error ? `title="${esc(r.error)}"` : ''}>${l[1]}</span>${r.takeover_hint ? `<div class="small warn-text">points at ${esc(r.takeover_hint)}: verify whether it is still claimed</div>` : ''}` : '<span class="faint small">pending</span>'}</td></tr>`; }).join('') || '<tr><td colspan="4" class="muted">No names match the filter.</td></tr>'}</tbody></table></div>
+          <p class="mini">${vis.length > 1500 ? `Showing 1500 of ${vis.length}. ` : ''}Shown ${Math.min(vis.length, 1500)} of ${found.size}. Sources can only report names they have seen, so absence here is not proof a subdomain does not exist.</p>`
+          : active ? '' : '<div class="state"><div class="h3">No names found</div><p>The sources returned nothing for this domain. Check the source cards above for errors.</p></div>'}</section>`;
+      $('tf').oninput = e => { text = e.target.value.trim().toLowerCase(); draw(); $('tf').focus(); $('tf').setSelectionRange(text.length, text.length); };
+      $('ol').onchange = e => { onlyLive = e.target.checked; draw(); };
+      res.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { filter.has(b.dataset.f) ? filter.delete(b.dataset.f) : filter.add(b.dataset.f); draw(); });
+      $('csv').onclick = () => {
+        const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+        const lines = ['name,sources,resolves_to,cname,status'].concat([...found.entries()].map(([n, s]) => [n, [...s].join(' '), (resolved[n]?.ips || []).join(' '), resolved[n]?.cname || '', resolved[n]?.status || ''].map(q).join(',')));
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })); a.download = `subdomains-${domain}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      };
+    }
+    $('f').onsubmit = e => { e.preventDefault(); run($('q').value); };
+    init();
+  </script>
+</body>
+</html>
