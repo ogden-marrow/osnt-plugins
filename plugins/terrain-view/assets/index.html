@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Terrain &amp; horizon · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 400px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px 24px; font-size: 13px; }
+    aside h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .seg { display: flex; flex-wrap: wrap; width: 100%; }
+    .seg button { flex: 1 1 auto; }
+    .field .label { font-size: 12px; }
+    canvas.chart { width: 100%; height: 190px; display: block; background: var(--surface-2); border-radius: var(--radius-sm); }
+    #out { margin-top: 12px; }
+    .item { padding: 8px 10px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
+    .item:hover { border-color: var(--edge-strong); }
+    .item small { display: block; color: var(--ink-2); font-size: 12px; }
+    .attrib { margin-top: 18px; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+    pre.ql { margin: 6px 0 0; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius-sm); font: 11.5px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow: auto; }
+    @media (max-width: 760px) {
+      #layout { flex-direction: column; }
+      #map { flex: none; height: 38dvh; }
+      aside#panel { width: auto; flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--edge-strong); }
+      .readout { display: none; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Terrain &amp; horizon</h1>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map" aria-label="Map: click to place points"></div>
+    <div id="readout" class="readout"></div>
+    <aside id="panel" aria-label="Terrain controls">
+      <div class="seg" role="tablist" aria-label="Mode">
+        <button class="on" data-m="horizon">Horizon</button>
+        <button data-m="view">Visible from here</button>
+        <button data-m="los">Line of sight</button>
+        <button data-m="profile">Profile</button>
+        <button data-m="elev">Elevation</button>
+      </div>
+      <div class="two" style="margin-top:10px">
+        <label class="field"><span class="label" id="la-label">Observer lat</span><input id="la" inputmode="decimal" value="46.5600"></label>
+        <label class="field"><span class="label" id="lo-label">Observer lon</span><input id="lo" inputmode="decimal" value="8.0200"></label>
+      </div>
+      <div id="bpoint" class="two" hidden style="margin-top:8px">
+        <label class="field"><span class="label">Point B lat</span><input id="lb" inputmode="decimal" value="46.5400"></label>
+        <label class="field"><span class="label">Point B lon</span><input id="ob" inputmode="decimal" value="8.2500"></label>
+      </div>
+      <p class="hint" id="clickhint">Click the map to place the observer, or drag the pin.</p>
+
+      <div id="p-horizon" class="pane"><div class="two" style="margin-top:6px"><label class="field"><span class="label">Range (km)</span><input id="hr" value="30"></label><label class="field"><span class="label">Eye height (m)</span><input id="he" value="1.7"></label></div>
+        <button class="btn primary block" id="go-horizon" style="margin-top:10px">Compute horizon</button></div>
+      <div id="p-view" class="pane" hidden><div class="two" style="margin-top:6px"><label class="field"><span class="label">Range (km)</span><input id="vr" value="10"></label><label class="field"><span class="label">Target height (m)</span><input id="vt" value="0"></label><label class="field"><span class="label">Facing (&deg;, blank = all round)</span><input id="vf" placeholder="e.g. 90"></label><label class="field"><span class="label">Field of view (&deg;)</span><input id="vs" value="90"></label></div>
+        <button class="btn primary block" id="go-view" style="margin-top:10px">Show what is visible</button></div>
+      <div id="p-los" class="pane" hidden><div class="two" style="margin-top:6px"><label class="field"><span class="label">Eye at A (m)</span><input id="h1" value="1.7"></label><label class="field"><span class="label">Target at B (m)</span><input id="h2" value="1.7"></label></div>
+        <button class="btn primary block" id="go-los" style="margin-top:10px">Check line of sight</button></div>
+      <div id="p-profile" class="pane" hidden><button class="btn primary block" id="go-profile" style="margin-top:6px">Elevation profile A to B</button></div>
+      <div id="p-elev" class="pane" hidden><button class="btn primary block" id="go-elev" style="margin-top:6px">Elevation at the pin</button>
+        <label class="check"><input type="checkbox" id="chk"> Cross-check with Open-Meteo and OpenTopoData</label></div>
+
+      <div id="out" aria-live="polite"></div>
+      <div class="attrib">
+        Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen/AWS Terrain Tiles</a> (Terrarium; sources include SRTM, USGS NED, ETOPO1 and others, see their attribution list).
+        Elevation cross-checks: Open-Meteo and OpenTopoData (SRTM 30 m). Curvature and refraction (k = 0.13) are applied. Heights are bare terrain: trees and buildings are not included.
+        Map data &copy; OpenStreetMap contributors.
+      </div>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    let map, pa, pb, layer, mode = 'horizon', activeB = false, last = null;
+    const two = () => mode === 'los' || mode === 'profile';
+    const num = id => parseFloat($(id).value.replace(',', '.'));
+    async function api(path) {
+      const r = await fetch(path), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      return d;
+    }
+    const busy = m => { $('out').innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
+    const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; };
+    const kv = rows => `<table class="kv">${rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
+    const A = () => [num('la'), num('lo')], B = () => [num('lb'), num('ob')];
+    function chk(p) { if (p.some(x => isNaN(x)) || Math.abs(p[0]) > 85 || Math.abs(p[1]) > 180) throw new Error('Coordinates must be numbers (latitude within 85 degrees).'); return p; }
+    function clearLayer() { if (!map) return; if (layer) map.removeLayer(layer); layer = L.featureGroup().addTo(map); }
+
+    function syncPins() {
+      const a = A(); if (!a.some(isNaN)) pa.setLatLng(a);
+      const b = B(); if (!b.some(isNaN)) pb.setLatLng(b);
+      drawLine();
+    }
+    let line;
+    function drawLine() { if (!map || !pa) return; if (line) { map.removeLayer(line); line = null; } if (two()) line = L.polyline([pa.getLatLng(), pb.getLatLng()], { color: '#0c7a62', weight: 2, dashArray: '5 5' }).addTo(map); }
+    function place(lat, lon, second) {
+      const f = second ? ['lb', 'ob'] : ['la', 'lo'];
+      $(f[0]).value = lat.toFixed(5); $(f[1]).value = lon.toFixed(5); syncPins();
+    }
+    function setMode(m) {
+      mode = m; activeB = false;
+      document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+      document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'p-' + m);
+      $('bpoint').hidden = !two(); if (!two() && pb) pb.setOpacity(0); else if (pb) pb.setOpacity(1);
+      $('la-label').textContent = two() ? 'Point A lat' : 'Observer lat'; $('lo-label').textContent = two() ? 'Point A lon' : 'Observer lon';
+      $('clickhint').textContent = two() ? 'Clicks alternate between A and B. Drag either pin to adjust.' : 'Click the map to place the observer, or drag the pin.';
+      $('out').innerHTML = ''; clearLayer(); drawLine();
+    }
+
+    // ---- canvas charts ----
+    function ctx(cv) {
+      const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; cv.width = w * dpr; cv.height = h * dpr;
+      const g = cv.getContext('2d'); g.scale(dpr, dpr);
+      const css = getComputedStyle(document.documentElement);
+      return { g, w, h, ink: css.getPropertyValue('--ink-2').trim() || '#666', edge: css.getPropertyValue('--edge-strong').trim() || '#999', accent: css.getPropertyValue('--accent').trim() || '#0c7a62' };
+    }
+    function axes(c, x0, x1, y0, y1, xfmt, yfmt, xticks = 4, yticks = 4) {
+      const { g, w, h } = c, L0 = 40, B0 = 18; g.font = '10px sans-serif'; g.fillStyle = c.ink; g.strokeStyle = c.edge; g.lineWidth = 1;
+      for (let i = 0; i <= yticks; i++) { const v = y0 + (y1 - y0) * i / yticks, y = h - B0 - (h - B0 - 6) * i / yticks; g.globalAlpha = .4; g.beginPath(); g.moveTo(L0, y); g.lineTo(w - 4, y); g.stroke(); g.globalAlpha = 1; g.fillText(yfmt(v), 2, y + 3); }
+      for (let i = 0; i <= xticks; i++) { const v = x0 + (x1 - x0) * i / xticks, x = L0 + (w - L0 - 6) * i / xticks; g.fillText(xfmt(v), Math.min(x - 8, w - 26), h - 4); }
+      return { X: v => L0 + (v - x0) / (x1 - x0) * (w - L0 - 6), Y: v => h - B0 - (v - y0) / (y1 - y0) * (h - B0 - 6) };
+    }
+    function drawHorizon(d) {
+      const cv = $('hz'); if (!cv) return; const c = ctx(cv), pts = d.horizon;
+      const ys = pts.map(p => p[1]), lo = Math.min(-2, Math.floor(Math.min(...ys))), hi = Math.max(5, Math.ceil(Math.max(...ys) + 1));
+      const s = axes(c, 0, 360, lo, hi, v => ({ 0: 'N', 90: 'E', 180: 'S', 270: 'W', 360: 'N' }[Math.round(v)] || Math.round(v) + '°'), v => Math.round(v) + '°', 4, 4);
+      const { g } = c; g.beginPath(); g.moveTo(s.X(0), s.Y(lo)); pts.forEach(p => g.lineTo(s.X(p[0]), s.Y(p[1]))); g.lineTo(s.X(360), s.Y(lo)); g.closePath();
+      g.fillStyle = c.accent; g.globalAlpha = .25; g.fill(); g.globalAlpha = 1; g.strokeStyle = c.accent; g.lineWidth = 1.6; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(s.X(p[0]), s.Y(p[1])) : g.moveTo(s.X(p[0]), s.Y(p[1]))); g.stroke();
+      g.fillStyle = c.ink; d.peaks.slice(0, 5).forEach((p, i) => { g.beginPath(); g.arc(s.X(p.azimuth), s.Y(p.elevation_deg), 3, 0, 7); g.fill(); g.fillText(String(i + 1), s.X(p.azimuth) + 4, s.Y(p.elevation_deg) - 4); });
+    }
+    function drawLine2(d, los) {
+      const cv = $('pf'); if (!cv) return; const c = ctx(cv), S = d.samples, { g } = c;
+      const gi = los ? 2 : 1, vals = S.map(r => r[gi]).filter(v => v != null).concat(los ? S.map(r => r[3]) : []);
+      const lo = Math.floor(Math.min(...vals) / 10) * 10, hi = Math.ceil(Math.max(...vals) / 10) * 10 || lo + 10, len = d.distance_m;
+      const s = axes(c, 0, len / 1000, lo, hi, v => v.toFixed(v < 10 ? 1 : 0) + 'km', v => Math.round(v) + 'm');
+      g.beginPath(); g.moveTo(s.X(0), s.Y(lo)); S.forEach(r => r[gi] != null && g.lineTo(s.X(r[0] / 1000), s.Y(r[gi]))); g.lineTo(s.X(len / 1000), s.Y(lo)); g.closePath(); g.fillStyle = c.accent; g.globalAlpha = .25; g.fill(); g.globalAlpha = 1;
+      g.strokeStyle = c.accent; g.lineWidth = 1.6; g.beginPath(); let first = true; S.forEach(r => { if (r[gi] == null) return; first ? g.moveTo(s.X(r[0] / 1000), s.Y(r[gi])) : g.lineTo(s.X(r[0] / 1000), s.Y(r[gi])); first = false; }); g.stroke();
+      if (los) { g.strokeStyle = d.visible ? '#16a34a' : '#dc2626'; g.setLineDash([5, 4]); g.beginPath(); S.forEach((r, i) => i ? g.lineTo(s.X(r[0] / 1000), s.Y(r[3])) : g.moveTo(s.X(r[0] / 1000), s.Y(r[3]))); g.stroke(); g.setLineDash([]); }
+    }
+    let redraw = null;
+    addEventListener('resize', () => redraw && redraw());
+
+    async function horizon() {
+      try {
+        const [la, lo] = chk(A()); busy('Loading terrain tiles and scanning 360 degrees…');
+        const d = await api(`api/horizon?lat=${la}&lon=${lo}&radius_km=${num('hr')}&eye=${num('he')}&step=1`);
+        clearLayer(); d.peaks.forEach((p, i) => L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', html: `<span class="badge ok" style="border:1px solid #fff">${i + 1}</span>`, iconSize: [20, 20] }) }).addTo(layer).bindTooltip(`Peak ${i + 1}: ${p.elevation_deg.toFixed(1)}° at ${p.azimuth}°, ${p.distance_km} km, ${Math.round(p.height_m)} m`));
+        $('out').innerHTML = `<h3>Horizon silhouette (elevation angle by compass direction)</h3><canvas id="hz" class="chart" role="img" aria-label="Horizon silhouette"></canvas>`
+          + kv([['Observer ground', d.observer.ground_m + ' m'], ['Eye elevation', d.observer.eye_elevation_m + ' m'], ['Highest', `${d.highest.elevation_deg.toFixed(2)}° at ${d.highest.azimuth}° (${d.highest.distance_km} km)`]])
+          + (d.peaks.length ? `<h3>Prominent peaks</h3><div class="table-wrap"><table class="data"><thead><tr><th>#</th><th>Bearing</th><th class="num">Angle</th><th class="num">Dist</th><th class="num">Height</th></tr></thead><tbody>${d.peaks.map((p, i) => `<tr><td>${i + 1}</td><td>${p.azimuth}°</td><td class="num">${p.elevation_deg.toFixed(1)}°</td><td class="num">${p.distance_km} km</td><td class="num">${Math.round(p.height_m)} m</td></tr>`).join('')}</tbody></table></div>` : '')
+          + `<p class="hint">${esc(d.note)}${d.tiles && d.tiles.missing ? ` ${d.tiles.missing} tiles had no data.` : ''}</p>`;
+        redraw = () => drawHorizon(d); redraw();
+      } catch (e) { redraw = null; fail(e.message); }
+    }
+    function dest(lat, lon, brg, dist) {
+      const R = 6371008.8, p1 = lat * Math.PI / 180, l1 = lon * Math.PI / 180, b = brg * Math.PI / 180, dd = dist / R;
+      const p2 = Math.asin(Math.sin(p1) * Math.cos(dd) + Math.cos(p1) * Math.sin(dd) * Math.cos(b));
+      const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(dd) * Math.cos(p1), Math.cos(dd) - Math.sin(p1) * Math.sin(p2));
+      return [p2 * 180 / Math.PI, l2 * 180 / Math.PI];
+    }
+    async function view() {
+      try {
+        const [la, lo] = chk(A()); busy('Loading terrain tiles…');
+        const f = $('vf').value.trim(), q = new URLSearchParams({ lat: la, lon: lo, radius_km: num('vr'), target: num('vt'), step: 2 });
+        if (f !== '') { const span = num('vs') || 90; q.set('from', ((parseFloat(f) - span / 2) + 360) % 360); q.set('span', span); }
+        const d = await api('api/viewshed?' + q);
+        clearLayer(); const r = L.canvas({ padding: .2 });
+        const step = (d.rays.length > 1 ? Math.abs(d.rays[1].az - d.rays[0].az) || 2 : 2);
+        d.rays.forEach(ray => ray.segments.forEach(([a, b]) => L.polyline([dest(la, lo, ray.az, a), dest(la, lo, ray.az, b)], { color: '#16a34a', weight: Math.max(3, step * 1.6), opacity: .5, renderer: r, interactive: false }).addTo(layer)));
+        map.fitBounds(L.latLng(la, lo).toBounds(num('vr') * 2000), { maxZoom: 16 });
+        $('out').innerHTML = kv([['Visible share of the sampled area', (d.visible_fraction * 100).toFixed(1) + '%'], ['Eye / target', `${d.observer.eye_m} m / ${d.target_height_m} m`], ['Observer ground', d.observer.ground_m + ' m']]) + `<p class="hint">Green: places where something ${d.target_height_m} m tall would be in sight. ${esc(d.note)}</p>`;
+        redraw = null;
+      } catch (e) { fail(e.message); }
+    }
+    async function los() {
+      try {
+        const [a, b] = [chk(A()), chk(B())]; busy('Loading terrain tiles…');
+        const d = await api(`api/los?lat1=${a[0]}&lon1=${a[1]}&lat2=${b[0]}&lon2=${b[1]}&h1=${num('h1')}&h2=${num('h2')}`);
+        clearLayer();
+        if (d.worst_obstruction) L.circleMarker([d.worst_obstruction.lat, d.worst_obstruction.lon], { radius: 7, color: '#fff', weight: 2, fillColor: '#dc2626', fillOpacity: 1 }).addTo(layer).bindTooltip('Blocks the view');
+        if (line) line.setStyle({ color: d.visible ? '#16a34a' : '#dc2626', dashArray: null, weight: 3 });
+        $('out').innerHTML = `<div class="notice ${d.visible ? 'ok' : 'err'}"><div><b>${d.visible ? 'Line of sight is clear' : 'Blocked by terrain'}</b> over ${(d.distance_m / 1000).toFixed(2)} km. Minimum clearance ${d.min_clearance_m} m.</div></div><canvas id="pf" class="chart" style="margin-top:10px" role="img" aria-label="Terrain and sight line"></canvas>`
+          + kv([['Ground at A / B', `${d.from.ground_m} m / ${d.to.ground_m} m`], ['Eye / target', `${d.from.eye_m} m / ${d.to.eye_m} m`], ['Obstruction', d.worst_obstruction ? `${(d.worst_obstruction.distance_m / 1000).toFixed(2)} km from A, ${d.worst_obstruction.above_line_m} m above the line` : null], ['Curvature drop mid-way', d.curvature_drop_mid_m + ' m']])
+          + `<p class="hint">Dashed line: sight line. Filled: terrain raised by the Earth's curvature (k=${d.refraction_k}). ${esc(d.note)}</p>`;
+        redraw = () => drawLine2(d, true); redraw();
+      } catch (e) { redraw = null; fail(e.message); }
+    }
+    async function profile() {
+      try {
+        const [a, b] = [chk(A()), chk(B())]; busy('Loading terrain tiles…');
+        const d = await api(`api/profile?lat1=${a[0]}&lon1=${a[1]}&lat2=${b[0]}&lon2=${b[1]}&n=200`);
+        $('out').innerHTML = `<canvas id="pf" class="chart" role="img" aria-label="Elevation profile"></canvas>` + kv([['Length', (d.distance_m / 1000).toFixed(2) + ' km, bearing ' + d.bearing + '°'], ['Min / max', `${d.min_m} m / ${d.max_m} m`], ['Climb / descent', `+${d.gain_m} m / -${d.loss_m} m`], ['Start / end', `${d.start_m} m / ${d.end_m} m`]])
+          + `<p class="hint">${d.samples.length} samples, about ${d.sample_spacing_m} m apart.</p>`;
+        redraw = () => drawLine2(d, false); redraw();
+      } catch (e) { redraw = null; fail(e.message); }
+    }
+    async function elev() {
+      try {
+        const [la, lo] = chk(A()); busy('Reading elevation…');
+        const d = await api(`api/elevation?lat=${la}&lon=${lo}&check=${$('chk').checked ? 'all' : 'none'}`);
+        const c = d.checks || {};
+        $('out').innerHTML = `<div class="big" style="font-size:24px;font-weight:650">${d.elevation_m} m</div>` + kv([['Tiles', `zoom ${d.tile_zoom}, about ${d.resolution_m} m per pixel`], ['Open-Meteo', 'open_meteo_m' in c ? (c.open_meteo_m ?? 'unavailable') + (c.open_meteo_m != null ? ' m' : '') : null], ['OpenTopoData SRTM30', 'opentopodata_srtm30m_m' in c ? (c.opentopodata_srtm30m_m ?? 'unavailable') + (c.opentopodata_srtm30m_m != null ? ' m' : '') : null], ['Largest difference', d.max_difference_m != null ? d.max_difference_m + ' m' : null]])
+          + '<p class="hint">Services use different source grids, so differences of a few metres up to tens in steep terrain are normal.</p>';
+        redraw = null;
+      } catch (e) { fail(e.message); }
+    }
+    document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+    $('go-horizon').onclick = horizon; $('go-view').onclick = view; $('go-los').onclick = los; $('go-profile').onclick = profile; $('go-elev').onclick = elev;
+    for (const id of ['la', 'lo', 'lb', 'ob']) $(id).addEventListener('change', () => { syncPins(); });
+
+    (async () => {
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      map.setView([46.56, 8.1], 10);
+      pa = L.marker([46.56, 8.02], { draggable: true, title: 'A / observer' }).addTo(map).on('dragend', e => { const p = e.target.getLatLng(); place(p.lat, p.lng, false); });
+      pb = L.marker([46.54, 8.25], { draggable: true, title: 'B', opacity: 0 }).addTo(map).on('dragend', e => { const p = e.target.getLatLng(); place(p.lat, p.lng, true); });
+      setMode(mode);
+      map.on('click', e => { if (two()) { place(e.latlng.lat, e.latlng.lng, activeB); activeB = !activeB; } else place(e.latlng.lat, e.latlng.lng, false); });
+    })();
+  </script>
+</body>
+</html>

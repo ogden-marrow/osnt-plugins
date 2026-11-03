@@ -1,0 +1,16 @@
+id = "sun-shadow"
+name = "Sun & shadow check"
+description = "Sun azimuth and altitude, shadow length and direction, time of day from a shadow, candidate locations from a shadow (ShadowFinder-style) and a weather cross-check."
+grid = "Geospatial"
+port = 8144
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_SUN_SHADOW_BIND = "127.0.0.1:{port}"
+# Optional upstreams (defaults shown); only used by the weather and sunrise cross-check.
+# OSNT_SUN_SHADOW_METEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
+# OSNT_SUN_SHADOW_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
+# OSNT_SUN_SHADOW_SUNRISE = "https://api.sunrise-sunset.org/json"

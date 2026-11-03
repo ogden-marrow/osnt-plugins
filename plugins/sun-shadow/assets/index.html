@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sun &amp; shadow · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 380px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px 24px; font-size: 13px; }
+    aside h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .seg { display: flex; flex-wrap: wrap; width: 100%; }
+    .seg button { flex: 1 1 auto; }
+    .field .label { font-size: 12px; }
+    #out { margin-top: 12px; }
+    #out .state { padding: 12px; }
+    .big { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .sunicon { background: none; border: 0; }
+    .attrib { margin-top: 18px; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+    .table-wrap { max-height: 320px; overflow: auto; }
+    canvas#chart { width: 100%; height: 120px; display: block; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+    .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
+    @media (max-width: 760px) {
+      #layout { flex-direction: column; }
+      #map { flex: none; height: 38dvh; }
+      .readout { display: none; }
+      aside#panel { width: auto; flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--edge-strong); }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Sun &amp; shadow</h1>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map" aria-label="Map: drag the pin to move the observer"></div>
+    <div id="readout" class="readout"></div>
+    <aside id="panel" aria-label="Sun and shadow controls">
+      <div class="two">
+        <label class="field"><span class="label">Latitude</span><input id="lat" inputmode="decimal" value="48.8584"></label>
+        <label class="field"><span class="label">Longitude</span><input id="lon" inputmode="decimal" value="2.2945"></label>
+      </div>
+      <div class="two" style="margin-top:8px">
+        <label class="field"><span class="label">Date and time</span><input id="dt" type="datetime-local" step="60"></label>
+        <label class="field"><span class="label">UTC offset (h)</span><input id="off" inputmode="decimal" value="0"></label>
+      </div>
+      <p class="hint">Enter the time shown in the photo's place; the offset converts it to UTC (Paris in summer: 2). Click the map or drag the pin to move.</p>
+
+      <div class="seg" role="tablist" aria-label="Mode" style="margin-top:10px">
+        <button id="m-sun" class="on" data-m="sun">Sun</button>
+        <button data-m="solve">Time from shadow</button>
+        <button data-m="cand">Where on Earth</button>
+        <button data-m="year">Year</button>
+        <button data-m="wx">Check</button>
+      </div>
+
+      <div id="p-sun" class="pane">
+        <label class="field" style="margin-top:10px"><span class="label">Object height (m)</span><input id="h1" inputmode="decimal" value="10"></label>
+      </div>
+      <div id="p-solve" class="pane" hidden>
+        <div class="three" style="margin-top:10px">
+          <label class="field"><span class="label">Height (m)</span><input id="h2" inputmode="decimal" value="10"></label>
+          <label class="field"><span class="label">Shadow (m)</span><input id="l2" inputmode="decimal" value="12"></label>
+          <label class="field"><span class="label">Error (%)</span><input id="t2" inputmode="decimal" value="5"></label>
+        </div>
+        <button class="btn primary block" id="go-solve" style="margin-top:10px">Find the time of day</button>
+        <p class="hint">Uses the pin and the date above. A shadow of one length happens once in the morning and once in the afternoon.</p>
+      </div>
+      <div id="p-cand" class="pane" hidden>
+        <div class="three" style="margin-top:10px">
+          <label class="field"><span class="label">Height (m)</span><input id="h3" inputmode="decimal" value="10"></label>
+          <label class="field"><span class="label">Shadow (m)</span><input id="l3" inputmode="decimal" value="12"></label>
+          <label class="field"><span class="label">Error (%)</span><input id="t3" inputmode="decimal" value="5"></label>
+        </div>
+        <button class="btn primary block" id="go-cand" style="margin-top:10px">Draw candidate band</button>
+        <p class="hint">Needs the exact date and time converted to UTC. The pin is ignored: the band shows every place with that sun height.</p>
+      </div>
+      <div id="p-year" class="pane" hidden>
+        <button class="btn primary block" id="go-year" style="margin-top:10px">Sunrise table for this pin</button>
+      </div>
+      <div id="p-wx" class="pane" hidden>
+        <button class="btn primary block" id="go-wx" style="margin-top:10px">Cloud cover and sunrise check</button>
+        <p class="hint">Was it overcast at the claimed time? Weather is modelled, so treat it as a hint.</p>
+      </div>
+
+      <div id="out" aria-live="polite"></div>
+      <div class="attrib">
+        Sun position: NOAA solar equations (J. Meeus, <i>Astronomical Algorithms</i>), computed locally, accurate to about 0.01&deg;.
+        Weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0, non-commercial use).
+        Sunrise cross-check: <a href="https://sunrise-sunset.org/api" target="_blank" rel="noopener">sunrise-sunset.org</a>.
+        Map data &copy; OpenStreetMap contributors.
+      </div>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const toast = (m, k = 'err') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
+    let map, pin, sunLine, shadowLine, bandLayer, mode = 'sun', lastSun = null, timer;
+
+    // Time handling: the date/time field is local to the place; the offset converts it to UTC.
+    const pad = n => String(n).padStart(2, '0');
+    function offsetHours() { const v = parseFloat($('off').value.replace(',', '.')); return Number.isFinite(v) ? v : 0; }
+    function utcMs() { const v = $('dt').value; if (!v) return NaN; return Date.parse(v + ':00Z') - offsetHours() * 3600000; }
+    const utcIso = () => new Date(utcMs()).toISOString().replace('.000Z', 'Z');
+    function local(isoZ) { if (!isoZ) return '—'; const d = new Date(Date.parse(isoZ) + offsetHours() * 3600000); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; }
+    function localDate(isoZ) { const d = new Date(Date.parse(isoZ) + offsetHours() * 3600000); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; }
+    const dateOnly = () => $('dt').value.slice(0, 10);
+    const num = id => parseFloat($(id).value.replace(',', '.'));
+
+    async function api(path) {
+      const r = await fetch(path), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      return d;
+    }
+    const busy = m => { $('out').innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
+    const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; };
+    const kv = rows => `<table class="kv">${rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
+    const where = () => `lat=${(+$('lat').value).toFixed(5)}&lon=${(+$('lon').value).toFixed(5)}`;
+    function checkLatLon() {
+      const la = num('lat'), lo = num('lon');
+      if (!(la >= -90 && la <= 90) || !(lo >= -180 && lo <= 180)) throw new Error('Latitude must be -90..90 and longitude -180..180.');
+      return [la, lo];
+    }
+    function needTime() { if (isNaN(utcMs())) throw new Error('Pick a date and time first.'); }
+
+    // Sun and shadow lines drawn at a fixed pixel length so they stay visible at any zoom.
+    function drawLines() {
+      if (sunLine) { map.removeLayer(sunLine); sunLine = null; }
+      if (shadowLine) { map.removeLayer(shadowLine); shadowLine = null; }
+      if (!lastSun || !pin) return;
+      const c = map.latLngToContainerPoint(pin.getLatLng()), px = 90;
+      const end = az => map.containerPointToLatLng(L.point(c.x + Math.sin(az * Math.PI / 180) * px, c.y - Math.cos(az * Math.PI / 180) * px));
+      if (lastSun.above_horizon) {
+        sunLine = L.polyline([pin.getLatLng(), end(lastSun.azimuth)], { color: '#f59e0b', weight: 4 }).addTo(map).bindTooltip(`Sun ${lastSun.azimuth.toFixed(0)}° ${lastSun.compass}, ${lastSun.altitude.toFixed(1)}° up`, { permanent: false });
+        shadowLine = L.polyline([pin.getLatLng(), end(lastSun.shadow_bearing)], { color: '#475569', weight: 4, dashArray: '2 6' }).addTo(map).bindTooltip(`Shadows point ${lastSun.shadow_bearing.toFixed(0)}°`);
+      }
+    }
+
+    async function updateSun() {
+      try {
+        checkLatLon(); needTime();
+        const h = num('h1') > 0 ? num('h1') : 1;
+        const [s, sh] = await Promise.all([api(`api/sun?${where()}&time=${encodeURIComponent(utcIso())}`), api(`api/shadow?${where()}&time=${encodeURIComponent(utcIso())}&height=${h}`)]);
+        lastSun = { ...s, shadow_bearing: sh.shadow_bearing };
+        drawLines();
+        if (mode !== 'sun') return;
+        $('out').innerHTML = (s.above_horizon ? '' : '<div class="notice warn" style="margin-bottom:10px">The sun is below the horizon at this time and place.</div>')
+          + `<div class="big">${s.altitude.toFixed(1)}° up &middot; ${s.azimuth.toFixed(0)}° ${esc(s.compass)}</div>`
+          + kv([['Sun azimuth', `${s.azimuth.toFixed(2)}° (${esc(s.compass)}), clockwise from north`], ['Apparent altitude', s.altitude.toFixed(2) + '°'],
+                ['Shadow points to', s.above_horizon ? `${sh.shadow_bearing.toFixed(1)}°` : null],
+                [`Shadow of ${h} m`, sh.shadow_length_m != null ? `${sh.shadow_length_m.toFixed(2)} m (ratio ${sh.shadow_to_height_ratio})` : 'none'],
+                ['UTC time', esc(s.time)], ['Declination', s.declination.toFixed(2) + '°'], ['Equation of time', s.equation_of_time_min.toFixed(1) + ' min']]);
+      } catch (e) { if (mode === 'sun') fail(e.message); }
+    }
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(() => (mode === 'sun' ? updateSun() : updateSunQuiet()), 200); };
+    const updateSunQuiet = () => updateSun();
+
+    function placePin(lat, lon, pan) {
+      $('lat').value = (+lat).toFixed(5); $('lon').value = (+lon).toFixed(5);
+      pin.setLatLng([lat, lon]); if (pan) map.panTo([lat, lon]); schedule();
+    }
+
+    function branch(name, b) {
+      if (!b) return `<h3>${name}</h3><p class="muted">No match.</p>`;
+      return `<h3>${name}</h3>` + kv([['Best estimate', `<b>${local(b.time)}</b> local (${esc(b.time.slice(11, 16))} UTC)`], ['Window', `${local(b.from)} to ${local(b.to)} local`],
+        ['Sun', `${b.azimuth.toFixed(0)}° ${esc(b.compass)}, ${b.altitude.toFixed(1)}° up`], ['Shadow points to', b.shadow_bearing.toFixed(0) + '°']]);
+    }
+    async function solve() {
+      try {
+        checkLatLon(); if (!dateOnly()) throw new Error('Pick the date first.');
+        busy('Searching the day…');
+        const d = await api(`api/solve?${where()}&date=${dateOnly()}&height=${num('h2')}&length=${num('l2')}&tolerance=${num('t2') || 5}`);
+        $('out').innerHTML = (d.message ? `<div class="notice warn">${esc(d.message)}</div>` : '') + branch('Morning', d.morning) + branch('Afternoon', d.afternoon)
+          + `<p class="hint">Shortest shadow that day: ${d.shortest_shadow_m ?? '—'} m at solar noon (${local(d.solar_noon)} local). Window reflects the ${d.tolerance_pct}% error.</p>`;
+      } catch (e) { fail(e.message); }
+    }
+
+    function ringsToMap(d) {
+      if (bandLayer) map.removeLayer(bandLayer);
+      bandLayer = L.layerGroup().addTo(map);
+      const add = (segs, style) => segs.forEach(s => L.polyline(s, style).addTo(bandLayer));
+      add(d.outer, { color: '#0ea5e9', weight: 2, opacity: .7, dashArray: '6 6' }); add(d.inner, { color: '#0ea5e9', weight: 2, opacity: .7, dashArray: '6 6' });
+      add(d.center, { color: '#0c7a62', weight: 3 });
+      L.circleMarker([d.subsolar_point.lat, d.subsolar_point.lon], { radius: 7, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 1 }).addTo(bandLayer).bindTooltip('Sub-solar point (sun straight overhead)');
+      map.fitWorld({ maxZoom: 4 });
+    }
+    async function candidates() {
+      try {
+        needTime(); busy('Computing…');
+        const d = await api(`api/candidates?time=${encodeURIComponent(utcIso())}&height=${num('h3')}&length=${num('l3')}&tolerance=${num('t3') || 5}`);
+        ringsToMap(d);
+        $('out').innerHTML = kv([['Sun altitude', `${d.sun_altitude}° (range ${d.sun_altitude_range[0]}° to ${d.sun_altitude_range[1]}°)`], ['Time (UTC)', esc(d.time)],
+          ['Sub-solar point', `${d.subsolar_point.lat}, ${d.subsolar_point.lon}`], ['Circle radius', `${d.radius_km.toLocaleString()} km`], ['Latitude span', `${d.latitude_range[0]}° to ${d.latitude_range[1]}°`]])
+          + `<h3>Longitudes on the centre line</h3><div class="table-wrap"><table class="data"><thead><tr><th>Lat</th><th class="num">Lon A</th><th class="num">Lon B</th></tr></thead><tbody>${d.longitudes.map(r => `<tr><td>${r.lat}°</td><td class="num">${r.lon_a}°</td><td class="num">${r.lon_b}°</td></tr>`).join('')}</tbody></table></div>`
+          + `<p class="hint">${esc(d.note)}</p>`;
+      } catch (e) { fail(e.message); }
+    }
+
+    function chart(days) {
+      const cv = $('chart'); if (!cv) return;
+      const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; cv.width = w * dpr; cv.height = h * dpr;
+      const g = cv.getContext('2d'); g.scale(dpr, dpr);
+      const css = getComputedStyle(document.documentElement);
+      g.strokeStyle = css.getPropertyValue('--edge-strong') || '#999'; g.fillStyle = css.getPropertyValue('--ink-3') || '#888'; g.font = '10px sans-serif';
+      for (const hr of [0, 12, 24]) { const y = h - 14 - (hr / 24) * (h - 22); g.beginPath(); g.moveTo(28, y); g.lineTo(w, y); g.stroke(); g.fillText(hr + 'h', 2, y + 3); }
+      g.strokeStyle = '#0c7a62'; g.lineWidth = 2; g.beginPath();
+      days.forEach((d, i) => { const x = 28 + (i / (days.length - 1)) * (w - 32), y = h - 14 - (d.day_hours / 24) * (h - 22); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+      g.fillStyle = css.getPropertyValue('--ink-3') || '#888';
+      ['Jan', 'Apr', 'Jul', 'Oct'].forEach((m, i) => g.fillText(m, 28 + (i / 4) * (w - 32), h - 2));
+    }
+    async function year() {
+      try {
+        checkLatLon(); busy('Computing the year…');
+        const y = ($('dt').value || '').slice(0, 4) || new Date().getFullYear();
+        const d = await api(`api/year?${where()}&year=${y}`);
+        const rows = d.days.filter((_, i) => i % 7 === 0 || d.days[i].date.endsWith('-12-31'));
+        $('out').innerHTML = `<h3>Day length in ${d.year}</h3><canvas id="chart" role="img" aria-label="Day length through the year"></canvas>`
+          + `<div class="table-wrap" style="margin-top:8px"><table class="data"><thead><tr><th>Date</th><th>Rise</th><th>Set</th><th class="num">Day</th><th class="num">Noon alt</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.date.slice(5)}</td><td>${r.polar ? (r.polar === 'up' ? 'sun up' : 'sun down') : local(r.sunrise)}</td><td>${r.polar ? '' : local(r.sunset)}</td><td class="num">${r.day_hours.toFixed(2)}h</td><td class="num">${r.noon_altitude.toFixed(1)}°</td></tr>`).join('')}</tbody></table></div>`
+          + `<p class="hint">Every 7th day, times in the offset above. ${esc(d.note)}</p>`;
+        chart(d.days); window._days = d.days;
+      } catch (e) { fail(e.message); }
+    }
+    async function wx() {
+      try {
+        checkLatLon(); needTime(); busy('Asking Open-Meteo…');
+        const d = await api(`api/crosscheck?${where()}&time=${encodeURIComponent(utcIso())}`);
+        const w = d.weather, s = d.sunrise_check;
+        let html = '<h3>Weather at that hour</h3>';
+        html += w.error ? `<div class="notice warn">${esc(w.error)}</div>` : kv([['Cloud cover', `<b>${w.cloud_cover_pct}%</b> (low clouds ${w.cloud_cover_low_pct ?? '—'}%)`], ['Reading', esc(w.reading)], ['Temperature', w.temperature_c + ' °C'], ['Precipitation', w.precipitation_mm + ' mm'], ['Source', esc(w.source)]]) + `<p class="hint">${esc(w.grid_note || '')}</p>`;
+        html += '<h3>Sunrise / sunset cross-check</h3>';
+        html += s.error ? `<div class="notice warn">${esc(s.error)}</div>` : kv([['Ours', `${(s.our_sunrise.time || '—').slice(11, 16)} / ${(s.our_sunset.time || '—').slice(11, 16)} UTC`], ['sunrise-sunset.org', `${(s.their_sunrise || '—').slice(11, 16)} / ${(s.their_sunset || '—').slice(11, 16)} UTC`], ['Difference', `${s.sunrise_diff_s ?? '—'} s / ${s.sunset_diff_s ?? '—'} s`]]);
+        $('out').innerHTML = html;
+      } catch (e) { fail(e.message); }
+    }
+
+    function setMode(m) {
+      mode = m;
+      document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+      document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'p-' + m);
+      $('out').innerHTML = '';
+      if (bandLayer && m !== 'cand') { map.removeLayer(bandLayer); bandLayer = null; }
+      if (m === 'sun') updateSun();
+    }
+    document.querySelectorAll('.seg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+    $('go-solve').onclick = solve; $('go-cand').onclick = candidates; $('go-year').onclick = year; $('go-wx').onclick = wx;
+    for (const id of ['dt', 'off', 'h1']) $(id).addEventListener('input', schedule);
+    for (const id of ['lat', 'lon']) $(id).addEventListener('change', () => { const la = num('lat'), lo = num('lon'); if (la >= -90 && la <= 90 && lo >= -180 && lo <= 180) { pin.setLatLng([la, lo]); map.panTo([la, lo]); } schedule(); });
+    addEventListener('resize', () => window._days && $('chart') && chart(window._days));
+    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => window._days && $('chart') && chart(window._days));
+
+    (async () => {
+      const now = new Date(); $('dt').value = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T12:00`;
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      map.setView([48.8584, 2.2945], 5);
+      pin = L.marker([48.8584, 2.2945], { draggable: true }).addTo(map);
+      pin.on('dragend', () => { const p = pin.getLatLng(); placePin(p.lat, p.lng, false); });
+      map.on('click', e => placePin(e.latlng.lat, e.latlng.lng, false));
+      map.on('zoomend moveend', drawLines);
+      updateSun();
+    })();
+  </script>
+</body>
+</html>

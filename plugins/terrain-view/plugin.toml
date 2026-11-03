@@ -1,0 +1,15 @@
+id = "terrain-view"
+name = "Terrain & horizon"
+description = "Elevation at a point, elevation profile, line of sight with Earth curvature, horizon silhouette and a visible-from-here map, from decoded Terrarium elevation tiles."
+grid = "Geospatial"
+port = 8146
+version = "0.1.0"
+
+[service]
+state_dir = true
+
+[service.env]
+OSNT_TERRAIN_BIND = "127.0.0.1:{port}"
+OSNT_TERRAIN_STATE = "{state_dir}"
+# Terrarium PNG tile source (AWS Open Data, derived from SRTM, NED, ETOPO1 and others). Change only to point at a mirror.
+OSNT_TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium"

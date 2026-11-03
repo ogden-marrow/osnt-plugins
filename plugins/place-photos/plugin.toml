@@ -1,0 +1,18 @@
+id = "place-photos"
+name = "Place photos"
+description = "Geotagged photos and articles near a coordinate (Wikimedia Commons, Wikipedia) and optional street-level coverage (Mapillary), to compare a claimed location with what is there."
+grid = "Geospatial"
+port = 8147
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_PLACES_BIND = "127.0.0.1:{port}"
+
+[[secret]]
+name = "MAPILLARY_TOKEN"
+label = "Mapillary access token (optional, enables street-level coverage)"
+help_url = "https://www.mapillary.com/dashboard/developers"
+required = false

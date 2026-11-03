@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>OSM feature finder · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 400px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px 24px; font-size: 13px; }
+    aside h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .seg { display: flex; flex-wrap: wrap; width: 100%; }
+    .seg button { flex: 1 1 auto; }
+    .field .label { font-size: 12px; }
+    textarea { width: 100%; font: 12px/1.4 var(--font-mono); min-height: 120px; }
+    #out { margin-top: 12px; }
+    .item { padding: 8px 10px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
+    .item:hover { border-color: var(--edge-strong); }
+    .item small { display: block; color: var(--ink-2); font-size: 12px; }
+    .attrib { margin-top: 18px; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+    pre.ql { margin: 6px 0 0; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius-sm); font: 11.5px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow: auto; }
+    @media (max-width: 760px) {
+      #layout { flex-direction: column; }
+      #map { flex: none; height: 38dvh; }
+      aside#panel { width: auto; flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--edge-strong); }
+      .readout { display: none; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>OSM feature finder</h1>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map" aria-label="Map: click to set the search centre"></div>
+    <div id="readout" class="readout"></div>
+    <aside id="panel" aria-label="Search controls">
+      <div class="seg" role="tablist" aria-label="Mode">
+        <button class="on" data-m="find">Find features</button>
+        <button data-m="place">Place search</button>
+        <button data-m="edits">Recent edits</button>
+        <button data-m="raw">Overpass QL</button>
+      </div>
+
+      <div id="p-find" class="pane">
+        <label class="field" style="margin-top:10px"><span class="label">What to find</span><select id="preset"></select></label>
+        <div id="custom1" class="two" hidden style="margin-top:8px"><label class="field"><span class="label">Tag key</span><input id="key" placeholder="shop"></label><label class="field"><span class="label">Value (optional)</span><input id="value" placeholder="bakery"></label></div>
+        <div class="two" style="margin-top:8px">
+          <label class="field"><span class="label">Centre (lat, lon)</span><input id="centre" value="47.3769, 8.5417" inputmode="decimal"></label>
+          <label class="field"><span class="label">Radius (m)</span><input id="radius" value="1000" inputmode="numeric"></label>
+        </div>
+        <label class="field" style="margin-top:8px"><span class="label">Only those near (optional)</span><select id="near"><option value="">Anything</option></select></label>
+        <div id="nearrow" class="two" hidden style="margin-top:8px">
+          <label class="field"><span class="label">Within (m)</span><input id="nearr" value="200" inputmode="numeric"></label>
+          <div id="custom2" hidden class="two"><label class="field"><span class="label">Key</span><input id="key2"></label><label class="field"><span class="label">Value</span><input id="value2"></label></div>
+        </div>
+        <div class="row" style="margin-top:10px"><button class="btn primary grow" id="go-find">Search the map area</button><button class="btn" id="use-view" title="Use the visible map as the area">Use view</button></div>
+        <p class="hint">Click the map to move the centre. Searches the centre and radius, or the visible map if you press "Use view" (up to 0.6&deg; across).</p>
+      </div>
+
+      <div id="p-place" class="pane" hidden>
+        <form id="geo-form" class="row" style="margin-top:10px" role="search"><label class="sr-only" for="gq">Place or address</label><input id="gq" class="grow" placeholder="Place name or address" autocomplete="off"><button class="btn primary">Search</button></form>
+        <div class="seg" style="margin-top:8px" id="prov"><button class="on" data-p="nominatim">Nominatim</button><button data-p="photon">Photon</button></div>
+        <button class="btn block" id="go-rev" style="margin-top:8px">Name the place at the map centre</button>
+        <p class="hint">Places and addresses only. Nominatim allows one search per second; it is not queried while you type.</p>
+      </div>
+
+      <div id="p-edits" class="pane" hidden>
+        <div class="two" style="margin-top:10px">
+          <label class="field"><span class="label">Radius (m)</span><input id="eradius" value="500" inputmode="numeric"></label>
+          <label class="field"><span class="label">Look back (days)</span><input id="edays" value="30" inputmode="numeric"></label>
+        </div>
+        <button class="btn primary block" id="go-edits" style="margin-top:10px">Check the map centre</button>
+        <p class="hint">Was this place edited recently? Lists changesets and open notes. Mapper names are left out.</p>
+      </div>
+
+      <div id="p-raw" class="pane" hidden>
+        <label class="field" style="margin-top:10px"><span class="label">Overpass QL (JSON output)</span><textarea id="rawq" spellcheck="false">node["amenity"="fuel"](around:800,47.3769,8.5417);
+out center tags 50;</textarea></label>
+        <button class="btn primary block" id="go-raw" style="margin-top:10px">Run query</button>
+        <p class="hint">An <code>out</code> statement is required. Keep queries small: the public servers are shared.</p>
+      </div>
+
+      <div id="out" aria-live="polite"></div>
+      <div class="attrib">
+        Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>, ODbL 1.0.
+        Features via the Overpass API; geocoding by Nominatim and Photon (komoot). Results are public map data and describe places, not people.
+      </div>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const toast = (m, k = 'err') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 5000); };
+    let map, layer, centreMarker, circle, mode = 'find', provider = 'nominatim', lastGeo = null, useView = false;
+    const COLOURS = { a: '#0c7a62', b: '#d97706', '': '#2563eb' };
+
+    async function api(path) {
+      const r = await fetch(path), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      return d;
+    }
+    const busy = m => { $('out').innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
+    const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; };
+    function centre() {
+      const v = $('centre').value.split(/[ ,;]+/).filter(Boolean).map(Number);
+      if (v.length !== 2 || v.some(isNaN) || Math.abs(v[0]) > 90 || Math.abs(v[1]) > 180) throw new Error('Centre must be "lat, lon".');
+      return v;
+    }
+    function setCentre(lat, lon, pan) {
+      $('centre').value = `${(+lat).toFixed(5)}, ${(+lon).toFixed(5)}`; useView = false;
+      if (centreMarker) centreMarker.setLatLng([lat, lon]); else centreMarker = L.marker([lat, lon], { draggable: true }).addTo(map).on('dragend', e => { const p = e.target.getLatLng(); setCentre(p.lat, p.lng, false); });
+      drawCircle(); if (pan) map.panTo([lat, lon]);
+    }
+    function drawCircle() {
+      if (circle) { map.removeLayer(circle); circle = null; }
+      try { const [la, lo] = centre(), r = +$('radius').value; if (mode === 'find' && r > 0) circle = L.circle([la, lo], { radius: r, color: '#0c7a62', weight: 1, fillOpacity: .05, interactive: false }).addTo(map); } catch { /* ignore */ }
+    }
+
+    // ---- results on the map and in the list ----
+    function clearLayer() { if (layer) map.removeLayer(layer); layer = L.featureGroup().addTo(map); }
+    function popup(f) {
+      const p = f.properties, tags = Object.entries(p.tags || {}).slice(0, 12).map(([k, v]) => `${esc(k)}=${esc(String(v).slice(0, 80))}`).join('<br>');
+      return `<b>${esc(p.name || p.osm_type + ' ' + p.osm_id)}</b><br><small>${tags}</small><br><a href="${esc(p.url)}" target="_blank" rel="noopener">View on OSM</a>`;
+    }
+    function showGeoJSON(d) {
+      clearLayer();
+      const feats = d.features, m = d.meta;
+      const markers = [];
+      feats.forEach((f, i) => {
+        const c = COLOURS[f.properties.class] || COLOURS[''];
+        let l;
+        if (f.geometry.type === 'Point') l = L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], { radius: 7, color: '#fff', weight: 1.5, fillColor: c, fillOpacity: .95 });
+        else l = L.geoJSON(f, { style: { color: c, weight: 3 } });
+        l.bindPopup(popup(f)).addTo(layer); markers.push(l); f._l = l;
+      });
+      if (feats.length) map.fitBounds(layer.getBounds().pad(.2), { maxZoom: 17 });
+      const kind = p => p.properties.class === 'a' ? 'A' : p.properties.class === 'b' ? 'B' : '';
+      $('out').innerHTML = `<div class="row spread"><b>${m.count} result${m.count === 1 ? '' : 's'}</b>${m.truncated ? '<span class="badge warn">limit reached</span>' : ''}<button class="btn sm" id="dl">GeoJSON</button></div>`
+        + (feats.length ? '' : '<div class="state" style="margin-top:8px"><div class="h3">Nothing found</div><p>Try a larger radius, or a different feature type.</p></div>')
+        + feats.map((f, i) => `<div class="item" data-i="${i}"><b>${esc(f.properties.name || f.properties.osm_type + ' ' + f.properties.osm_id)}</b>${kind(f) ? ` <span class="badge">${kind(f)}</span>` : ''}<small>${esc(Object.entries(f.properties.tags).slice(0, 3).map(([k, v]) => k + '=' + v).join(', '))}</small></div>`).join('')
+        + `<h3>Overpass query</h3><pre class="ql">${esc(m.query)}</pre><p class="hint">Server: ${esc(m.instance)} &middot; data ${esc(m.data_timestamp || 'timestamp unknown')}</p>`;
+      document.querySelectorAll('.item[data-i]').forEach(el => el.onclick = () => { const f = feats[+el.dataset.i]; map.setView([f._l.getLatLng ? f._l.getLatLng().lat : f._l.getBounds().getCenter().lat, f._l.getLatLng ? f._l.getLatLng().lng : f._l.getBounds().getCenter().lng], Math.max(map.getZoom(), 16)); f._l.openPopup(); });
+      $('dl').onclick = () => { const clean = { type: 'FeatureCollection', features: feats.map(f => ({ type: f.type, geometry: f.geometry, properties: f.properties })) }; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(clean)], { type: 'application/geo+json' })); a.download = 'osm-features.geojson'; a.click(); };
+    }
+
+    async function find() {
+      try {
+        const preset = $('preset').value, q = new URLSearchParams({ preset });
+        if (preset === 'custom') { q.set('key', $('key').value.trim()); if ($('value').value.trim()) q.set('value', $('value').value.trim()); }
+        if (useView) { const b = map.getBounds(); q.set('bbox', [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(x => x.toFixed(6)).join(',')); }
+        else { const [la, lo] = centre(); q.set('lat', la); q.set('lon', lo); q.set('radius', $('radius').value); }
+        if ($('near').value) { q.set('near', $('near').value); q.set('near_radius', $('nearr').value); if ($('near').value === 'custom') { q.set('key2', $('key2').value.trim()); if ($('value2').value.trim()) q.set('value2', $('value2').value.trim()); } }
+        busy('Asking Overpass…'); showGeoJSON(await api('api/find?' + q));
+      } catch (e) { fail(e.message); }
+    }
+    async function raw() {
+      try { busy('Running…'); showGeoJSON(await api('api/raw?q=' + encodeURIComponent($('rawq').value))); } catch (e) { fail(e.message); }
+    }
+    function geoList(items, onPick) {
+      $('out').innerHTML = items.length ? items.map((r, i) => `<div class="item" data-i="${i}"><b>${esc(r.name || r.display_name)}</b><small>${esc(r.display_name)}</small><small>${(+r.lat).toFixed(5)}, ${(+r.lon).toFixed(5)} &middot; ${esc([r.class, r.type].filter(Boolean).join(' / '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener">OSM</a>` : ''}</small></div>`).join('')
+        : '<div class="state"><div class="h3">No match</div><p>Try fewer words or another spelling.</p></div>';
+      document.querySelectorAll('.item[data-i]').forEach(el => el.onclick = () => onPick(items[+el.dataset.i]));
+    }
+    function pick(r) {
+      setCentre(r.lat, r.lon, false);
+      if (r.bbox) map.fitBounds([[r.bbox[0], r.bbox[2]], [r.bbox[1], r.bbox[3]]], { maxZoom: 17 }); else map.setView([r.lat, r.lon], 16);
+    }
+    $('geo-form').onsubmit = async e => {
+      e.preventDefault(); if (!$('gq').value.trim()) return;
+      try { busy('Searching…'); const d = await api(`api/geocode?provider=${provider}&q=${encodeURIComponent($('gq').value)}`);
+        // Photon boxes are [minlon, minlat, maxlon, maxlat] -> normalise to [s, n, w, e] like Nominatim.
+        d.results.forEach(r => { if (r.bbox && d.provider === 'photon') r.bbox = [r.bbox[1], r.bbox[3], r.bbox[0], r.bbox[2]]; });
+        geoList(d.results, pick); } catch (er) { fail(er.message); }
+    };
+    $('prov').querySelectorAll('button').forEach(b => b.onclick = () => { provider = b.dataset.p; $('prov').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+    $('go-rev').onclick = async () => {
+      try { const [la, lo] = centre(); busy('Looking up…'); const d = await api(`api/reverse?provider=${provider}&lat=${la}&lon=${lo}`);
+        $('out').innerHTML = d.result ? `<div class="item"><b>${esc(d.result.display_name)}</b><small>${(+d.result.lat).toFixed(5)}, ${(+d.result.lon).toFixed(5)} &middot; ${esc([d.result.class, d.result.type].filter(Boolean).join(' / '))}${d.result.url ? ` &middot; <a href="${esc(d.result.url)}" target="_blank" rel="noopener">OSM</a>` : ''}</small></div>` : `<div class="state"><div class="h3">Nothing here</div><p>${esc(d.message || 'No place found at this point.')}</p></div>`;
+      } catch (e) { fail(e.message); }
+    };
+    $('go-edits').onclick = async () => {
+      try {
+        const [la, lo] = centre(); busy('Asking openstreetmap.org…');
+        const d = await api(`api/edits?lat=${la}&lon=${lo}&radius=${$('eradius').value}&days=${$('edays').value}`);
+        clearLayer();
+        const cs = d.changesets.items, ns = d.notes.items;
+        cs.filter(c => c.bbox[2] - c.bbox[0] < 0.1 && c.bbox[3] - c.bbox[1] < 0.1).forEach(c => L.rectangle([[c.bbox[1], c.bbox[0]], [c.bbox[3], c.bbox[2]]], { color: '#2563eb', weight: 1, fillOpacity: .08 }).addTo(layer).bindPopup(`<b>Changeset ${c.id}</b><br>${esc(c.comment || '')}<br><a href="${esc(c.url)}" target="_blank" rel="noopener">View</a>`));
+        ns.forEach(n => L.circleMarker([n.lat, n.lon], { radius: 6, color: '#fff', weight: 1.5, fillColor: n.status === 'open' ? '#dc2626' : '#6b7280', fillOpacity: 1 }).addTo(layer).bindPopup(`<b>Note ${n.id}</b> (${esc(n.status)})<br>${esc(n.text || '')}<br><a href="${esc(n.url)}" target="_blank" rel="noopener">View</a>`));
+        const err = [d.changesets.error, d.notes.error].filter(Boolean).map(e => `<div class="notice warn" style="margin-top:8px">${esc(e)}</div>`).join('');
+        $('out').innerHTML = `<div class="notice ${cs.length ? 'info' : ''}"><div><b>${cs.length} changeset${cs.length === 1 ? '' : 's'}</b> since ${esc(d.since.slice(0, 10))}, <b>${d.open_notes} open note${d.open_notes === 1 ? '' : 's'}</b>.</div></div>` + err
+          + (cs.length ? '<h3>Changesets (newest first)</h3>' : '') + cs.map(c => `<div class="item"><b>${esc(c.created_at.slice(0, 16).replace('T', ' '))}</b> &middot; ${c.changes ?? '?'} changes<small>${esc(c.comment || '(no comment)')}</small><small>${esc(c.editor || '')} &middot; <a href="${esc(c.url)}" target="_blank" rel="noopener">changeset ${c.id}</a></small></div>`).join('')
+          + (ns.length ? '<h3>Map notes</h3>' : '') + ns.map(n => `<div class="item"><b>${esc(n.status)}</b> &middot; ${esc(String(n.created).slice(0, 10))}<small>${esc(n.text || '')}</small><small><a href="${esc(n.url)}" target="_blank" rel="noopener">note ${n.id}</a></small></div>`).join('')
+          + `<p class="hint">${esc(d.privacy)}</p>`;
+        map.setView([la, lo], Math.max(map.getZoom(), 15));
+      } catch (e) { fail(e.message); }
+    };
+
+    function setMode(m) {
+      mode = m;
+      document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+      document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'p-' + m);
+      drawCircle();
+    }
+    document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+    $('go-find').onclick = find; $('go-raw').onclick = raw;
+    $('use-view').onclick = () => { useView = true; find(); };
+    $('preset').onchange = () => { $('custom1').hidden = $('preset').value !== 'custom'; };
+    $('near').onchange = () => { $('nearrow').hidden = !$('near').value; $('custom2').hidden = $('near').value !== 'custom'; };
+    for (const id of ['centre', 'radius']) $(id).addEventListener('change', () => { try { const [la, lo] = centre(); setCentre(la, lo, true); } catch { /* shown on search */ } });
+
+    (async () => {
+      try {
+        const presets = await api('api/presets');
+        const opts = presets.map(p => `<option value="${esc(p.id)}" title="${esc(p.help)}">${esc(p.label)}</option>`).join('') + '<option value="custom">Custom tag…</option>';
+        $('preset').innerHTML = opts; $('near').innerHTML = '<option value="">Anything</option>' + opts;
+      } catch (e) { toast('Could not load presets: ' + e.message); }
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      map.setView([47.3769, 8.5417], 14);
+      setCentre(47.3769, 8.5417, false);
+      map.on('click', e => setCentre(e.latlng.lat, e.latlng.lng, false));
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+id = "geo-toolkit"
+name = "Coordinates & geodesy"
+description = "Convert coordinates between decimal, DMS, UTM, MGRS, geohash, Plus Codes and Maidenhead; geodesic distance, bearing and destination; circle, box and grid generators; GeoJSON clean-up with KML/GPX export; find coordinates in pasted text."
+grid = "Geospatial"
+port = 8148
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_GEO_TOOLKIT_BIND = "127.0.0.1:{port}"
+# Optional online timezone lookup (Open-Meteo); everything else is offline maths.
+# OSNT_GEO_TOOLKIT_METEO = "https://api.open-meteo.com"

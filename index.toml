@@ -321,3 +321,38 @@ name = "Site fingerprint"
 description = "Fingerprint one URL: redirect chain, server and technology hints, security-header scorecard, cookie flags, robots and sitemap, favicon hash and TLS certificate chain."
 version = "0.1.0"
 path = "plugins/site-fingerprint"
+
+[[plugin]]
+id = "sun-shadow"
+name = "Sun & shadow check"
+description = "Sun azimuth and altitude, shadow length and direction, time of day from a shadow, candidate locations from a shadow (ShadowFinder-style) and a weather cross-check."
+version = "0.1.0"
+path = "plugins/sun-shadow"
+
+[[plugin]]
+id = "osm-query"
+name = "OSM feature finder"
+description = "Find OpenStreetMap features (towers, bridges, rail crossings, fuel stations, military sites) by radius or box, with raw Overpass QL, geocoding, reverse geocoding and recent edits and notes for an area."
+version = "0.1.0"
+path = "plugins/osm-query"
+
+[[plugin]]
+id = "terrain-view"
+name = "Terrain & horizon"
+description = "Elevation at a point, elevation profile, line of sight with Earth curvature, horizon silhouette and a visible-from-here map, from decoded Terrarium elevation tiles."
+version = "0.1.0"
+path = "plugins/terrain-view"
+
+[[plugin]]
+id = "place-photos"
+name = "Place photos"
+description = "Geotagged photos and articles near a coordinate (Wikimedia Commons, Wikipedia) and optional street-level coverage (Mapillary), to compare a claimed location with what is there."
+version = "0.1.0"
+path = "plugins/place-photos"
+
+[[plugin]]
+id = "geo-toolkit"
+name = "Coordinates & geodesy"
+description = "Convert coordinates between decimal, DMS, UTM, MGRS, geohash, Plus Codes and Maidenhead; geodesic distance, bearing and destination; circle, box and grid generators; GeoJSON clean-up with KML/GPX export; find coordinates in pasted text."
+version = "0.1.0"
+path = "plugins/geo-toolkit"

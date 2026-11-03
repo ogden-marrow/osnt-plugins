@@ -1,0 +1,16 @@
+id = "osm-query"
+name = "OSM feature finder"
+description = "Find OpenStreetMap features (towers, bridges, rail crossings, fuel stations, military sites) by radius or box, with raw Overpass QL, geocoding, reverse geocoding and recent edits and notes for an area."
+grid = "Geospatial"
+port = 8145
+version = "0.1.0"
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_OSM_QUERY_BIND = "127.0.0.1:{port}"
+# Overpass API endpoint. The public instances are volunteer-run; point this at your own if you have one.
+OSNT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Comma-separated fallbacks tried (in order) when the primary does not answer.
+OSNT_OVERPASS_FALLBACKS = "https://overpass.private.coffee/api/interpreter,https://overpass.kumi.systems/api/interpreter"

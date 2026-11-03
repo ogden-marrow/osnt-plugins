@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Coordinates &amp; geodesy · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 400px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px 24px; font-size: 13px; }
+    aside h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .seg { display: flex; flex-wrap: wrap; width: 100%; }
+    .seg button { flex: 1 1 auto; }
+    .field .label { font-size: 12px; }
+    textarea { width: 100%; font: 12px/1.4 var(--font-mono); min-height: 110px; resize: vertical; }
+    .fmt { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--edge); }
+    .fmt .k { flex: 0 0 120px; color: var(--ink-2); font-size: 12px; }
+    .fmt code { flex: 1; min-width: 0; overflow-wrap: anywhere; font: 12.5px/1.4 var(--font-mono); user-select: all; }
+    .fmt .btn { flex: none; }
+    #out { margin-top: 12px; }
+    .item { padding: 8px 10px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
+    .item:hover { border-color: var(--edge-strong); }
+    .item small { display: block; color: var(--ink-2); font-size: 12px; }
+    .attrib { margin-top: 18px; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+    pre.ql { margin: 6px 0 0; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius-sm); font: 11.5px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow: auto; }
+    @media (max-width: 760px) {
+      #layout { flex-direction: column; }
+      #map { flex: none; height: 38dvh; }
+      aside#panel { width: auto; flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--edge-strong); }
+      .readout { display: none; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Coordinates &amp; geodesy</h1>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map" aria-label="Map preview"></div>
+    <div id="readout" class="readout"></div>
+    <aside id="panel" aria-label="Coordinate tools">
+      <div class="seg" role="tablist" aria-label="Tool">
+        <button class="on" data-m="convert">Convert</button>
+        <button data-m="distance">Distance</button>
+        <button data-m="gen">Generate</button>
+        <button data-m="gj">GeoJSON</button>
+        <button data-m="scan">Find in text</button>
+      </div>
+
+      <div id="p-convert" class="pane">
+        <form id="f-convert" class="row" style="margin-top:10px"><label class="sr-only" for="q">Coordinate</label><input id="q" class="grow" placeholder="48.8584, 2.2945  ·  31U 448251 5411951  ·  8FW4V75V+8Q" autocomplete="off" spellcheck="false"><button class="btn primary">Convert</button></form>
+        <p class="hint">Decimal, DMS, UTM, MGRS, geohash, Plus Code or Maidenhead. Short Plus Codes need a reference below. Click the map to convert that point.</p>
+        <label class="field"><span class="label">Reference for short Plus Codes (optional)</span><input id="ref" placeholder="47.3, 8.5"></label>
+      </div>
+      <div id="p-distance" class="pane" hidden>
+        <label class="field" style="margin-top:10px"><span class="label">Points (one per line, any format)</span><textarea id="pts" spellcheck="false">48.8584, 2.2945
+51.5007, -0.1246</textarea></label>
+        <button class="btn primary block" id="go-dist" style="margin-top:8px">Measure</button>
+        <h3>Destination point</h3>
+        <div class="two"><label class="field"><span class="label">From</span><input id="dfrom" value="48.8584, 2.2945"></label><label class="field"><span class="label">Bearing (&deg;)</span><input id="dbr" value="45"></label></div>
+        <div class="two" style="margin-top:8px"><label class="field"><span class="label">Distance (km)</span><input id="dkm" value="10"></label><button class="btn block" id="go-dest" style="align-self:end">Project</button></div>
+      </div>
+      <div id="p-gen" class="pane" hidden>
+        <div class="two" style="margin-top:10px"><label class="field"><span class="label">Centre</span><input id="gc" value="48.8584, 2.2945"></label><label class="field"><span class="label">Radius (m)</span><input id="gr" value="1000"></label></div>
+        <div class="two" style="margin-top:8px"><label class="field"><span class="label">Grid cell (m)</span><input id="gcell" value="250"></label><label class="field"><span class="label">Circle points</span><input id="gn" value="72"></label></div>
+        <div class="row" style="margin-top:10px"><button class="btn primary grow" data-gen="circle">Circle</button><button class="btn grow" data-gen="bbox">Box</button><button class="btn grow" data-gen="grid">Grid</button></div>
+      </div>
+      <div id="p-gj" class="pane" hidden>
+        <label class="field" style="margin-top:10px"><span class="label">Paste GeoJSON (or drop a .geojson file)</span><textarea id="gjin" spellcheck="false" placeholder='{"type":"FeatureCollection","features":[...]}'></textarea></label>
+        <div class="row" style="margin-top:8px"><label class="field" style="width:110px"><span class="label">Decimals</span><input id="gjd" value="6"></label><label class="check"><input type="checkbox" id="gjk" checked> Keep properties</label></div>
+        <div class="row" style="margin-top:8px"><button class="btn primary grow" id="go-gj">Clean &amp; view</button></div>
+        <div class="row" style="margin-top:8px"><button class="btn grow" data-exp="kml">KML</button><button class="btn grow" data-exp="gpx">GPX</button><button class="btn grow" data-exp="geojson">GeoJSON</button></div>
+      </div>
+      <div id="p-scan" class="pane" hidden>
+        <label class="field" style="margin-top:10px"><span class="label">Paste text</span><textarea id="stext" spellcheck="false" placeholder="Paste an article, a message or notes. Coordinates in any common format are found."></textarea></label>
+        <button class="btn primary block" id="go-scan" style="margin-top:8px">Find coordinates</button>
+      </div>
+
+      <div id="out" aria-live="polite"></div>
+      <div class="attrib">Offline maths: Karney geodesics on WGS84 (geographiclib), UTM by the Krueger series, Open Location Code (Plus Codes), geohash and Maidenhead. Timezone lookup uses Open-Meteo. Map data &copy; OpenStreetMap contributors. Pasted text and GeoJSON are processed in memory and not stored.</div>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const toast = (m, k = 'err') => { const t = document.createElement('div'); t.className = 'toast ' + k; t.textContent = m; $('toasts').append(t); setTimeout(() => t.remove(), 3500); };
+    let map, layer, mode = 'convert', lastGJ = null;
+    async function api(path, body) {
+      const r = await fetch(path, body === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || ('HTTP ' + r.status)); }
+      return r;
+    }
+    const json = async (p, b) => (await api(p, b)).json();
+    const busy = m => { $('out').innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
+    const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; };
+    function clearLayer() { if (layer) map.removeLayer(layer); layer = L.featureGroup().addTo(map); }
+    const kv = rows => `<table class="kv">${rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
+    const copyBtn = t => `<button class="btn sm" data-copy="${esc(t)}" aria-label="Copy">Copy</button>`;
+    function wireCopy() { document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied', 'ok'); } catch { toast('Select the text and copy it manually'); } }); }
+    const pin = (la, lo) => L.marker([la, lo]).addTo(layer);
+
+    async function convert(text) {
+      try {
+        busy('Converting…');
+        const q = new URLSearchParams({ q: text }); if ($('ref').value.trim()) q.set('ref', $('ref').value.trim());
+        const d = await json('api/convert?' + q);
+        clearLayer(); pin(d.lat, d.lon); if (d.bbox) L.rectangle([[d.bbox[0], d.bbox[1]], [d.bbox[2], d.bbox[3]]], { color: '#0c7a62', weight: 1 }).addTo(layer); map.setView([d.lat, d.lon], Math.max(map.getZoom(), 14));
+        $('out').innerHTML = `<div class="row spread" style="margin-top:12px"><b>Recognised as ${esc(d.kind)}</b><a class="btn sm" href="${esc(d.links.openstreetmap)}" target="_blank" rel="noopener">OpenStreetMap</a></div>`
+          + d.formats.map(f => `<div class="fmt"><span class="k">${esc(f.label)}</span><code>${esc(f.value)}</code>${copyBtn(f.value)}</div>`).join('')
+          + (d.geohash_neighbours.length ? `<h3>Neighbouring geohash cells</h3><code>${d.geohash_neighbours.map(esc).join(' ')}</code>` : '')
+          + `<div class="row" style="margin-top:10px"><button class="btn sm" id="tz">Timezone here</button><span id="tzout" class="muted small">Nominal solar offset UTC${d.nominal_utc_offset_hours >= 0 ? '+' : ''}${d.nominal_utc_offset_hours}</span></div>`;
+        wireCopy();
+        $('tz').onclick = async () => { $('tzout').textContent = 'Looking up…'; try { const t = await json(`api/timezone?lat=${d.lat}&lon=${d.lon}`); $('tzout').textContent = t.timezone ? `${t.timezone} (${t.abbreviation || ''}), UTC${t.utc_offset_hours >= 0 ? '+' : ''}${t.utc_offset_hours} now` : (t.warning || 'unavailable'); } catch (e) { $('tzout').textContent = e.message; } };
+      } catch (e) { fail(e.message); }
+    }
+    $('f-convert').onsubmit = e => { e.preventDefault(); if ($('q').value.trim()) convert($('q').value.trim()); };
+
+    async function distance() {
+      try {
+        const pts = $('pts').value.split('\n').map(s => s.trim()).filter(Boolean);
+        if (pts.length < 2) throw new Error('Enter at least two points, one per line.');
+        busy('Measuring…'); const d = await json('api/distance?points=' + encodeURIComponent(pts.join('|')));
+        clearLayer(); const ll = [[d.legs[0].from[0], d.legs[0].from[1]], ...d.legs.map(l => [l.to[0], l.to[1]])];
+        ll.forEach(p => L.circleMarker(p, { radius: 5, color: '#fff', weight: 1.5, fillColor: '#0c7a62', fillOpacity: 1 }).addTo(layer));
+        // Draw geodesics as dense polylines from the midpoints so long legs curve correctly.
+        L.polyline(ll, { color: '#0c7a62', weight: 2, dashArray: '4 4' }).addTo(layer); map.fitBounds(layer.getBounds().pad(.2));
+        $('out').innerHTML = `<div class="big" style="font-size:22px;font-weight:650;margin-top:12px">${(d.total_km).toLocaleString(undefined, { maximumFractionDigits: 3 })} km</div>` + kv([['Metres', d.total_meters.toLocaleString()], ['Miles', d.total_miles], ['Nautical miles', d.total_nautical_miles]])
+          + d.legs.map((l, i) => `<h3>Leg ${i + 1}</h3>` + kv([['Distance', `${l.km} km`], ['Initial bearing', `${l.initial_bearing}° ${l.initial_compass}`], ['Final bearing', l.final_bearing + '°'], ['Midpoint', `${l.midpoint.lat}, ${l.midpoint.lon}`]])).join('')
+          + `<p class="hint">${esc(d.method)}. Lines on the map are straight on screen; the geodesic is the shortest path on the globe.</p>`;
+      } catch (e) { fail(e.message); }
+    }
+    $('go-dist').onclick = distance;
+    $('go-dest').onclick = async () => {
+      try { busy('Projecting…'); const d = await json(`api/destination?from=${encodeURIComponent($('dfrom').value)}&bearing=${encodeURIComponent($('dbr').value)}&km=${encodeURIComponent($('dkm').value)}`);
+        clearLayer(); pin(d.lat, d.lon); map.setView([d.lat, d.lon], Math.max(map.getZoom(), 10));
+        $('out').innerHTML = `<h3>Destination</h3>` + d.formats.slice(0, 5).map(f => `<div class="fmt"><span class="k">${esc(f.label)}</span><code>${esc(f.value)}</code>${copyBtn(f.value)}</div>`).join(''); wireCopy();
+      } catch (e) { fail(e.message); }
+    };
+
+    function drawGJ(fc, style) {
+      clearLayer(); L.geoJSON(fc, { style: style || { color: '#0c7a62', weight: 2, fillOpacity: .08 }, pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 6, color: '#fff', weight: 1.5, fillColor: '#0c7a62', fillOpacity: 1 }), onEachFeature: (f, l) => { const n = f.properties && (f.properties.name || f.properties.id); if (n) l.bindTooltip(String(n)); } }).addTo(layer);
+      if (layer.getBounds().isValid()) map.fitBounds(layer.getBounds().pad(.1), { maxZoom: 17 });
+    }
+    function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+    document.querySelectorAll('[data-gen]').forEach(b => b.onclick = async () => {
+      try {
+        const kind = b.dataset.gen, q = new URLSearchParams({ kind, center: $('gc').value, radius: $('gr').value });
+        if (kind === 'grid') q.set('cell', $('gcell').value); if (kind === 'circle') q.set('points', $('gn').value);
+        busy('Generating…'); const d = await json('api/generate?' + q); lastGJ = d.geojson; drawGJ(d.geojson);
+        const props = d.geojson.properties || {};
+        $('out').innerHTML = kv([['Created', kind === 'grid' ? `${props.rows} × ${props.cols} cells of ${props.cell_m} m` : kind], ['Box (S, W, N, E)', d.bbox ? d.bbox.map(v => (+v).toFixed(5)).join(', ') : null], ['Box as W,S,E,N', d.bbox_text]])
+          + `<div class="row" style="margin-top:10px"><button class="btn sm" id="dlgj">Download GeoJSON</button><button class="btn sm" id="tojs">Edit in GeoJSON tab</button></div>`;
+        $('dlgj').onclick = () => download('osnt-' + kind + '.geojson', JSON.stringify(lastGJ, null, 1), 'application/geo+json');
+        $('tojs').onclick = () => { $('gjin').value = JSON.stringify(lastGJ); setMode('gj'); };
+      } catch (e) { fail(e.message); }
+    });
+
+    async function gj() {
+      try {
+        const txt = $('gjin').value.trim(); if (!txt) throw new Error('Paste some GeoJSON first.');
+        busy('Cleaning…'); const d = await json('api/geojson', { geojson: txt, decimals: +$('gjd').value, keep_properties: $('gjk').checked });
+        lastGJ = d.cleaned; drawGJ(d.cleaned); const s = d.stats;
+        $('out').innerHTML = kv([['Features', s.features], ['Positions', s.positions], ['Types', Object.entries(s.types).map(([k, v]) => `${esc(k)} × ${v}`).join(', ')], ['Box (W,S,E,N)', s.bbox ? s.bbox.map(v => (+v).toFixed(5)).join(', ') : null],
+          ['Line length', s.line_length_m ? (s.line_length_m / 1000).toFixed(3) + ' km' : null], ['Polygon area', s.polygon_area_m2 ? (s.polygon_area_m2 / 1e6).toFixed(4) + ' km²' : null], ['Polygon perimeter', s.polygon_perimeter_m ? (s.polygon_perimeter_m / 1000).toFixed(3) + ' km' : null]])
+          + (d.warnings.length ? `<div class="notice warn" style="margin-top:10px"><div><b>Cleaned:</b><br>${d.warnings.map(esc).join('<br>')}</div></div>` : '<div class="notice ok" style="margin-top:10px"><div>Valid GeoJSON, nothing needed fixing.</div></div>');
+      } catch (e) { fail(e.message); }
+    }
+    $('go-gj').onclick = gj;
+    document.querySelectorAll('[data-exp]').forEach(b => b.onclick = async () => {
+      try {
+        const txt = $('gjin').value.trim(); if (!txt) throw new Error('Paste some GeoJSON first.');
+        const fmt = b.dataset.exp, r = await api('api/export', { geojson: txt, format: fmt, decimals: +$('gjd').value, keep_properties: $('gjk').checked, name: 'OSNT export' });
+        download('osnt-export.' + fmt, await r.text(), 'text/plain'); toast('Downloaded ' + fmt.toUpperCase(), 'ok');
+      } catch (e) { fail(e.message); }
+    });
+    $('gjin').addEventListener('dragover', e => e.preventDefault());
+    $('gjin').addEventListener('drop', async e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && f.size < 2e6) { $('gjin').value = await f.text(); gj(); } });
+
+    async function scan() {
+      try {
+        const t = $('stext').value; if (!t.trim()) throw new Error('Paste some text first.');
+        busy('Scanning…'); const d = await json('api/extract', t);
+        clearLayer(); const bounds = [];
+        d.matches.forEach((m, i) => { L.circleMarker([m.lat, m.lon], { radius: 6, color: '#fff', weight: 1.5, fillColor: '#2563eb', fillOpacity: 1 }).addTo(layer).bindTooltip(String(i + 1)); bounds.push([m.lat, m.lon]); });
+        if (bounds.length) map.fitBounds(bounds, { maxZoom: 15, padding: [30, 30] });
+        $('out').innerHTML = `<b>${d.count} coordinate${d.count === 1 ? '' : 's'} found</b>${d.truncated ? ' (first 500 shown)' : ''}`
+          + (d.count ? `<div class="table-wrap"><table class="data"><thead><tr><th>#</th><th>Text</th><th>Type</th><th class="num">Lat, lon</th></tr></thead><tbody>${d.matches.map((m, i) => `<tr class="hit" data-i="${i}" style="cursor:pointer"><td>${i + 1}</td><td><code>${esc(m.text)}</code><div class="tiny muted">line ${m.line}</div></td><td>${esc(m.kind)}</td><td class="num">${m.lat.toFixed(5)}, ${m.lon.toFixed(5)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="state" style="margin-top:8px"><div class="h3">None found</div><p>Looks for decimal pairs (3+ decimals), DMS with N/S/E/W, UTM, MGRS and full Plus Codes.</p></div>')
+          + `<p class="hint">${esc(d.note)}</p>`;
+        document.querySelectorAll('tr.hit').forEach(tr => tr.onclick = () => { const m = d.matches[+tr.dataset.i]; map.setView([m.lat, m.lon], 16); });
+      } catch (e) { fail(e.message); }
+    }
+    $('go-scan').onclick = scan;
+
+    function setMode(m) {
+      mode = m;
+      document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+      document.querySelectorAll('.pane').forEach(p => p.hidden = p.id !== 'p-' + m);
+      $('out').innerHTML = '';
+    }
+    document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+    (async () => {
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      map.setView([48.8584, 2.2945], 5); clearLayer();
+      map.on('click', e => { if (mode === 'convert') { $('q').value = `${e.latlng.lat.toFixed(6)}, ${(((e.latlng.lng + 540) % 360) - 180).toFixed(6)}`; convert($('q').value); } });
+    })();
+  </script>
+</body>
+</html>

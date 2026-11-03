@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Place photos · OSNT</title>
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #layout { display: flex; min-height: 0; }
+    #map { flex: 1; min-width: 0; }
+    aside#panel { width: 400px; flex: none; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--edge); padding: 14px 16px 24px; font-size: 13px; }
+    aside h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .seg { display: flex; flex-wrap: wrap; width: 100%; }
+    .seg button { flex: 1 1 auto; }
+    .field .label { font-size: 12px; }
+    .grid-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
+    .ph { border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); overflow: hidden; cursor: pointer; }
+    .ph img { display: block; width: 100%; height: 100px; object-fit: cover; background: var(--surface-3); }
+    .ph .cap { padding: 6px 8px; font-size: 11.5px; line-height: 1.35; color: var(--ink-2); overflow-wrap: anywhere; }
+    .ph .cap b { color: var(--ink); font-weight: 600; display: block; }
+    .ph:hover { border-color: var(--edge-strong); }
+    .ph.sel { border-color: var(--accent); }
+    #out { margin-top: 12px; }
+    .item { padding: 8px 10px; margin: 6px 0; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
+    .item:hover { border-color: var(--edge-strong); }
+    .item small { display: block; color: var(--ink-2); font-size: 12px; }
+    .attrib { margin-top: 18px; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+    pre.ql { margin: 6px 0 0; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius-sm); font: 11.5px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow: auto; }
+    @media (max-width: 760px) {
+      #layout { flex-direction: column; }
+      #map { flex: none; height: 38dvh; }
+      aside#panel { width: auto; flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--edge-strong); }
+      .readout { display: none; }
+    }
+  </style>
+</head>
+<body class="fixed">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>Place photos</h1>
+  </header>
+  <div id="layout" class="fill map-box">
+    <div id="map" aria-label="Map: click to move the search centre"></div>
+    <div id="readout" class="readout"></div>
+    <aside id="panel" aria-label="Place photo controls">
+      <div class="seg" role="tablist" aria-label="Source">
+        <button class="on" data-m="photos">Photos</button>
+        <button data-m="articles">Articles</button>
+        <button data-m="street">Street level</button>
+      </div>
+      <div class="two" style="margin-top:10px">
+        <label class="field"><span class="label">Centre (lat, lon)</span><input id="centre" value="48.8584, 2.2945" inputmode="decimal"></label>
+        <label class="field"><span class="label">Radius (m)</span><select id="radius"><option>100</option><option selected>300</option><option>1000</option><option>3000</option><option>10000</option></select></label>
+      </div>
+      <button class="btn primary block" id="go" style="margin-top:10px">Show what is here</button>
+      <p class="hint" id="hint">Click the map or drag the pin, then search. Compare the photos with the claimed scene: skyline, signs, road layout, vegetation.</p>
+      <div id="out" aria-live="polite"></div>
+      <div class="attrib">
+        Photos: <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>, each under its own licence (credit shown with the image). Articles: Wikipedia, CC BY-SA.
+        Street level: <a href="https://www.mapillary.com/" target="_blank" rel="noopener">Mapillary</a> (CC BY-SA), needs an access token on the Credentials page.
+        This tool shows places only. It does not search for people and does not analyse faces. Map data &copy; OpenStreetMap contributors.
+      </div>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/osnt-map.js"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const safeUrl = u => /^https:\/\//.test(u || '') ? u : '#';
+    let map, pin, ring, layer, mode = 'photos';
+    async function api(path) {
+      const r = await fetch(path), d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      return d;
+    }
+    const busy = m => { $('out').innerHTML = `<div class="loading"><span class="spin" aria-hidden="true"></span>${esc(m)}</div>`; };
+    const fail = m => { $('out').innerHTML = `<div class="state error" role="alert"><div class="h3">That did not work</div><p>${esc(m)}</p></div>`; };
+    function centre() {
+      const v = $('centre').value.split(/[ ,;]+/).filter(Boolean).map(Number);
+      if (v.length !== 2 || v.some(isNaN) || Math.abs(v[0]) > 90 || Math.abs(v[1]) > 180) throw new Error('Centre must be "lat, lon".');
+      return v;
+    }
+    function setCentre(lat, lon, pan) {
+      $('centre').value = `${(+lat).toFixed(5)}, ${(+lon).toFixed(5)}`; pin.setLatLng([lat, lon]); drawRing(); if (pan) map.panTo([lat, lon]);
+    }
+    function drawRing() {
+      if (ring) map.removeLayer(ring);
+      const r = mode === 'street' ? Math.min(+$('radius').value, 400) : +$('radius').value;
+      ring = L.circle(pin.getLatLng(), { radius: r, color: '#0c7a62', weight: 1, fillOpacity: .04, interactive: false }).addTo(map);
+    }
+    function clearLayer() { if (layer) map.removeLayer(layer); layer = L.featureGroup().addTo(map); }
+    function select(i) { document.querySelectorAll('.ph').forEach((e, k) => e.classList.toggle('sel', k === i)); }
+    function show(items, colour, card) {
+      clearLayer(); const markers = [];
+      items.forEach((it, i) => { const m = L.circleMarker([it.lat, it.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: colour, fillOpacity: .95 }).addTo(layer); m.on('click', () => { select(i); document.querySelectorAll('.ph')[i]?.scrollIntoView({ block: 'nearest' }); }); markers.push(m); it._m = m; });
+      document.querySelectorAll('.ph').forEach((el, i) => el.onclick = e => { if (e.target.closest('a')) return; select(i); const it = items[i]; map.panTo([it.lat, it.lon]); it._m.bringToFront(); });
+      if (items.length) map.fitBounds(L.featureGroup([...markers, ring]).getBounds().pad(.1), { maxZoom: 18 });
+    }
+    const dist = d => d == null ? '' : d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1) + ' km';
+    function photoCard(p) {
+      const lic = p.licence ? (p.licence_url ? `<a href="${esc(safeUrl(p.licence_url))}" target="_blank" rel="noopener">${esc(p.licence)}</a>` : esc(p.licence)) : 'licence: see file page';
+      return `<div class="ph"><img loading="lazy" src="${esc(safeUrl(p.thumb))}" alt="${esc(p.title)}"><div class="cap"><b>${esc(p.title.replace(/\.[a-z]+$/i, ''))}</b>${esc(dist(p.distance_m))}${p.date ? ' · ' + esc(p.date) : ''}<br>${p.author ? esc(p.author) + ' · ' : ''}${lic}<br><a href="${esc(safeUrl(p.page))}" target="_blank" rel="noopener">File page</a></div></div>`;
+    }
+    async function go() {
+      try {
+        const [la, lo] = centre(), r = $('radius').value; busy('Looking…');
+        if (mode === 'photos') {
+          const d = await api(`api/photos?lat=${la}&lon=${lo}&radius=${r}&limit=60`);
+          $('out').innerHTML = `<b>${d.count} geotagged photo${d.count === 1 ? '' : 's'}</b> within ${dist(d.radius_m)}` + (d.count ? `<div class="grid-photos">${d.items.map(photoCard).join('')}</div>` : '<div class="state" style="margin-top:8px"><div class="h3">No photos here</div><p>Try a larger radius. Rural or private places often have none.</p></div>') + `<p class="hint">${esc(d.note)}</p>`;
+          show(d.items, '#2563eb', photoCard);
+        } else if (mode === 'articles') {
+          const d = await api(`api/articles?lat=${la}&lon=${lo}&radius=${r}&limit=30`);
+          $('out').innerHTML = `<b>${d.count} article${d.count === 1 ? '' : 's'}</b>` + (d.count ? d.items.map(a => `<div class="item"><b><a href="${esc(safeUrl(a.url))}" target="_blank" rel="noopener">${esc(a.title)}</a></b> <small>${esc(dist(a.distance_m))}</small><small>${esc(a.extract || '')}</small></div>`).join('') : '<div class="state" style="margin-top:8px"><div class="h3">Nothing nearby</div><p>No Wikipedia article is tagged within this radius.</p></div>');
+          document.querySelectorAll('.item').forEach((e, i) => e.onclick = ev => { if (!ev.target.closest('a')) { map.panTo([d.items[i].lat, d.items[i].lon]); } });
+          clearLayer(); d.items.forEach(a => L.circleMarker([a.lat, a.lon], { radius: 7, color: '#fff', weight: 1.5, fillColor: '#d97706', fillOpacity: .95 }).addTo(layer).bindTooltip(a.title));
+        } else {
+          const d = await api(`api/street?lat=${la}&lon=${lo}&radius=${Math.min(+r, 400)}&limit=60`);
+          if (!d.available) { clearLayer(); $('out').innerHTML = `<div class="notice warn"><div>${esc(d.message)}</div></div>`; return; }
+          $('out').innerHTML = `<b>${d.count} street-level image${d.count === 1 ? '' : 's'}</b> within ${dist(d.radius_m)}` + (d.count ? `<div class="grid-photos">${d.items.map(s => `<div class="ph"><img loading="lazy" src="${esc(safeUrl(s.thumb))}" alt="Street-level view"><div class="cap"><b>${esc(s.captured || 'date unknown')}</b>${s.compass != null ? 'facing ' + Math.round(s.compass) + '°' : ''}${s.pano ? ' · 360' : ''}<br><a href="${esc(safeUrl(s.url))}" target="_blank" rel="noopener">Open in Mapillary</a></div></div>`).join('')}</div>` : '<div class="state" style="margin-top:8px"><div class="h3">No coverage</div><p>No images in this area.</p></div>') + `<p class="hint">${esc(d.note)}</p>`;
+          show(d.items, '#16a34a');
+        }
+      } catch (e) { fail(e.message); }
+    }
+    document.querySelectorAll('aside > .seg:first-child button').forEach(b => b.onclick = () => {
+      mode = b.dataset.m; document.querySelectorAll('aside > .seg:first-child button').forEach(x => x.classList.toggle('on', x === b)); $('out').innerHTML = ''; if (layer) clearLayer(); if (pin) drawRing();
+    });
+    $('go').onclick = go; $('radius').onchange = () => drawRing();
+    $('centre').addEventListener('change', () => { try { const [la, lo] = centre(); setCentre(la, lo, true); } catch { /* shown on search */ } });
+    (async () => {
+      ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
+      map.setView([48.8584, 2.2945], 16);
+      pin = L.marker([48.8584, 2.2945], { draggable: true }).addTo(map).on('dragend', e => { const p = e.target.getLatLng(); setCentre(p.lat, p.lng, false); });
+      map.on('click', e => setCentre(e.latlng.lat, e.latlng.lng, false)); drawRing();
+    })();
+  </script>
+</body>
+</html>
