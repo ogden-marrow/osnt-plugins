@@ -295,3 +295,12 @@ fn bbox_antimeridian_and_dates() {
     acc.feed(heat::Rec::Pos { addr: 3, lat: 0, lon: 0, alt: 0, gs: 0 });
     assert_eq!(acc.recs.len(), 2);
 }
+
+#[test]
+fn page_has_icon_deep_links_and_dateline_safe_bbox() {
+    // Regression: the page had no favicon (404 noise) and sent bbox longitudes beyond +/-180 when the map was panned
+    // around the world, which the API rejects.
+    assert!(crate::PAGE.contains(r#"rel="icon""#));
+    assert!(crate::PAGE.contains("P.get('auto')") && crate::PAGE.contains("linkParams"));
+    assert!(crate::PAGE.contains("wrap(b.getWest())"));
+}

@@ -114,3 +114,11 @@ async fn bad_ids_and_upstream_down() {
     let (_, t) = get_(format!("{down}/tools")).await;
     assert_eq!(t.as_array().unwrap().len(), 2);
 }
+
+#[test]
+fn page_supports_deep_links_and_guards_slow_loads() {
+    // ?event=&a=&b= restores a comparison; a slow acquisition load must not overwrite a newer pick.
+    for k in ["P.get('event')", "pickToken", "if (S[slot] !== a) return;"] {
+        assert!(PAGE.contains(k), "missing {k}");
+    }
+}

@@ -111,8 +111,16 @@ fn valid_date(s: &str) -> bool {
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit()) {
         return false;
     }
-    let (m, d): (u32, u32) = (s[5..7].parse().unwrap_or(0), s[8..10].parse().unwrap_or(0));
-    (1..=12).contains(&m) && (1..=31).contains(&d) && s[..4] >= *"1972"
+    let (y, m, d): (i64, i64, i64) = (s[..4].parse().unwrap_or(0), s[5..7].parse().unwrap_or(0), s[8..10].parse().unwrap_or(0));
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let dim = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=dim).contains(&d) && y >= 1972
 }
 
 fn parse_bbox(s: &str) -> Result<[f64; 4], String> {

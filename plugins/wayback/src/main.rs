@@ -28,6 +28,7 @@ const PAGE: &str = include_str!("../assets/index.html");
 const UA: &str = "osnt-wayback/0.1 (+https://github.com/ogden-marrow/osnt-plugins; self-hosted OSINT hub)";
 const CONFIG_TTL: Duration = Duration::from_secs(6 * 3600);
 const CHANGES_TTL: Duration = Duration::from_secs(6 * 3600);
+const STALE_CONFIG_TTL: Duration = Duration::from_secs(24 * 3600);
 const CAPTURE_TTL: Duration = Duration::from_secs(24 * 3600);
 const WORKERS: usize = 8;
 
@@ -129,7 +130,14 @@ async fn releases_cached(app: &Shared) -> Result<Vec<Release>, ApiError> {
     let v = tokio::task::spawn_blocking(move || get_json(&a.agent, &a.cfg.config_url))
         .await
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .map_err(upstream)?;
+        .map_err(upstream);
+    // Esri unreachable: a release list up to a day old is far better than an error (new releases only add to it).
+    let v = match v {
+        Ok(v) => v,
+        Err(e) => {
+            return app.cache.get(&key, STALE_CONFIG_TTL).and_then(|raw| serde_json::from_slice::<Value>(&raw).ok()).map(|v| parse_config(&v)).filter(|r| !r.is_empty()).ok_or(e);
+        }
+    };
     app.cache.put(&key, v.to_string().as_bytes());
     let r = parse_config(&v);
     if r.is_empty() {

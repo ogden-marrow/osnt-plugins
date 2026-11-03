@@ -13,7 +13,7 @@
     #bar .ctl { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--ink-2); font-weight: 600; font-size: 12px; }
     #bar .ctl.inline { flex-direction: row; align-items: center; gap: 8px; min-height: var(--control-h); font-size: 13px; font-weight: 500; }
     #bar select, #bar input[type=date] { font-weight: 400; }
-    #bar .step { display: flex; gap: 2px; align-items: flex-end; }
+    #bar .step { display: flex; gap: 2px; align-items: flex-end; flex-wrap: wrap; }
     #bar .step .btn { padding: 0 10px; min-width: 36px; }
     #blend { width: 150px; min-height: var(--control-h); }
     #moreBtn { display: none; }
@@ -24,6 +24,7 @@
       #bar .wide { flex-basis: 100%; order: 1; }
       #bar .ctl:not(.sec):not(.wide) { order: 1; flex: 1 1 0; }
       #bar .step { order: 1; flex: none; }
+      #bar .step.sec { order: 2; }
       #bar .ctl.inline, #bar .ctl.sec:has(#place) { flex-basis: 100%; }
       #blend { width: 100%; }
       #bar:not(.expanded) .sec { display: none; }
@@ -47,25 +48,33 @@
     <label class="ctl">Date A <input id="dateA" type="date"></label>
     <span class="step"><button class="btn" id="prevA" aria-label="Date A, one day earlier">&lsaquo;</button><button class="btn" id="nextA" aria-label="Date A, one day later">&rsaquo;</button></span>
     <label class="ctl sec">Date B <input id="dateB" type="date"></label>
+    <span class="step sec"><button class="btn" id="prevB" aria-label="Date B, one day earlier">&lsaquo;</button><button class="btn" id="nextB" aria-label="Date B, one day later">&rsaquo;</button><button class="btn" id="swap" aria-label="Swap dates A and B" title="Swap A and B">&#8646;</button></span>
     <label class="ctl sec">Blend A &harr; B <input id="blend" type="range" min="0" max="100" value="0"></label>
     <label class="ctl inline sec"><input id="fires" type="checkbox"> Fire/thermal detections (VIIRS, Date A)</label>
+    <span class="step sec"><button class="btn" id="share" title="Copy a link to this view">Copy link</button></span>
+    <span id="note" class="small muted" role="status" aria-live="polite" style="flex-basis:100%"></span>
   </div>
   <div class="fill map-box"><div id="map" style="position:absolute;inset:0"></div></div>
   <script src="/static/leaflet/leaflet.js"></script>
   <script src="/static/osnt-map.js"></script>
   <script>
-    // NASA GIBS (public, no key). Daily products appear with about a day of latency, so default to yesterday.
+    // NASA GIBS (public, no key). Daily products appear with about a day of latency, so the newest date offered is yesterday (UTC).
+    // Deep link: ?lat=&lon=&zoom=&a=YYYY-MM-DD&b=YYYY-MM-DD&product=<name>&fires=1&blend=0..100
+    // Start dates are when each GIBS layer begins (GetCapabilities).
     const PRODUCTS = {
-      'MODIS Terra true colour':  { id: 'MODIS_Terra_CorrectedReflectance_TrueColor',  level: 9, ext: 'jpg' },
-      'MODIS Aqua true colour':   { id: 'MODIS_Aqua_CorrectedReflectance_TrueColor',   level: 9, ext: 'jpg' },
-      'VIIRS SNPP true colour':   { id: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',   level: 9, ext: 'jpg' },
-      'VIIRS NOAA-20 true colour':{ id: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor', level: 9, ext: 'jpg' },
+      'MODIS Terra true colour':  { id: 'MODIS_Terra_CorrectedReflectance_TrueColor',  level: 9, ext: 'jpg', from: '2000-02-24' },
+      'MODIS Aqua true colour':   { id: 'MODIS_Aqua_CorrectedReflectance_TrueColor',   level: 9, ext: 'jpg', from: '2002-07-03' },
+      'VIIRS SNPP true colour':   { id: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',   level: 9, ext: 'jpg', from: '2015-11-24' },
+      'VIIRS NOAA-20 true colour':{ id: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor', level: 9, ext: 'jpg', from: '2018-01-05' },
     };
-    const FIRES = { id: 'VIIRS_SNPP_Thermal_Anomalies_375m_All', level: 9, ext: 'png' };
+    // The 375 m fire layer only exists as vector tiles in GIBS; its WMS endpoint draws them as ready-made images.
+    const FIRES = { layer: 'VIIRS_SNPP_Thermal_Anomalies_375m_All', wms: 'https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi', from: '2012-01-20' };
     const PLACES = { 'World': [20, 0, 2], 'Ukraine': [48.8, 33, 6], 'Eastern Ukraine': [48.3, 37.5, 7], 'Black Sea': [43.5, 34, 6],
                      'Gaza / Levant': [31.8, 35, 7], 'Taiwan Strait': [24, 120, 6], 'Gainesville, FL': [29.65, -82.34, 9] };
     const $ = id => document.getElementById(id);
+    const store = { get(k) { try { return localStorage.getItem('osnt-imagery-' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-imagery-' + k, v); } catch {} } };
     const iso = d => d.toISOString().slice(0, 10);
+    const validDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && iso(new Date(s + 'T00:00:00Z')) === s;
     const shift = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
     const url = (p, date) => `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${p.id}/default/${date}/GoogleMapsCompatible_Level${p.level}/{z}/{y}/{x}.${p.ext}`;
     const attr = 'Imagery &copy; NASA GIBS / EOSDIS';
@@ -73,27 +82,61 @@
     $('moreBtn').onclick = () => { const o = $('bar').classList.toggle('expanded'); $('moreBtn').setAttribute('aria-expanded', String(o)); };
     (async () => {
       const { map } = await OSNT.createMap('map');
+      if (matchMedia('(max-width: 640px)').matches) document.querySelectorAll('.leaflet-control-layers-expanded').forEach(e => e.classList.remove('leaflet-control-layers-expanded'));
+      const P = new URLSearchParams(location.search);
       for (const k of Object.keys(PRODUCTS)) $('product').add(new Option(k, k));
       for (const k of Object.keys(PLACES)) $('place').add(new Option(k, k));
       const yesterday = shift(iso(new Date()), -1);
-      $('dateA').value = yesterday; $('dateB').value = shift(yesterday, -7);
+      const prod = P.get('product') || store.get('product');
+      $('product').value = PRODUCTS[prod] ? prod : 'MODIS Terra true colour';
+      const clampDate = d => { const lo = PRODUCTS[$('product').value].from; return d > yesterday ? yesterday : d < lo ? lo : d; };
+      const dateOr = (k, dflt) => validDate(P.get(k)) ? clampDate(P.get(k)) : dflt;
+      $('dateA').value = dateOr('a', yesterday); $('dateB').value = dateOr('b', shift(yesterday, -7));
       $('dateA').max = $('dateB').max = yesterday;
-      let a, b, fires;
-      const tile = (p, date, opacity, z) => L.tileLayer(url(p, date), { attribution: attr, maxNativeZoom: p.level, maxZoom: 19, opacity, zIndex: z });
+      const setMin = () => { $('dateA').min = $('dateB').min = PRODUCTS[$('product').value].from; };
+      setMin();
+      $('fires').checked = P.get('fires') === '1';
+      if (P.has('blend') && Number.isFinite(+P.get('blend'))) $('blend').value = Math.min(100, Math.max(0, +P.get('blend')));
+      let a, b, fires, missing = 0;
+      const tile = (p, date, opacity, z) => {
+        const l = L.tileLayer(url(p, date), { attribution: attr, maxNativeZoom: p.level, maxZoom: 19, opacity, zIndex: z });
+        // GIBS answers 404 for a tile it has no picture for (a date that is not processed yet, or a gap in the swath).
+        l.on('tileerror', () => { missing++; $('note').textContent = 'Some tiles have no image for this date (not processed yet, or outside the satellite swath). Try another date.'; });
+        l.on('loading', () => { missing = 0; $('note').textContent = ''; });
+        return l;
+      };
       function rebuild() {
         for (const l of [a, b, fires]) if (l) map.removeLayer(l);
         const p = PRODUCTS[$('product').value], t = $('blend').value / 100;
+        for (const id of ['dateA', 'dateB']) if (!validDate($(id).value)) $(id).value = id === 'dateA' ? yesterday : shift(yesterday, -7);
+        for (const id of ['dateA', 'dateB']) $(id).value = clampDate($(id).value);
         b = tile(p, $('dateB').value, 1, 200).addTo(map);
         a = tile(p, $('dateA').value, 1 - t, 210).addTo(map);
-        fires = $('fires').checked ? tile(FIRES, $('dateA').value, 1, 300).addTo(map) : null;
+        fires = $('fires').checked && $('dateA').value >= FIRES.from
+          ? L.tileLayer.wms(FIRES.wms, { layers: FIRES.layer, format: 'image/png', transparent: true, version: '1.1.1', TIME: $('dateA').value, attribution: attr, zIndex: 300, maxZoom: 19 }).addTo(map) : null;
         $('status').textContent = `A ${$('dateA').value} · B ${$('dateB').value}`;
+        syncUrl();
       }
-      for (const id of ['product', 'dateA', 'dateB', 'fires']) $(id).addEventListener('change', rebuild);
-      $('blend').addEventListener('input', () => a && a.setOpacity(1 - $('blend').value / 100));
-      $('prevA').onclick = () => { $('dateA').value = shift($('dateA').value, -1); rebuild(); };
-      $('nextA').onclick = () => { if ($('dateA').value < yesterday) { $('dateA').value = shift($('dateA').value, 1); rebuild(); } };
-      $('place').onchange = () => map.setView(PLACES[$('place').value].slice(0, 2), PLACES[$('place').value][2]);
-      $('place').value = 'Ukraine'; $('place').onchange();
+      function syncUrl() {
+        const c = map.getCenter(), q = new URLSearchParams({ lat: c.lat.toFixed(3), lon: (((c.lng + 540) % 360) - 180).toFixed(3), zoom: map.getZoom(), a: $('dateA').value, b: $('dateB').value, product: $('product').value });
+        if ($('fires').checked) q.set('fires', '1');
+        if ($('blend').value !== '0') q.set('blend', $('blend').value);
+        try { history.replaceState(null, '', location.pathname + '?' + q); } catch {}
+        store.set('product', $('product').value);
+      }
+      $('product').addEventListener('change', () => { setMin(); rebuild(); });
+      for (const id of ['dateA', 'dateB', 'fires']) $(id).addEventListener('change', rebuild);
+      $('blend').addEventListener('input', () => { a && a.setOpacity(1 - $('blend').value / 100); syncUrl(); });
+      const step = (id, n) => { const d = shift($(id).value, n); if (d <= yesterday && d >= PRODUCTS[$('product').value].from) { $(id).value = d; rebuild(); } };
+      $('prevA').onclick = () => step('dateA', -1); $('nextA').onclick = () => step('dateA', 1);
+      $('prevB').onclick = () => step('dateB', -1); $('nextB').onclick = () => step('dateB', 1);
+      $('swap').onclick = () => { [$('dateA').value, $('dateB').value] = [$('dateB').value, $('dateA').value]; rebuild(); };
+      $('place').onchange = () => { map.setView(PLACES[$('place').value].slice(0, 2), PLACES[$('place').value][2]); store.set('place', $('place').value); };
+      $('share').onclick = async () => { syncUrl(); try { await navigator.clipboard.writeText(location.href); $('share').textContent = 'Copied'; } catch { prompt('Copy this link', location.href); } setTimeout(() => $('share').textContent = 'Copy link', 1800); };
+      map.on('moveend', syncUrl);
+      const lat = P.has('lat') ? +P.get('lat') : NaN, lon = P.has('lon') ? +P.get('lon') : NaN, zoom = P.has('zoom') ? +P.get('zoom') : 6;
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) map.setView([lat, lon], Number.isFinite(zoom) ? Math.min(19, Math.max(1, zoom)) : 6);
+      else { const pl = PLACES[store.get('place')] ? store.get('place') : 'Ukraine'; $('place').value = pl; $('place').onchange(); }
       rebuild();
     })();
   </script>

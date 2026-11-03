@@ -84,8 +84,9 @@
           <select id="source"><option value="pc">Microsoft Planetary Computer</option><option value="es">Element 84 Earth Search (AWS)</option></select></label>
         <label class="field full"><span class="label">Go to</span><select id="place"></select></label>
         <button id="search" class="btn primary full">Search this view</button>
+        <div class="row full"><button id="dlGeo" class="btn sm" disabled title="Download the scene footprints as GeoJSON">GeoJSON</button><button id="dlCsv" class="btn sm" disabled title="Download the scene list as CSV">CSV</button><button id="share" class="btn sm" title="Copy a link that repeats this search">Copy link</button></div>
       </div>
-      <div id="results"><div class="state"><div class="h3">No search yet</div><p>Pick a sensor and dates, move the map to your area and press Search. Pick two scenes (A and B) to compare them with a swipe.</p></div></div>
+      <div id="results" aria-live="polite"><div class="state"><div class="h3">No search yet</div><p>Pick a sensor and dates, move the map to your area and press Search. Pick two scenes (A and B) to compare them with a swipe.</p></div></div>
       <div style="padding:0 16px 16px"><div class="notice info" id="attrib"><span>Scenes are found with free STAC catalogs; tiles stream from the source on demand and nothing is stored here.</span></div></div>
     </aside>
   </div>
@@ -114,15 +115,28 @@
       const k = $('kind').value;
       $('cloudBox').hidden = !(k === 's2' || k === 'landsat');
       if (k === 'naip') $('start').value = '2018-01-01'; else if ($('start').value < daysAgo(400) ) $('start').value = daysAgo(30);
-      if (k === 'naip') $('end').value = '2024-12-31'; else $('end').value = daysAgo(0);
+      $('end').value = daysAgo(0);
     };
+    const store = { get(k) { try { return localStorage.getItem('osnt-satellite-' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-satellite-' + k, v); } catch {} } };
 
     function setStatus(t) { $('status').textContent = t; }
 
     function bboxOf(map) { const b = map.getBounds(); return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(v => +v.toFixed(5)); }
 
+    // Search around the visible map. The archives take at most 12 degrees a side, and longitudes must stay within +/-180.
+    let searchToken = 0;
     async function runSearch() {
       const map = S.map, b = bboxOf(map);
+      b[0] = Math.max(-180, b[0]); b[2] = Math.min(180, b[2]); b[1] = Math.max(-90, b[1]); b[3] = Math.min(90, b[3]);
+      if (b[2] - b[0] > 12 || b[3] - b[1] > 12) {
+        S.scenes = []; clearFootprints(); setStatus('Zoom in to search');
+        $('results').replaceChildren(el('div', { class: 'state' }, el('div', { class: 'h3' }, 'Zoom in to search'),
+          el('p', {}, `The visible area is ${(b[2] - b[0]).toFixed(0)}° wide by ${(b[3] - b[1]).toFixed(0)}° tall; the archives take at most 12° on a side. Zoom in (about zoom 7 or closer) and search again.`)));
+        $('panel').classList.add('open'); $('panelBtn').setAttribute('aria-expanded', 'true');
+        return;
+      }
+      const token = ++searchToken;
+      saveInputs();
       const p = new URLSearchParams({ bbox: b.join(','), start: $('start').value, end: $('end').value, kind: $('kind').value, source: $('source').value, limit: 30 });
       if (!$('cloudBox').hidden) p.set('cloud', $('cloud').value);
       $('search').setAttribute('aria-busy', 'true'); $('goBtn').setAttribute('aria-busy', 'true');
@@ -130,18 +144,37 @@
       $('panel').classList.add('open'); $('panelBtn').setAttribute('aria-expanded', 'true');
       try {
         const r = await fetch('api/search?' + p);
-        const d = await r.json();
+        const d = await r.json().catch(() => ({}));
+        if (token !== searchToken) return;   // a newer search superseded this one
         if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
         S.scenes = d.scenes; S.data = d;
         render();
       } catch (e) {
+        if (token !== searchToken) return;
         S.scenes = [];
-        clearFootprints();
+        clearFootprints(); $('dlGeo').disabled = $('dlCsv').disabled = true;
         $('results').replaceChildren(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Search failed'), el('p', {}, String(e.message || e)),
           $('source').value === 'pc' ? el('button', { class: 'btn', onclick: () => { $('source').value = 'es'; runSearch(); } }, 'Try Earth Search instead') : null));
         setStatus('Search failed');
-      } finally { $('search').removeAttribute('aria-busy'); $('goBtn').removeAttribute('aria-busy'); }
+      } finally { if (token === searchToken) { $('search').removeAttribute('aria-busy'); $('goBtn').removeAttribute('aria-busy'); } }
     }
+
+    function saveInputs() { store.set('kind', $('kind').value); store.set('source', $('source').value); store.set('cloud', $('cloud').value); syncUrl(); }
+    function syncUrl() {
+      const c = S.map.getCenter(), q = new URLSearchParams({ lat: c.lat.toFixed(4), lon: (((c.lng + 540) % 360) - 180).toFixed(4), zoom: S.map.getZoom(), kind: $('kind').value, start: $('start').value, end: $('end').value, source: $('source').value });
+      if (!$('cloudBox').hidden) q.set('cloud', $('cloud').value);
+      try { history.replaceState(null, '', location.pathname + '?' + q); } catch {}
+      store.set('view', JSON.stringify({ lat: c.lat, lng: c.lng, z: S.map.getZoom() }));
+    }
+    $('share').onclick = async () => { syncUrl(); const u = new URL(location.href); u.searchParams.set('auto', '1'); try { await navigator.clipboard.writeText(u.href); $('share').textContent = 'Copied'; } catch { prompt('Copy this link', u.href); } setTimeout(() => $('share').textContent = 'Copy link', 1800); };
+    const download = (name, type, text) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+    $('dlGeo').onclick = () => S.scenes.length && download(`scenes-${S.data.kind}-${S.data.start}_${S.data.end}.geojson`, 'application/geo+json', JSON.stringify({ type: 'FeatureCollection',
+      features: S.scenes.map(s => ({ type: 'Feature', geometry: s.geometry, properties: { id: s.id, datetime: s.datetime, platform: s.platform, cloud_cover: s.cloud_cover, collection: s.collection, source: s.source, stac_item: s.stac_item } })) }));
+    $('dlCsv').onclick = () => {
+      if (!S.scenes.length) return; const cols = ['id', 'datetime', 'platform', 'cloud_cover', 'collection', 'source', 'west', 'south', 'east', 'north', 'stac_item'];
+      const cell = v => { v = v ?? ''; return /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v; };
+      download(`scenes-${S.data.kind}-${S.data.start}_${S.data.end}.csv`, 'text/csv', [cols.join(','), ...S.scenes.map(s => cols.map(c => cell(['west', 'south', 'east', 'north'].includes(c) ? (s.bbox || [])[['west', 'south', 'east', 'north'].indexOf(c)] : s[c])).join(','))].join('\n'));
+    };
 
     function clearFootprints() { if (S.fp) { S.map.removeLayer(S.fp); S.fp = null; } }
 
@@ -151,9 +184,10 @@
       $('attrib').replaceChildren(el('span', {}, d.attribution + ' ' + (d.source === 'pc'
         ? 'Search and tiles: Microsoft Planetary Computer (open data, no key). '
         : 'Search: Element 84 Earth Search on AWS. Map tiles for Sentinel-2/NAIP are rendered by the public titiler.xyz demo service (best effort). ')));
+      $('dlGeo').disabled = $('dlCsv').disabled = !d.scenes.length;
       if (!d.scenes.length) {
         list.replaceChildren(el('div', { class: 'state' }, el('div', { class: 'h3' }, 'No scenes found'),
-          el('p', {}, 'Nothing matched this view and date range. Widen the dates, raise the cloud limit or try radar (Sentinel-1), which sees through cloud.')));
+          el('p', {}, d.kind === 'naip' ? 'NAIP aerial imagery only covers the United States (surveyed every 2-3 years). Pan to a US location or widen the dates.' : 'Nothing matched this view and date range. Widen the dates, raise the cloud limit or try radar (Sentinel-1), which sees through cloud.')));
         setStatus('0 scenes'); return;
       }
       const fc = { type: 'FeatureCollection', features: d.scenes.filter(s => s.geometry).map(s => ({ type: 'Feature', geometry: s.geometry, properties: { id: s.id } })) };
@@ -248,9 +282,24 @@
     (async () => {
       const { map } = await OSNT.createMap('map');
       S.map = map;
+      if (matchMedia('(max-width: 760px)').matches) document.querySelectorAll('.leaflet-control-layers-expanded').forEach(e => e.classList.remove('leaflet-control-layers-expanded'));
       map.on('move zoom viewreset layeradd resize', updateCompare);
-      $('place').value = 'Suez Canal'; $('place').onchange();
+      map.on('moveend', () => { try { syncUrl(); } catch {} });
+      // Deep link: ?lat=&lon=&zoom=&kind=s2|s1|landsat|naip&start=&end=&cloud=&source=pc|es (&auto=1, or any lat/lon, runs the search).
+      const P = new URLSearchParams(location.search), has = P.has('lat') && P.has('lon');
+      const kind = P.get('kind') || store.get('kind'); if (['s2', 's1', 'landsat', 'naip'].includes(kind)) $('kind').value = kind;
       $('kind').onchange();
+      const src = P.get('source') || store.get('source'); if (['pc', 'es'].includes(src)) $('source').value = src;
+      const cl = P.get('cloud') ?? store.get('cloud'); if (cl !== null && cl !== '' && +cl >= 0 && +cl <= 100) { $('cloud').value = cl; $('cloudVal').textContent = cl; }
+      const okDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && !isNaN(Date.parse(d));
+      if (okDate(P.get('start'))) $('start').value = P.get('start');
+      if (okDate(P.get('end'))) $('end').value = P.get('end');
+      let saved = null; try { saved = JSON.parse(store.get('view') || 'null'); } catch {}
+      const lat = +P.get('lat'), lon = +P.get('lon'), zoom = P.has('zoom') ? +P.get('zoom') : 9;
+      if (has && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) map.setView([lat, lon], Number.isFinite(zoom) ? Math.min(18, Math.max(2, zoom)) : 9);
+      else if (saved && Math.abs(saved.lat) <= 90) map.setView([saved.lat, saved.lng], saved.z);
+      else { $('place').value = 'Suez Canal'; $('place').onchange(); }
+      if (has || P.get('auto') === '1') runSearch();
     })();
   </script>
 </body>

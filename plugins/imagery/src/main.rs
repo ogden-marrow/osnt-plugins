@@ -25,3 +25,22 @@ async fn main() {
     println!("imagery plugin on http://{addr}");
     axum::serve(listener, app).await.expect("serve");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PAGE;
+
+    #[test]
+    fn fire_layer_uses_wms_because_gibs_only_has_vector_tiles_for_it() {
+        // Regression: the 375 m thermal-anomaly layer has no PNG WMTS tiles (HTTP 400), so it must go through WMS.
+        assert!(PAGE.contains("wms/epsg3857/best/wms.cgi"));
+        assert!(!PAGE.contains("Thermal_Anomalies_375m_All', level"));
+    }
+
+    #[test]
+    fn page_supports_deep_links() {
+        for k in ["P.has('lat')", "dateOr('a'", "P.get('product')"] {
+            assert!(PAGE.contains(k), "missing {k}");
+        }
+    }
+}

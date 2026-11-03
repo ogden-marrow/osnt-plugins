@@ -3,7 +3,7 @@ name = "Map"
 description = "Base maps, satellite, terrain and elevation layers streamed on demand."
 grid = "Geospatial"
 port = 8107
-version = "0.1.1"
+version = "0.1.2"
 
 [service]
 state_dir = false

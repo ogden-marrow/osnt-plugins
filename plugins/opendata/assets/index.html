@@ -75,6 +75,7 @@
         <h2 id="evtitle"></h2>
         <p id="evdesc" class="muted" style="margin:4px 0 8px"></p>
         <div class="row" style="margin-bottom:6px"><span class="muted small">Pick a date for A and another for B to compare (swipe). Earlier dates are usually before the event.</span></div>
+        <div class="row" style="margin-bottom:8px"><button id="share" class="btn sm" type="button">Copy link to this view</button></div>
         <div id="acqlist"></div>
       </div>
       <div class="notice warn"><span><b>Licence:</b> Maxar Open Data Program, CC BY-NC 4.0. Non-commercial use only, credit Maxar (Vantor). Imagery streams from Maxar's public bucket through the public titiler.xyz demo renderer (best effort, may be slow). Nothing is stored here.</span></div>
@@ -90,6 +91,7 @@
       for (const c of kids.flat()) if (c !== null && c !== undefined && c !== false) e.append(c.nodeType ? c : document.createTextNode(c));
       return e;
     }
+    let pickToken = 0;
     const S = { events: [], ev: null, acqs: [], A: null, B: null, mode: 'swipe', layers: { A: [], B: [] }, markers: null, fp: null, map: null, cache: {} };
     const bounds = b => L.latLngBounds([b[1], b[0]], [b[3], b[2]]);
     const dateRange = e => e.start && e.end && e.start !== e.end ? `${e.start} to ${e.end}` : (e.start || 'dates unknown');
@@ -101,8 +103,15 @@
         el('small', {}, `${dateRange(e)} · ${e.acquisitions} acquisition${e.acquisitions === 1 ? '' : 's'}`))) : [el('div', { class: 'state' }, el('p', {}, 'No events match.'))]));
     }
 
-    async function pickEvent(e) {
-      S.ev = e; S.A = S.B = null; applyLayers(); clearFp();
+    // Shareable state: ?event=<event id>&a=<acquisition id or YYYY-MM-DD>&b=<same>&q=<filter>
+    function syncUrl() {
+      const q = new URLSearchParams(); if (S.ev) q.set('event', S.ev.id); if (S.A) q.set('a', S.A.id); if (S.B) q.set('b', S.B.id);
+      try { history.replaceState(null, '', location.pathname + (String(q) ? '?' + q : '')); } catch {}
+    }
+    const pickAcq = key => key ? S.acqs.find(a => a.id === key) || S.acqs.filter(a => a.date === key).pop() : null;
+    async function pickEvent(e, keepSlots) {
+      const mine = ++pickToken;
+      S.ev = e; S.A = S.B = null; applyLayers(); clearFp(); syncUrl();
       $('evbox').hidden = false; $('evtitle').textContent = e.title; $('evdesc').textContent = e.description;
       $('acqlist').replaceChildren(el('div', { class: 'row muted' }, el('span', { class: 'spin' }), 'Reading acquisitions…'));
       if (e.bbox) S.map.fitBounds(bounds(e.bbox), { maxZoom: 12 });
@@ -112,8 +121,11 @@
       try {
         const r = await fetch('api/acquisitions?event=' + encodeURIComponent(e.id)); const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        if (mine !== pickToken) return;   // another event was picked while this one loaded
         S.acqs = d.acquisitions; renderAcqs(d);
-      } catch (err) { $('acqlist').replaceChildren(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Could not read acquisitions'), el('p', {}, String(err.message || err)), el('button', { class: 'btn', onclick: () => pickEvent(e) }, 'Retry'))); }
+        if (keepSlots) { const a = pickAcq(keepSlots.a), b = pickAcq(keepSlots.b); if (a) await assign('A', a); if (b) await assign('B', b); }
+      } catch (err) {
+        if (mine !== pickToken) return; $('acqlist').replaceChildren(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Could not read acquisitions'), el('p', {}, String(err.message || err)), el('button', { class: 'btn', onclick: () => pickEvent(e) }, 'Retry'))); }
     }
 
     function clearFp() { if (S.fp) { S.map.removeLayer(S.fp); S.fp = null; } }
@@ -144,18 +156,19 @@
     }
 
     async function assign(slot, a) {
-      S[slot] = a; markAcqs();
+      S[slot] = a; markAcqs(); syncUrl();
       $('status').textContent = 'Loading ' + (a.date || a.id) + '…';
       try {
         const d = await loadItems(a);
-        S[slot].detail = d;
+        if (S[slot] !== a) return;   // replaced by a newer click while loading
+        a.detail = d;
         applyLayers();
         if (slot === 'A' || !S.A) {
           const b = bounds(d.bbox || a.bbox); S.map.fitBounds(b, { maxZoom: 16 });
           if (S.map.getZoom() < 12) S.map.setView(b.getCenter(), 13);
         }
         $('status').textContent = S.ev.title;
-      } catch (e) { $('status').textContent = 'Failed: ' + (e.message || e); S[slot] = null; applyLayers(); markAcqs(); }
+      } catch (e) { if (S[slot] !== a) return; $('status').textContent = 'Failed: ' + (e.message || e); S[slot] = null; applyLayers(); markAcqs(); syncUrl(); }
     }
 
     function makeLayers(a, z) {
@@ -190,18 +203,25 @@
     $('mSwipe').onclick = () => { S.mode = 'swipe'; $('mSwipe').classList.add('on'); $('mBlend').classList.remove('on'); updateCompare(); };
     $('mBlend').onclick = () => { S.mode = 'blend'; $('mBlend').classList.add('on'); $('mSwipe').classList.remove('on'); updateCompare(); };
     $('swipe').oninput = updateCompare;
-    $('clearCmp').onclick = () => { S.A = S.B = null; applyLayers(); markAcqs(); };
+    $('clearCmp').onclick = () => { S.A = S.B = null; applyLayers(); markAcqs(); syncUrl(); };
     $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
 
+    $('share').onclick = async () => { syncUrl(); try { await navigator.clipboard.writeText(location.href); $('share').textContent = 'Link copied'; } catch { prompt('Copy this link', location.href); } setTimeout(() => $('share').textContent = 'Copy link to this view', 1800); };
+    $('q').addEventListener('change', () => { try { const u = new URL(location.href); $('q').value ? u.searchParams.set('q', $('q').value) : u.searchParams.delete('q'); history.replaceState(null, '', u); } catch {} });
     (async () => {
       const { map } = await OSNT.createMap('map');
       S.map = map; map.setView([15, 30], 2);
+      if (matchMedia('(max-width: 760px)').matches) document.querySelectorAll('.leaflet-control-layers-expanded').forEach(e => e.classList.remove('leaflet-control-layers-expanded'));
       map.on('move zoom viewreset layeradd resize', updateCompare);
       try {
         const r = await fetch('api/events'); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
         S.events = d.events; renderEvents();
         S.markers = L.layerGroup(S.events.filter(e => e.bbox).map(e => L.circleMarker([(e.bbox[1] + e.bbox[3]) / 2, (e.bbox[0] + e.bbox[2]) / 2], { radius: 6, color: '#fff', weight: 1.5, fillColor: '#d9552b', fillOpacity: 0.9 }).bindTooltip(e.title).on('click', () => pickEvent(e)))).addTo(map);
         $('status').textContent = `${d.count} events`;
+        const P = new URLSearchParams(location.search);
+        if (P.get('q')) { $('q').value = P.get('q'); renderEvents(); }
+        const want = S.events.find(e => e.id === P.get('event'));
+        if (want) pickEvent(want, { a: P.get('a'), b: P.get('b') });
       } catch (e) {
         $('status').textContent = 'Catalog unavailable';
         $('evlist').replaceChildren(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Could not read the Maxar catalog'), el('p', {}, String(e.message || e)), el('button', { class: 'btn', onclick: () => location.reload() }, 'Retry')));

@@ -3,7 +3,7 @@ name = "Imagery timeline"
 description = "Compare NASA satellite imagery across dates, with fire and thermal detections."
 grid = "Geospatial"
 port = 8102
-version = "0.1.1"
+version = "0.1.2"
 
 [service]
 state_dir = false

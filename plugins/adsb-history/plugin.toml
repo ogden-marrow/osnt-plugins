@@ -3,7 +3,7 @@ name = "Aircraft history (ADS-B)"
 description = "Pull just the window you need out of adsb.lol's daily global ADS-B archive (time, area, ICAO hex, callsign), keep it as a short-lived slice, and serve it as an API for other plugins."
 grid = "Air & Sea"
 port = 8120
-version = "0.1.0"
+version = "0.1.1"
 provides = ["adsb-history"]
 
 [service]

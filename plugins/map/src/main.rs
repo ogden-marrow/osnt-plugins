@@ -24,3 +24,15 @@ async fn main() {
     println!("map plugin on http://{addr}");
     axum::serve(listener, app).await.expect("serve");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PAGE;
+
+    #[test]
+    fn page_has_deep_links_and_health_failure_does_not_hide_the_map() {
+        assert!(PAGE.contains("P.has('lat')") && PAGE.contains("P.get('q')"));
+        // /api/health is best effort: it must not sit in the same try block as createMap.
+        assert!(PAGE.contains("fetch('/api/health')") && PAGE.contains(".catch(() => {})"));
+    }
+}

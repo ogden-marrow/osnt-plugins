@@ -68,6 +68,8 @@ fn bbox_and_dates_validate() {
     assert!(parse_bbox("a,b,c,d").is_err());
     assert!(parse_bbox("-200,0,10,5").is_err());
     assert!(valid_date("2026-10-11"));
+    // Regression: any day 1-31 used to pass, so 30 February went upstream and came back as an HTTP 400 "archive error".
+    assert!(!valid_date("2026-02-30") && !valid_date("2026-02-29") && valid_date("2028-02-29") && !valid_date("2026-04-31") && valid_date("2026-12-31"));
     assert!(!valid_date("2026-13-01") && !valid_date("20261011") && !valid_date("2026-1-011"));
     assert_eq!(civil(0), (1970, 1, 1));
     assert_eq!(civil(20_000), (2024, 10, 4));

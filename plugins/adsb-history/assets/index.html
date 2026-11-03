@@ -7,6 +7,7 @@
   <title>Aircraft history · OSNT</title>
   <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
   <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/osnt-ui.css">
   <style>
     #layout { display: flex; }
@@ -61,7 +62,8 @@
         <select id="step"><option value="10">every 10 s (full)</option><option value="30">every 30 s</option><option value="60">every minute</option></select></label>
       <div class="row nowrap" style="margin-top:14px"><button id="go" class="btn primary grow">Fetch history</button><button id="stop" class="btn" hidden>Cancel</button></div>
       <div id="bar" hidden><i></i></div>
-      <div id="msg" class="muted small" role="status" style="margin-top:8px"></div>
+      <div id="msg" class="muted small" role="status" aria-live="polite" style="margin-top:8px"></div>
+      <div class="row" style="margin-top:8px"><button id="share" class="btn sm" type="button" title="Copy a link that fills in this query and runs it">Copy link</button><button id="dlGeo" class="btn sm" type="button" disabled title="Download the loaded tracks as GeoJSON">GeoJSON</button><button id="dlCsv" class="btn sm" type="button" disabled title="Download the loaded points as CSV">CSV</button></div>
       <div class="notice info small" style="margin-top:12px">Only the needed part of the day's archive is downloaded (about 10&ndash;20 MB per half hour, less for short windows) and kept for a few hours. Short windows and small areas are fastest.</div>
       <h2 class="group-label">Altitude</h2>
       <div class="legend"><span><i style="background:#4fc3f7"></i>&lt; 5k ft</span><span><i style="background:#66bb6a"></i>5&ndash;15k</span><span><i style="background:#ffd54f"></i>15&ndash;30k</span><span><i style="background:#ef6c6c"></i>&gt; 30k</span><span><i style="background:#9aa5b1"></i>Ground / unknown</span></div>
@@ -92,7 +94,11 @@
 
     function query() {
       const q = new URLSearchParams({ date: $('date').value, from: $('from').value, to: $('to').value, step: $('step').value });
-      if ($('area').value === 'view') { const b = map.getBounds(); q.set('bbox', [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(4)).join(',')); }
+      if ($('area').value === 'view') {
+        // A zoomed-out or panned-over-the-dateline view can have longitudes beyond +/-180; the API wants -180..180 (west > east crosses the dateline).
+        const b = map.getBounds(), wrap = (x) => ((x + 540) % 360) - 180;
+        if (b.getEast() - b.getWest() < 360) q.set('bbox', [wrap(b.getWest()), Math.max(-90, b.getSouth()), wrap(b.getEast()), Math.min(90, b.getNorth())].map((v) => v.toFixed(4)).join(','));
+      }
       if ($('hex').value.trim()) q.set('hex', $('hex').value.trim());
       if ($('callsign').value.trim()) q.set('callsign', $('callsign').value.trim());
       return q;
@@ -128,7 +134,7 @@
     $('go').onclick = go;
     $('stop').onclick = async () => { if (job) await api('api/jobs/' + job, { method: 'DELETE' }); };
 
-    async function show(j) {
+    let show = async function show(j) {
       const r = await api(`api/slices/${j.id}/tracks`);
       if (!r.ok) return;
       layer.clearLayers(); polys.clear(); sel = null;
@@ -155,7 +161,7 @@
         list.append(item);
       }
       if (all.length && $('area').value === 'all') map.fitBounds(all, { padding: [30, 30] });
-    }
+    };
     function select(hex, item) {
       for (const [h, segs] of polys) for (const s of segs) s.setStyle({ weight: h === hex ? 4 : 2, opacity: h === hex || !hex ? .95 : .25 });
       document.querySelectorAll('#list .item').forEach((i) => i.classList.toggle('on', i === item));
@@ -175,12 +181,50 @@
       if (!box.children.length) box.append(el('div', { className: 'state', textContent: 'No cached slices.' }));
     }
 
+    const store = { get(k) { try { return localStorage.getItem('osnt-adsbh-' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-adsbh-' + k, v); } catch {} } };
+    const FIELDS = ['date', 'from', 'to', 'area', 'hex', 'callsign', 'step'];
+    // Shareable query: ?date=&from=&to=&area=view|all&bbox=w,s,e,n&hex=&callsign=&step=&auto=1 (any of date/hex/callsign/bbox also runs it).
+    function linkParams() {
+      const q = new URLSearchParams(); for (const f of FIELDS) if ($(f).value.trim()) q.set(f, $(f).value.trim());
+      if ($('area').value === 'view') { const b = map.getBounds(), w = (x) => ((x + 540) % 360) - 180; q.delete('area'); q.set('bbox', [w(b.getWest()), Math.max(-90, b.getSouth()), w(b.getEast()), Math.min(90, b.getNorth())].map((v) => v.toFixed(3)).join(',')); }
+      else q.set('area', 'all');
+      return q;
+    }
+    $('share').onclick = async () => {
+      const u = new URL(location.pathname + '?' + linkParams() + '&auto=1', location.href).href;
+      try { await navigator.clipboard.writeText(u); toast('Link copied'); } catch { prompt('Copy this link', u); }
+    };
+    let loaded = null;   // { id, tracks } of the slice on screen
+    const download = (name, type, text) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
+    $('dlGeo').onclick = async () => { if (!loaded) return; const r = await fetch(`api/slices/${loaded}/tracks?format=geojson`); download(`adsb-history-${loaded}.geojson`, 'application/geo+json', await r.text()); };
+    $('dlCsv').onclick = async () => {
+      if (!loaded) return; const r = await api(`api/slices/${loaded}/tracks`); if (!r.ok) return;
+      const cell = (v) => { v = v ?? ''; return /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v; };
+      const rows = ['hex,callsign,squawk,time_utc,lat,lon,alt_ft,gs_kt'];
+      for (const a of r.j.aircraft) for (const p of a.points) rows.push([a.hex, a.callsign, a.squawk, new Date(p[0] * 1000).toISOString(), p[1], p[2], p[3], p[4]].map(cell).join(','));
+      download(`adsb-history-${loaded}.csv`, 'text/csv', rows.join('\n'));
+    };
+    const showOrig = show;
+    show = async function (j) { loaded = j.id; $('dlGeo').disabled = $('dlCsv').disabled = false; return showOrig(j); };
+
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
       layer = L.layerGroup().addTo(map);
-      map.setView([29.65, -82.34], 7);
+      if (matchMedia('(max-width: 700px)').matches) document.querySelectorAll('.leaflet-control-layers-expanded').forEach((e) => e.classList.remove('leaflet-control-layers-expanded'));
+      const P = new URLSearchParams(location.search);
+      // last-used filters are remembered (not the date: it defaults to yesterday, the newest complete day)
+      for (const f of ['from', 'to', 'step', 'callsign']) { const v = P.get(f) ?? store.get(f); if (v) $(f).value = v; }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(P.get('date') || '')) $('date').value = P.get('date');
+      if (P.get('hex')) $('hex').value = P.get('hex');
+      const bb = (P.get('bbox') || '').split(',').map(Number);
+      const hasBox = bb.length === 4 && bb.every(Number.isFinite) && Math.abs(bb[1]) <= 90 && Math.abs(bb[3]) <= 90;
+      if (hasBox) map.fitBounds(bb[0] <= bb[2] ? [[bb[1], bb[0]], [bb[3], bb[2]]] : [[bb[1], bb[0]], [bb[3], 180]]);
+      else map.setView([29.65, -82.34], 7);
+      $('area').value = P.get('area') === 'all' || (!hasBox && (P.has('hex') || P.has('callsign')) && P.get('area') !== 'view') ? 'all' : 'view';
       loadCache();
+      if (P.get('auto') === '1' || P.has('hex') || P.has('callsign') || hasBox) setTimeout(go, 400);
     })();
+    for (const f of ['from', 'to', 'step', 'callsign']) $(f).addEventListener('change', () => store.set(f, $(f).value));
   </script>
 </body>
 </html>

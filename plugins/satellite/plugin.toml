@@ -3,7 +3,7 @@ name = "Satellite scenes"
 description = "Search Sentinel-2, Sentinel-1 radar, Landsat and NAIP scenes by area, date and cloud cover, and view or compare them on the map."
 grid = "Geospatial"
 port = 8123
-version = "0.1.0"
+version = "0.1.1"
 
 [service]
 state_dir = true

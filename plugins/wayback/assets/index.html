@@ -88,6 +88,7 @@
         <div class="card-head"><h2 style="margin:0">When was it photographed?</h2></div>
         <div id="capture" class="muted">Click the map to see the real capture date, resolution and provider for that point in the selected release.</div>
       </div>
+      <div class="row"><button id="share" class="btn sm" type="button">Copy link</button><span class="small muted" id="shareNote"></span></div>
       <div class="notice info"><span id="attrib">Imagery: Esri World Imagery Wayback. Source: Esri, Vantor, Earthstar Geographics and the GIS user community. Tiles stream from Esri on demand; nothing is stored here. A release is a basemap snapshot, so the picture can be older than its date.</span></div>
     </aside>
   </div>
@@ -209,20 +210,41 @@
     $('findBtn').onclick = findVersions;
     $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
 
+    const store = { get(k) { try { return localStorage.getItem('osnt-wayback-' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-wayback-' + k, v); } catch {} } };
+    const wrapLng = x => ((x + 540) % 360) - 180;
+    // Shareable view: ?lat=&lon=&zoom=&a=YYYY-MM-DD[&b=YYYY-MM-DD] (a b date means compare mode). A date picks the release at or before it.
+    function syncUrl() {
+      if (!S.map || !S.list.length || !relA()) return;
+      const c = S.map.getCenter(), q = new URLSearchParams({ lat: c.lat.toFixed(5), lon: wrapLng(c.lng).toFixed(5), zoom: S.map.getZoom(), a: relA().date });
+      if (S.compare && relB()) q.set('b', relB().date);
+      try { history.replaceState(null, '', location.pathname + '?' + q); } catch {}
+      store.set('view', JSON.stringify({ lat: c.lat, lng: c.lng, z: S.map.getZoom() }));
+    }
+    $('share').onclick = async () => { syncUrl(); try { await navigator.clipboard.writeText(location.href); $('shareNote').textContent = 'Link copied'; } catch { prompt('Copy this link', location.href); } setTimeout(() => $('shareNote').textContent = '', 1800); };
+    const releaseAtOrBefore = date => { let best = -1; for (let i = 0; i < S.all.length; i++) if (S.all[i].date <= date) best = i; return best; };
     (async () => {
       const { map } = await OSNT.createMap('map');
       S.map = map;
+      if (matchMedia('(max-width: 760px)').matches) document.querySelectorAll('.leaflet-control-layers-expanded').forEach(e => e.classList.remove('leaflet-control-layers-expanded'));
+      map.on('moveend', syncUrl);
       const pl = L.control({ position: 'topleft' });
       pl.onAdd = () => { const s = el('select', { 'aria-label': 'Go to place', class: 'input' }, ...Object.keys(PLACES).map(k => el('option', {}, k))); s.onchange = () => map.setView(PLACES[s.value].slice(0, 2), PLACES[s.value][2]); L.DomEvent.disableClickPropagation(s); s.id = 'place'; return s; };
       pl.addTo(map);
       map.on('move zoom viewreset layeradd resize', updateCompare);
       map.on('click', e => showCapture(e.latlng));
-      $('place').value = 'Palm Jumeirah, Dubai'; $('place').onchange();
+      const P = new URLSearchParams(location.search), lat = +P.get('lat'), lon = +P.get('lon');
+      let saved = null; try { saved = JSON.parse(store.get('view') || 'null'); } catch {}
+      if (P.has('lat') && P.has('lon') && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) map.setView([lat, lon], Math.min(19, Math.max(2, P.has('zoom') && Number.isFinite(+P.get('zoom')) ? +P.get('zoom') : 15)));
+      else if (saved && Math.abs(saved.lat) <= 90) map.setView([saved.lat, saved.lng], saved.z);
+      else { $('place').value = 'Palm Jumeirah, Dubai'; $('place').onchange(); }
       try {
         const r = await fetch('api/releases'); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
         S.all = S.list = d.releases; S.tpl = d.tile_template; if (d.attribution) $('attrib').textContent = d.attribution + ' Tiles stream from Esri on demand; nothing is stored here. A release is a basemap snapshot, so the picture can be older than its date.';
         S.a = S.all.length - 1; S.b = Math.max(0, S.all.findIndex(r => r.date >= '2016-01-01'));
-        apply();
+        const okDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+        if (okDate(P.get('a'))) { const i = releaseAtOrBefore(P.get('a')); S.a = i < 0 ? 0 : i; }
+        if (okDate(P.get('b'))) { const i = releaseAtOrBefore(P.get('b')); S.b = i < 0 ? 0 : i; S.compare = true; }
+        apply(); syncUrl();
       } catch (e) {
         $('status').textContent = 'Release list unavailable';
         $('panel').prepend(el('div', { class: 'state error' }, el('div', { class: 'h3' }, 'Could not load the Wayback releases'), el('p', {}, String(e.message || e)), el('button', { class: 'btn', onclick: () => location.reload() }, 'Retry')));

@@ -8,6 +8,18 @@
   <link rel="stylesheet" href="/static/leaflet/leaflet.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    #mapbar { position: absolute; z-index: 1000; left: 56px; top: 10px; right: 56px; display: flex; gap: 6px; max-width: 520px; pointer-events: none; }
+    #mapbar > * { pointer-events: auto; }
+    #q { flex: 1; min-width: 0; box-shadow: var(--shadow-float); }
+    #mapbar .btn { box-shadow: var(--shadow-float); background: var(--surface); }
+    #mapbar .btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+    #tip { position: absolute; z-index: 1000; left: 56px; top: 56px; max-width: min(360px, calc(100% - 70px)); pointer-events: none; }
+    #tip .well { background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--edge); font-size: var(--fs-sm); }
+    .pop .row { margin-top: 6px; gap: 6px; }
+    .pop a, .pop button { font-size: 12px; }
+    @media (max-width: 640px) { #mapbar { left: 10px; right: 56px; top: 10px; } #tip { top: 58px; max-width: calc(100% - 130px); } .leaflet-top.leaflet-left { margin-top: 48px; } }
+  </style>
 </head>
 <body class="fixed">
   <header class="topbar">
@@ -19,17 +31,90 @@
     <div class="bar-end"><span id="status" class="status" role="status" aria-live="polite">Connecting…</span></div>
   </header>
   <div class="fill map-box"><div id="map" style="position:absolute;inset:0"></div>
+  <form id="mapbar" role="search" aria-label="Find a place"><label class="sr-only" for="q">Place name or latitude, longitude</label><input id="q" type="search" class="input" placeholder="Place, or lat, lon" autocomplete="off" enterkeyhint="search"><button class="btn" type="submit">Go</button><button class="btn" type="button" id="locate" title="Centre on my location" aria-label="Centre on my location">&#9678;</button><button class="btn" type="button" id="measure" aria-pressed="false" title="Measure distance: click points on the map">Measure</button></form>
+  <div id="tip" role="status" aria-live="polite" hidden><div class="well"></div></div>
   <div id="readout" class="readout">Move the cursor over the map</div></div>
   <script src="/static/leaflet/leaflet.js"></script>
   <script src="/static/osnt-map.js"></script>
   <script>
+    // Deep link: ?lat=&lon=&zoom= (also ?q=<place or "lat, lon">). The page keeps the URL in sync so any view can be shared.
     (async () => {
-      const status = document.getElementById('status');
-      try {
-        const { cfg } = await OSNT.createMap('map', { readout: 'readout' });
-        const h = await (await fetch('/api/health')).json();
-        status.textContent = `server ${h.status} · v${h.version} · ${cfg.layer.length} layers`;
-      } catch { status.textContent = 'Failed to load'; status.classList.add('err'); }
+      const $ = id => document.getElementById(id);
+      const status = $('status');
+      const store = { get(k) { try { return localStorage.getItem('osnt-map-' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-map-' + k, v); } catch {} } };
+      let map, cfg;
+      try { ({ map, cfg } = await OSNT.createMap('map', { readout: 'readout' })); }
+      catch { status.textContent = 'Failed to load the map layers'; status.classList.add('err'); return; }
+      if (matchMedia('(max-width: 640px)').matches) document.querySelectorAll('.leaflet-control-layers-expanded').forEach(e => e.classList.remove('leaflet-control-layers-expanded'));
+      status.textContent = `${cfg.layer.length} layers`;
+      fetch('/api/health').then(r => r.json()).then(h => { status.textContent = `server ${h.status} · v${h.version} · ${cfg.layer.length} layers`; }).catch(() => {});
+
+      const wrap = x => ((x + 540) % 360) - 180, fmt = (la, lo) => `${la.toFixed(5)}, ${wrap(lo).toFixed(5)}`;
+      const P = new URLSearchParams(location.search);
+      const lat = P.has('lat') ? +P.get('lat') : NaN, lon = P.has('lon') ? +P.get('lon') : NaN, zoom = P.has('zoom') ? +P.get('zoom') : NaN;
+      let saved = null; try { saved = JSON.parse(store.get('view') || 'null'); } catch {}
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) map.setView([lat, lon], Number.isFinite(zoom) ? Math.min(19, Math.max(1, zoom)) : 12);
+      else if (saved && Math.abs(saved.lat) <= 90) map.setView([saved.lat, saved.lng], saved.z);
+      const sync = () => { const c = map.getCenter(); try { history.replaceState(null, '', `${location.pathname}?lat=${c.lat.toFixed(5)}&lon=${wrap(c.lng).toFixed(5)}&zoom=${map.getZoom()}`); } catch {} store.set('view', JSON.stringify({ lat: c.lat, lng: c.lng, z: map.getZoom() })); };
+      map.on('moveend', sync);
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) sync();
+
+      const tip = (text) => { $('tip').hidden = !text; $('tip').firstChild.textContent = text || ''; };
+      // Click: drop a pin with the coordinates, a copy button and links to the other tools at the same spot.
+      let pin = null, measuring = false, pts = [], line = null, dots = [];
+      function popup(ll) {
+        const la = ll.lat, lo = wrap(ll.lng), z = Math.max(map.getZoom(), 10), q = `lat=${la.toFixed(5)}&lon=${lo.toFixed(5)}&zoom=${z}`;
+        const d = document.createElement('div'); d.className = 'pop';
+        const b = document.createElement('b'); b.textContent = fmt(la, lo);
+        const row = document.createElement('div'); row.className = 'row';
+        const copy = document.createElement('button'); copy.className = 'btn sm'; copy.type = 'button'; copy.textContent = 'Copy';
+        copy.onclick = async () => { try { await navigator.clipboard.writeText(fmt(la, lo)); copy.textContent = 'Copied'; } catch { prompt('Coordinates', fmt(la, lo)); } };
+        row.append(copy);
+        for (const [name, path] of [['Imagery history', '../wayback/'], ['Satellite scenes', '../satellite/'], ['Aircraft', '../adsb/']]) {
+          const a = document.createElement('a'); a.className = 'btn sm'; a.href = `${path}?${q}`; a.textContent = name; row.append(a);
+        }
+        d.append(b, row); return d;
+      }
+      const clearMeasure = () => { pts = []; dots.forEach(d => map.removeLayer(d)); dots = []; if (line) { map.removeLayer(line); line = null; } };
+      function measureText() {
+        let m = 0; for (let i = 1; i < pts.length; i++) m += pts[i - 1].distanceTo(pts[i]);
+        return pts.length < 2 ? 'Click points on the map to measure a distance.' : `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km · ${(m / 1609.344).toFixed(m < 16093 ? 2 : 1)} mi · ${(m / 1852).toFixed(m < 18520 ? 2 : 1)} nm (${pts.length} points, great-circle sum)`;
+      }
+      map.on('click', e => {
+        if (measuring) {
+          pts.push(e.latlng); dots.push(L.circleMarker(e.latlng, { radius: 4, color: '#e8a33d', weight: 2, fillOpacity: 1 }).addTo(map));
+          if (line) map.removeLayer(line); line = L.polyline(pts, { color: '#e8a33d', weight: 3 }).addTo(map); tip(measureText()); return;
+        }
+        if (pin) map.removeLayer(pin);
+        pin = L.marker(e.latlng).addTo(map).bindPopup(popup(e.latlng)).openPopup();
+      });
+      $('measure').onclick = () => {
+        measuring = !measuring; $('measure').setAttribute('aria-pressed', measuring); clearMeasure();
+        map.getContainer().style.cursor = measuring ? 'crosshair' : ''; tip(measuring ? measureText() : '');
+        if (measuring && pin) { map.removeLayer(pin); pin = null; }
+      };
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && measuring) $('measure').click(); });
+
+      $('locate').onclick = () => {
+        if (!navigator.geolocation) { tip('Location is not available in this browser.'); return; }
+        tip('Locating…');
+        navigator.geolocation.getCurrentPosition(p => { tip(''); map.setView([p.coords.latitude, p.coords.longitude], 14); }, () => tip('Could not get your location (permission denied or unavailable).'), { timeout: 10000 });
+      };
+      async function find(text) {
+        text = text.trim(); if (!text) return;
+        const m = text.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+        if (m) { const la = +m[1], lo = +m[2]; if (Math.abs(la) <= 90 && Math.abs(lo) <= 180) { map.setView([la, lo], Math.max(map.getZoom(), 13)); return; } tip('Coordinates must be latitude (-90..90), then longitude (-180..180).'); return; }
+        tip('Searching…');
+        try {
+          const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=' + encodeURIComponent(text), { headers: { Accept: 'application/json' } });
+          const j = await r.json();
+          if (!j.length) { tip(`No place found for "${text}".`); return; }
+          const bb = j[0].boundingbox.map(Number); tip('');
+          map.fitBounds([[bb[0], bb[2]], [bb[1], bb[3]]], { maxZoom: 16 });
+        } catch { tip('Place search is unavailable right now. Try "lat, lon" instead.'); }
+      }
+      $('mapbar').addEventListener('submit', e => { e.preventDefault(); find($('q').value); });
+      if (P.get('q')) { $('q').value = P.get('q'); find(P.get('q')); }
     })();
   </script>
 </body>

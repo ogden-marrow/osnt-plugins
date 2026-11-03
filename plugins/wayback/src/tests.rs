@@ -127,3 +127,26 @@ async fn upstream_down_is_a_clean_502_and_tools_listed() {
     let names: Vec<&str> = t.as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["wayback_releases", "wayback_changes", "wayback_capture"]);
 }
+
+/// Esri unreachable but a release list was cached earlier (older than the 6 h freshness window): serve it, not a 502.
+#[tokio::test(flavor = "multi_thread")]
+async fn stale_release_list_is_served_when_esri_is_down() {
+    let up = "http://127.0.0.1:9";
+    let dir = env::temp_dir().join(format!("osnt-wb-stale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cache = cache::DiskCache::new(dir.join("cache"), 1 << 20);
+    let key = format!("config|{up}/config.json");
+    cache.put(&key, json!({ "10": { "itemTitle": "World Imagery (Wayback 2020-01-15)" } }).to_string().as_bytes());
+    for e in std::fs::read_dir(dir.join("cache")).unwrap().flatten() {
+        let f = std::fs::File::options().write(true).open(e.path()).unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(7 * 3600)).unwrap();
+    }
+    let cfg = Config { config_url: format!("{up}/config.json"), tilemap_base: format!("{up}/tilemap"), tile_template: "https://tiles.test/{id}/{z}/{y}/{x}".into(), meta_prefix: format!("{up}/meta/") };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = app(cfg, dir);
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let (code, v) = get_(format!("http://{addr}/api/releases")).await;
+    assert_eq!(code, 200, "{v}");
+    assert_eq!(v["count"], 1);
+}

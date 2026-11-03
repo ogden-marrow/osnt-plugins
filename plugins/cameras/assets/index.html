@@ -14,12 +14,21 @@
     #groups .grid { grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 12px; }
     figure { margin: 0; border: 1px solid var(--edge); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
     figure.stale { border-color: var(--err); }
-    figure.stale figcaption::after { content: "No signal"; color: var(--err); font-weight: 600; margin-left: 8px; }
-    figure img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #05080a; }
+    figure .shot { position: relative; display: block; width: 100%; padding: 0; border: 0; background: #05080a; cursor: zoom-in; aspect-ratio: 4 / 3; }
+    figure img[hidden] { display: none; }
+    figure img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    figure .err-msg { position: absolute; inset: auto 0 0 0; padding: 6px 10px; font-size: 12px; line-height: 1.35; color: #fff; background: rgba(160, 30, 30, .88); text-align: left; }
     figcaption { padding: 8px 12px; font-size: 13px; color: var(--ink); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
     figcaption .ts { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
-    figure.stale img { color: transparent; }
+    figure.stale figcaption .ts { color: var(--err); font-weight: 600; }
     #map { height: 260px; margin-bottom: 20px; border-radius: var(--radius); border: 1px solid var(--edge); display: none; }
+    #tools { display: none; margin-bottom: 16px; }
+    #big { border: 0; padding: 0; background: transparent; max-width: min(96vw, 1100px); width: 100%; color: var(--ink); }
+    #big::backdrop { background: rgba(0, 0, 0, .75); }
+    #big .box { background: var(--surface); border: 1px solid var(--edge-strong); border-radius: var(--radius); overflow: hidden; }
+    #big img { display: block; width: 100%; max-height: 78vh; object-fit: contain; background: #05080a; }
+    #big .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; }
+    #big .bar b { margin-right: auto; }
   </style>
 </head>
 <body>
@@ -31,13 +40,67 @@
     <span class="sep" aria-hidden="true">/</span><h1>Cameras</h1>
     <div class="bar-end"><span id="status" class="status" role="status" aria-live="polite"></span></div>
   </header>
-  <main class="page wide"><div id="map"></div><div id="groups"><div class="loading"><span class="spin" aria-hidden="true"></span>Loading cameras…</div></div></main>
+  <main class="page wide">
+    <div id="tools" class="row spread">
+      <div class="row">
+        <label class="row small muted" style="gap:6px">Refresh <select id="rate" class="input" aria-label="Refresh interval"><option value="1000">1 s</option><option value="2000" selected>2 s</option><option value="5000">5 s</option><option value="15000">15 s</option><option value="0">Paused</option></select></label>
+        <label class="row small muted" style="gap:6px" id="gwrap" hidden>Group <select id="gsel" class="input" aria-label="Show group"></select></label>
+      </div>
+      <button id="share" class="btn sm" type="button">Copy link</button>
+    </div>
+    <div id="map" role="region" aria-label="Camera locations"></div>
+    <div id="groups" aria-live="polite"><div class="loading"><span class="spin" aria-hidden="true"></span>Loading cameras…</div></div>
+  </main>
+  <dialog id="big" aria-label="Camera view"><div class="box"><img id="bigImg" alt=""><div class="bar"><b id="bigName"></b><span id="bigTs" class="small muted"></span><a id="bigOpen" class="btn sm" target="_blank" rel="noopener">Open image</a><button id="bigSave" class="btn sm" type="button">Save frame</button><button id="bigClose" class="btn sm primary" type="button">Close</button></div></div></dialog>
   <script src="/static/leaflet/leaflet.js"></script>
   <script src="/static/osnt-map.js"></script>
   <script>
-    const REFRESH_MS = 2000;
+    // Deep links: ?cam=<id> opens that camera large; ?group=<name> shows one group. Frames are fetched (not <img src>) so a
+    // failing feed can say why, back off instead of hammering, and old frames are released.
+    const $ = id => document.getElementById(id);
+    const store = { get(k) { try { return localStorage.getItem('osnt-cameras-' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-cameras-' + k, v); } catch {} } };
+    const P = new URLSearchParams(location.search);
+    let rate = +(store.get('rate') ?? 2000); if (![0, 1000, 2000, 5000, 15000].includes(rate)) rate = 2000;
+    $('rate').value = String(rate);
+    const tiles = new Map();           // id -> { c, fig, img, cap, ts, msg, url, blob, fails, timer, busy }
+    let bigId = null;
+
+    async function frame(t) {
+      if (t.busy) return; t.busy = true;
+      try {
+        const r = await fetch(`snap/${encodeURIComponent(t.c.id)}?t=${Date.now()}`, { cache: 'no-store' });
+        if (r.status === 401) { location.href = '/login?next=/p/cameras/'; return; }
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'HTTP ' + r.status); }
+        const blob = await r.blob(), url = URL.createObjectURL(blob), old = t.url;
+        t.img.src = url; t.img.hidden = false; t.url = url; t.blob = blob; if (old) setTimeout(() => URL.revokeObjectURL(old), 1500);
+        t.fails = 0; t.fig.classList.remove('stale'); t.msg.hidden = true; t.at = new Date(); t.ts.textContent = t.at.toLocaleTimeString();
+        if (bigId === t.c.id) syncBig();
+      } catch (e) {
+        t.fails++; t.fig.classList.add('stale'); t.msg.hidden = false; t.msg.textContent = e.message; t.ts.textContent = 'No signal';
+      } finally { t.busy = false; }
+    }
+    // Each camera runs its own timer: no overlapping requests, and a failing feed waits longer each time (up to a minute).
+    function schedule(t) {
+      clearTimeout(t.timer);
+      if (!rate) return;
+      const wait = t.fails ? Math.min(60000, Math.max(rate, 5000) * 2 ** Math.min(t.fails - 1, 4)) : rate;
+      t.timer = setTimeout(async () => { if (!document.hidden && !(t.c.id !== bigId && t.off)) await frame(t); schedule(t); }, wait);
+    }
+    function restartAll() { for (const t of tiles.values()) { schedule(t); } }
+    $('rate').onchange = () => { rate = +$('rate').value; store.set('rate', rate); $('status').textContent = statusText(); restartAll(); if (rate) for (const t of tiles.values()) frame(t); };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) for (const t of tiles.values()) { frame(t); } });
+    const statusText = () => `${tiles.size} camera${tiles.size === 1 ? '' : 's'} · ${rate ? 'every ' + rate / 1000 + ' s' : 'paused'}`;
+
+    function syncBig() { const t = tiles.get(bigId); if (!t) return; $('bigImg').src = t.url || ''; $('bigName').textContent = t.c.name; $('bigTs').textContent = t.at ? t.at.toLocaleTimeString() : 'no signal'; $('bigOpen').href = `snap/${encodeURIComponent(t.c.id)}`; }
+    function openBig(id) { bigId = id; $('bigImg').alt = tiles.get(id)?.c.name || ''; syncBig(); if (!$('big').open) $('big').showModal(); try { const u = new URL(location.href); u.searchParams.set('cam', id); history.replaceState(null, '', u); } catch {} }
+    $('bigClose').onclick = () => $('big').close();
+    $('big').addEventListener('close', () => { bigId = null; try { const u = new URL(location.href); u.searchParams.delete('cam'); history.replaceState(null, '', u); } catch {} });
+    $('big').addEventListener('click', e => { if (e.target === $('big')) $('big').close(); });
+    $('bigSave').onclick = () => { const t = tiles.get(bigId); if (!t?.blob) return; const a = document.createElement('a'); a.href = t.url; a.download = `${t.c.id}-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.jpg`; a.click(); };
+    $('share').onclick = async () => { const u = new URL(location.href); u.searchParams.delete('cam'); const href = u.href; try { await navigator.clipboard.writeText(href); $('share').textContent = 'Copied'; } catch { prompt('Copy this link', href); } setTimeout(() => $('share').textContent = 'Copy link', 1800); };
+
     (async () => {
-      const root = document.getElementById('groups');
+      const root = $('groups');
       let cams;
       try {
         const r = await fetch('api/cameras');
@@ -46,39 +109,51 @@
         cams = await r.json();
       } catch (e) {
         root.innerHTML = '<div class="state error" role="alert"><div class="h3">Could not load cameras</div><p>The camera service did not respond.</p><button class="btn" onclick="location.reload()">Try again</button></div>';
-        document.getElementById('status').textContent = 'offline';
+        $('status').textContent = 'offline';
         return;
       }
       root.innerHTML = '';
       if (!cams.length) {
-        root.innerHTML = '<div class="state"><div class="h3">No cameras configured</div><p>Add cameras to this plugin\'s configuration and they will appear here, refreshed every 2 seconds.</p></div>';
-        document.getElementById('status').textContent = '0 cameras';
+        root.innerHTML = '<div class="state"><div class="h3">No cameras configured</div><p>Add cameras to this plugin\'s configuration (a TOML file named by OSNT_CAMERAS: id, name, group, url, optional lat/lon) and they will appear here.</p></div>';
+        $('status').textContent = '0 cameras';
         return;
       }
+      $('tools').style.display = 'flex';
       const groups = {};
       for (const c of cams) (groups[c.group || 'Cameras'] ??= []).push(c);
-      const frames = [];
+      const names = Object.keys(groups);
+      if (names.length > 1) {
+        $('gwrap').hidden = false; $('gsel').add(new Option('All groups', ''));
+        for (const n of names) $('gsel').add(new Option(n, n));
+        $('gsel').value = names.includes(P.get('group')) ? P.get('group') : '';
+        $('gsel').onchange = () => { const u = new URL(location.href); $('gsel').value ? u.searchParams.set('group', $('gsel').value) : u.searchParams.delete('group'); history.replaceState(null, '', u); for (const [n, sec] of secs) sec.hidden = !!$('gsel').value && n !== $('gsel').value; for (const t of tiles.values()) t.off = !!$('gsel').value && (t.c.group || 'Cameras') !== $('gsel').value; };
+      }
+      const secs = new Map();
       for (const [name, list] of Object.entries(groups)) {
-        root.insertAdjacentHTML('beforeend', `<h2></h2><div class="grid"></div>`);
-        root.querySelector('h2:last-of-type').textContent = name;
-        const grid = root.querySelector('.grid:last-of-type');
+        const sec = document.createElement('section'); const h = document.createElement('h2'); h.textContent = name; const grid = document.createElement('div'); grid.className = 'grid';
+        sec.append(h, grid); root.append(sec); secs.set(name, sec);
         for (const c of list) {
-          const fig = document.createElement('figure'), img = document.createElement('img'), cap = document.createElement('figcaption');
-          cap.innerHTML = '<span></span><span class="ts"></span>'; cap.firstChild.textContent = c.name;
-          img.alt = c.name; img.onload = () => { fig.classList.remove('stale'); cap.lastChild.textContent = new Date().toLocaleTimeString(); };
-          img.onerror = () => fig.classList.add('stale');
-          fig.append(img, cap); grid.append(fig); frames.push({ c, img });
+          const fig = document.createElement('figure'), btn = document.createElement('button'), img = document.createElement('img'), msg = document.createElement('div'), cap = document.createElement('figcaption');
+          btn.type = 'button'; btn.className = 'shot'; btn.setAttribute('aria-label', `Enlarge ${c.name}`);
+          img.alt = c.name; img.hidden = true; msg.className = 'err-msg'; msg.hidden = true; msg.setAttribute('role', 'status');
+          btn.append(img, msg);
+          const nm = document.createElement('span'), ts = document.createElement('span'); ts.className = 'ts'; nm.textContent = c.name; cap.append(nm, ts);
+          fig.append(btn, cap); grid.append(fig);
+          const t = { c, fig, img, ts, msg, fails: 0, off: false }; tiles.set(c.id, t);
+          btn.onclick = () => openBig(c.id);
         }
       }
-      const tick = () => { if (!document.hidden) for (const { c, img } of frames) img.src = `snap/${c.id}?t=${Date.now()}`; };
-      tick(); setInterval(tick, REFRESH_MS);
-      document.getElementById('status').textContent = `${cams.length} camera${cams.length === 1 ? '' : 's'} · every ${REFRESH_MS / 1000}s`;
+      if ($('gsel').onchange && $('gsel').value) $('gsel').onchange();
+      for (const t of tiles.values()) { frame(t).then(() => schedule(t)); }
+      $('status').textContent = statusText();
+      if (P.get('cam') && tiles.has(P.get('cam'))) openBig(P.get('cam'));
 
       const placed = cams.filter(c => c.lat != null && c.lon != null);
       if (placed.length) {
-        document.getElementById('map').style.display = 'block';
+        $('map').style.display = 'block';
         const { map } = await OSNT.createMap('map');
-        const pts = placed.map(c => L.marker([c.lat, c.lon]).addTo(map).bindPopup(c.name).getLatLng());
+        if (matchMedia('(max-width: 700px)').matches) document.querySelectorAll('#map .leaflet-control-layers-expanded').forEach(e => e.classList.remove('leaflet-control-layers-expanded'));
+        const pts = placed.map(c => L.marker([c.lat, c.lon], { title: c.name }).addTo(map).bindPopup(() => { const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = c.name; const a = document.createElement('button'); a.className = 'btn sm'; a.textContent = 'View'; a.onclick = () => openBig(c.id); d.append(b, document.createElement('br'), a); return d; }).getLatLng());
         map.fitBounds(L.latLngBounds(pts).pad(0.4), { maxZoom: 17 });
       }
     })();

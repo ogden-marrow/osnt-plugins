@@ -21,6 +21,8 @@
     aside small { color: var(--ink-2); display: block; font-size: 12px; margin-top: 2px; }
     #sel b { font-size: 15px; }
     #sel { line-height: 1.45; }
+    .item { width: 100%; text-align: left; font: inherit; color: inherit; }
+    #status { max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .plane svg { filter: drop-shadow(0 0 1px rgba(0,0,0,.7)); }
     .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
     .legend span { display: inline-flex; align-items: center; gap: 5px; }
@@ -48,17 +50,20 @@
     <aside id="panel" aria-label="Aircraft controls">
       <h2>Find aircraft</h2>
       <label class="sr-only" for="q">Hex, registration or callsign</label>
-      <input id="q" type="search" placeholder="Hex, registration or callsign">
+      <input id="q" type="search" placeholder="Hex, registration or callsign" autocomplete="off" enterkeyhint="search" aria-describedby="qhint">
+      <p class="hint" id="qhint">Press Enter. Shows the aircraft only while it is transmitting.</p>
       <h2>View</h2>
       <div class="seg" role="group" aria-label="View">
-        <button id="modeView" class="on">In view</button>
-        <button id="modeMil">Military (world)</button>
+        <button id="modeView" class="on" aria-pressed="true">In view</button>
+        <button id="modeMil" aria-pressed="false">Military (world)</button>
       </div>
       <div class="muted" id="count" style="margin-top:8px"></div>
+      <div class="small" id="msg" role="status" aria-live="polite"></div>
+      <div class="row" style="margin-top:8px"><button id="dlGeo" class="btn sm" title="Download the aircraft on screen as GeoJSON">GeoJSON</button><button id="dlCsv" class="btn sm" title="Download the aircraft on screen as CSV">CSV</button><button id="share" class="btn sm" title="Copy a link to this view">Copy link</button></div>
       <h2>Altitude</h2>
-      <div class="legend"><span><i style="background:#4fc3f7"></i>&lt; 5k ft</span><span><i style="background:#66bb6a"></i>5&ndash;15k</span><span><i style="background:#ffd54f"></i>15&ndash;30k</span><span><i style="background:#ef6c6c"></i>&gt; 30k</span><span><i style="background:#9aa5b1"></i>Ground</span></div>
+      <div class="legend" role="list"><span><i style="background:#4fc3f7"></i>&lt; 5k ft</span><span><i style="background:#66bb6a"></i>5&ndash;15k</span><span><i style="background:#ffd54f"></i>15&ndash;30k</span><span><i style="background:#ef6c6c"></i>&gt; 30k</span><span><i style="background:#9aa5b1"></i>Ground</span></div>
       <h2>Emergencies</h2>
-      <div id="emerg" class="muted">None right now</div>
+      <div id="emerg" class="muted" aria-live="polite">None right now</div>
       <div class="row" style="margin-top:8px"><button id="notify" class="btn sm">Enable alerts</button></div>
       <h2>Selected</h2>
       <div id="sel" class="muted">Click an aircraft</div>
@@ -69,118 +74,210 @@
   <script src="/static/osnt-map.js"></script>
   <script>
     // Relative URLs throughout: the core mounts this page at /p/adsb/.
+    // Deep links: ?q=<hex|reg|callsign> (find and select), ?hex= (same), ?lat=&lon=&zoom= (view), ?mode=mil.
     const $ = id => document.getElementById(id);
     const markers = new Map();           // hex -> L.marker
-    let map, trailLine = null, selected = null, mode = 'view', lastList = [];
+    let map, trailLine = null, selected = null, mode = 'view', lastList = [], lastOk = null, trailToken = 0, firstEmergencies = true;
     const seenEmergencies = new Set();
+    const store = { get(k) { try { return localStorage.getItem('osnt-adsb-' + k); } catch { return null; } }, set(k, v) { try { localStorage.setItem('osnt-adsb-' + k, v); } catch {} } };
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     function altColour(a) {
       if (a.on_ground) return '#9aa5b1';
       const ft = a.alt ?? 0;
       return ft < 5000 ? '#4fc3f7' : ft < 15000 ? '#66bb6a' : ft < 30000 ? '#ffd54f' : '#ef6c6c';
     }
+    const iconSize = () => { const z = map ? map.getZoom() : 8; return z < 6 ? 14 : z < 8 ? 18 : 22; };
     function icon(a) {
-      const stroke = a.mil ? '#ff5252' : '#0b0f14', w = a.mil ? 1.6 : 0.8;
-      return L.divIcon({ className: 'plane', iconSize: [22, 22], iconAnchor: [11, 11],
-        html: `<svg width="22" height="22" viewBox="0 0 24 24" style="transform:rotate(${a.track ?? 0}deg)">
+      const stroke = a.mil ? '#ff5252' : '#0b0f14', w = a.mil ? 1.6 : 0.8, n = iconSize();
+      return L.divIcon({ className: 'plane', iconSize: [n, n], iconAnchor: [n / 2, n / 2],
+        html: `<svg width="${n}" height="${n}" viewBox="0 0 24 24" style="transform:rotate(${Number(a.track) || 0}deg)">
                  <path d="M12 2l2.2 8.5 8.3 3.5v2l-8.3-1.6L13.6 20l2.4 1.6V23L12 21.8 8 23v-1.4l2.4-1.6-.9-5.6L1.5 16v-2l8.3-3.5z"
                        fill="${altColour(a)}" stroke="${stroke}" stroke-width="${w}"/></svg>` });
     }
     const label = a => a.flight || a.reg || a.hex.toUpperCase();
     const fmtAlt = a => a.on_ground ? 'ground' : a.alt == null ? '—' : `${a.alt.toLocaleString()} ft`;
-    const details = a => `<b>${label(a)}</b>${a.mil ? ' <span class="badge err">MIL</span>' : ''}
-      <small>${[a.type, a.reg, a.hex.toUpperCase()].filter(Boolean).join(' · ')}</small>
-      <small>${fmtAlt(a)} · ${a.gs != null ? Math.round(a.gs) + ' kt' : '—'} · ${a.track != null ? Math.round(a.track) + '°' : '—'}${a.squawk ? ' · sqk ' + a.squawk : ''}</small>`;
+    const details = a => `<b>${esc(label(a))}</b>${a.mil ? ' <span class="badge err">MIL</span>' : ''}
+      <small>${esc([a.type, a.reg, a.hex.toUpperCase()].filter(Boolean).join(' · '))}</small>
+      <small>${esc(fmtAlt(a))} · ${a.gs != null ? Math.round(a.gs) + ' kt' : '—'} · ${a.track != null ? Math.round(a.track) + '°' : '—'}${a.squawk ? ' · sqk ' + esc(a.squawk) : ''}${a.seen_pos > 30 ? ' · last seen ' + Math.round(a.seen_pos) + ' s ago' : ''}</small>`;
+    const setMsg = (t, err) => { $('msg').textContent = t || ''; $('msg').className = 'small ' + (err ? 'err' : 'muted'); };
 
     function render(list) {
       lastList = list;
-      const keep = new Set();
+      const keep = new Set(), n = iconSize();
       for (const a of list) {
         keep.add(a.hex);
         let m = markers.get(a.hex);
         if (!m) {
-          m = L.marker([a.lat, a.lon], { icon: icon(a) }).addTo(map).on('click', () => select(m._ac));
+          m = L.marker([a.lat, a.lon], { icon: icon(a), keyboard: false, title: label(a) }).addTo(map).on('click', () => select(m._ac));
           markers.set(a.hex, m);
-        } else { m.setLatLng([a.lat, a.lon]).setIcon(icon(a)); }
-        m._ac = a;
+        } else {
+          m.setLatLng([a.lat, a.lon]);
+          if (m._n !== n || m._tr !== a.track || m._alt !== a.alt) m.setIcon(icon(a));
+        }
+        m._ac = a; m._n = n; m._tr = a.track; m._alt = a.alt;
       }
       for (const [hex, m] of markers) if (!keep.has(hex)) { map.removeLayer(m); markers.delete(hex); }
-      $('count').textContent = `${list.length} aircraft${list.filter(a => a.mil).length ? ` · ${list.filter(a => a.mil).length} military` : ''}`;
-      if (selected && markers.has(selected)) $('sel').innerHTML = details(markers.get(selected)._ac);
+      const mil = list.filter(a => a.mil).length;
+      $('count').textContent = `${list.length} aircraft${mil ? ` · ${mil} military` : ''}`;
+      if (selected && markers.has(selected)) $('sel').innerHTML = details(markers.get(selected)._ac) + trailNote;
     }
 
     async function api(path) {
       const r = await fetch(path);
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
       return r.json();
     }
 
-    async function refresh() {
-      try {
-        if (mode === 'mil') { render(await api('api/military')); $('status').textContent = 'military · live'; return; }
-        const c = map.getCenter(), b = map.getBounds();
-        const nm = c.distanceTo(b.getNorthEast()) / 1852;
-        const radius = Math.min(250, Math.ceil(nm));   // the aggregator caps point queries at 250 nm
-        render(await api(`api/aircraft?lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}&radius=${radius}`));
-        if (nm > 250) $('count').textContent += ' · showing 250 nm around centre, zoom in for the rest';
-        $('status').textContent = `live · ${new Date().toLocaleTimeString()}`;
-      } catch (e) { $('status').textContent = 'error: ' + e.message; }
+    function fail(e) {
+      const rate = /rate limit/i.test(e.message);
+      $('status').textContent = rate ? 'rate limited' : 'offline';
+      setMsg(`${e.message}${lastOk ? ` Showing data from ${lastOk}.` : ''}`, true);
     }
 
-    async function select(a) {
-      selected = a.hex; $('sel').innerHTML = details(a);
-      if (trailLine) map.removeLayer(trailLine);
+    let refreshing = false;
+    async function refresh() {
+      if (refreshing || !map) return;
+      refreshing = true;
       try {
-        const pts = await api(`api/trail/${a.hex}?minutes=180`);
+        if (mode === 'mil') {
+          render(await api('api/military'));
+        } else {
+          const c = map.getCenter(), b = map.getBounds();
+          const nm = c.distanceTo(b.getNorthEast()) / 1852;
+          const radius = Math.min(250, Math.ceil(nm));   // the aggregator caps point queries at 250 nm
+          const wrapLng = ((c.lng + 540) % 360) - 180;
+          render(await api(`api/aircraft?lat=${c.lat.toFixed(3)}&lon=${wrapLng.toFixed(3)}&radius=${radius}`));
+          if (nm > 250) $('count').textContent += ' · showing 250 nm around the centre, zoom in for the rest';
+        }
+        lastOk = new Date().toLocaleTimeString();
+        $('status').textContent = `${mode === 'mil' ? 'military' : 'live'} · ${lastOk}`;
+        setMsg('');
+      } catch (e) { fail(e); }
+      finally { refreshing = false; }
+    }
+
+    let trailNote = '';
+    async function select(a, { pan = false } = {}) {
+      selected = a.hex; trailNote = ''; $('sel').innerHTML = details(a);
+      const mk = markers.get(a.hex);
+      if (mk) { mk.unbindPopup().bindPopup(() => details(mk._ac)).openPopup(); }
+      if (pan) map.setView([a.lat, a.lon], Math.max(map.getZoom(), 9));
+      syncUrl();
+      loadTrail(a);
+    }
+    async function loadTrail(a) {
+      const token = ++trailToken;
+      try {
+        const pts = await api(`api/trail/${encodeURIComponent(a.hex)}?minutes=180`);
+        if (token !== trailToken) return;
+        if (trailLine) map.removeLayer(trailLine);
         trailLine = L.polyline(pts.map(p => [p.lat, p.lon]), { color: altColour(a), weight: 2, opacity: .8 }).addTo(map);
-        $('sel').innerHTML += `<small class="muted">${pts.length} recorded positions in the last 3 h</small>`;
+        const hist = `../adsb-history/?hex=${encodeURIComponent(a.hex)}&area=all`;
+        trailNote = `<small class="muted">${pts.length} recorded position${pts.length === 1 ? '' : 's'} in the last 3 h</small><small><a href="${hist}">Find older flights of this aircraft</a></small>`;
+        if (selected === a.hex) $('sel').innerHTML = details(markers.get(a.hex)?._ac || a) + trailNote;
       } catch { /* no trail yet */ }
     }
 
     async function checkEmergencies() {
       try {
         const list = await api('api/emergencies');
-        $('emerg').innerHTML = list.length ? '' : 'None right now';
+        $('emerg').replaceChildren();
+        if (!list.length) $('emerg').textContent = 'None right now';
         for (const a of list) {
-          const d = document.createElement('div'); d.className = 'item alert';
-          d.innerHTML = `${details(a)}<small>${a.squawk} — ${a.meaning}</small>`;
+          const d = document.createElement('button'); d.type = 'button'; d.className = 'item alert';
+          d.innerHTML = `${details(a)}<small>${esc(a.squawk)} — ${esc(a.meaning)}</small>`;
           d.onclick = () => { map.setView([a.lat, a.lon], 8); if (mode === 'view') refresh(); };
           $('emerg').append(d);
-          if (!seenEmergencies.has(a.hex + a.squawk)) {
-            seenEmergencies.add(a.hex + a.squawk);
-            if (seenEmergencies.size > list.length && 'Notification' in window && Notification.permission === 'granted')
+          const key = a.hex + a.squawk;
+          if (!seenEmergencies.has(key)) {
+            seenEmergencies.add(key);
+            if (!firstEmergencies && 'Notification' in window && Notification.permission === 'granted')
               new Notification(`Squawk ${a.squawk}: ${label(a)}`, { body: a.meaning });
           }
         }
+        firstEmergencies = false;
       } catch { /* leave previous list */ }
     }
 
-    $('q').addEventListener('keydown', async e => {
-      if (e.key !== 'Enter' || !e.target.value.trim()) return;
+    async function search(term) {
+      term = term.trim(); if (!term) return;
+      $('q').value = term; setMsg('Searching…');
       try {
-        const res = await api('api/search?q=' + encodeURIComponent(e.target.value.trim()));
-        if (!res.length) { $('sel').textContent = 'Not found (or not broadcasting right now)'; return; }
-        const a = res[0]; mode = 'view'; $('modeView').classList.add('on'); $('modeMil').classList.remove('on');
-        map.setView([a.lat, a.lon], 9); render(res); select(a);
-      } catch (err) { $('sel').textContent = 'search failed: ' + err.message; }
-    });
-    $('modeView').onclick = () => { mode = 'view'; $('modeView').classList.add('on'); $('modeMil').classList.remove('on'); refresh(); };
-    $('modeMil').onclick = () => { mode = 'mil'; $('modeMil').classList.add('on'); $('modeView').classList.remove('on'); refresh(); };
+        const res = await api('api/search?q=' + encodeURIComponent(term));
+        if (!res.length) { $('sel').textContent = `No aircraft "${term}" is transmitting right now (hex, registration or callsign).`; setMsg(''); return; }
+        const a = res[0]; setMode('view', false);
+        map.setView([a.lat, a.lon], 9); render(res); select(a); setMsg('');
+        // the next pan refreshes the surrounding view; keep the found aircraft until then
+      } catch (err) { setMsg('Search failed: ' + err.message, true); }
+    }
+    $('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(e.target.value); });
+
+    function setMode(m, reload = true) {
+      mode = m; store.set('mode', m);
+      $('modeView').classList.toggle('on', m === 'view'); $('modeMil').classList.toggle('on', m === 'mil');
+      $('modeView').setAttribute('aria-pressed', m === 'view'); $('modeMil').setAttribute('aria-pressed', m === 'mil');
+      if (reload) refresh();
+    }
+    $('modeView').onclick = () => setMode('view');
+    $('modeMil').onclick = () => setMode('mil');
     $('notify').onclick = async () => {
       if (!('Notification' in window)) { $('notify').textContent = 'Not supported'; return; }
       const p = await Notification.requestPermission();
       $('notify').textContent = p === 'granted' ? 'Alerts on' : 'Alerts blocked';
     };
 
+    // Export what is on screen.
+    function download(name, type, text) {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+    const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    $('dlGeo').onclick = () => download(`aircraft-${stamp()}.geojson`, 'application/geo+json', JSON.stringify({ type: 'FeatureCollection',
+      features: lastList.map(a => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [a.lon, a.lat] }, properties: a })) }));
+    $('dlCsv').onclick = () => {
+      const cols = ['hex', 'flight', 'reg', 'type', 'lat', 'lon', 'alt', 'on_ground', 'gs', 'track', 'squawk', 'mil'];
+      const cell = v => { v = v ?? ''; v = /^[=+\-@]/.test(String(v)) && typeof v === 'string' ? "'" + v : v; return /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v; };
+      download(`aircraft-${stamp()}.csv`, 'text/csv', [cols.join(','), ...lastList.map(a => cols.map(c => cell(a[c])).join(','))].join('\n'));
+    };
+
+    // Shareable URL: current view (and selected aircraft) without reloading the page.
+    function viewUrl() {
+      const q = new URLSearchParams();
+      if (mode === 'mil') q.set('mode', 'mil');
+      else { const c = map.getCenter(); q.set('lat', c.lat.toFixed(3)); q.set('lon', (((c.lng + 540) % 360) - 180).toFixed(3)); q.set('zoom', map.getZoom()); }
+      if (selected) q.set('hex', selected);
+      return location.pathname + '?' + q;
+    }
+    function syncUrl() { try { history.replaceState(null, '', viewUrl()); store.set('view', JSON.stringify({ c: map.getCenter(), z: map.getZoom() })); } catch {} }
+    $('share').onclick = async () => {
+      const u = new URL(viewUrl(), location.href).href;
+      try { await navigator.clipboard.writeText(u); $('share').textContent = 'Copied'; } catch { prompt('Copy this link', u); }
+      setTimeout(() => $('share').textContent = 'Copy link', 1800);
+    };
+
     // Phone layout: the side panel is a bottom sheet behind a button.
     $('panelBtn').onclick = () => { const o = $('panel').classList.toggle('open'); $('panelBtn').setAttribute('aria-expanded', String(o)); };
+    // The layer picker starts collapsed on phones so it does not cover the map.
+    const collapseLayers = () => { if (matchMedia('(max-width: 700px)').matches) document.querySelectorAll('.leaflet-control-layers-expanded').forEach(e => e.classList.remove('leaflet-control-layers-expanded')); };
+
     (async () => {
       ({ map } = await OSNT.createMap('map', { readout: 'readout' }));
-      map.setView([29.65, -82.34], 7);
-      map.on('moveend', () => mode === 'view' && refresh());
-      refresh(); checkEmergencies();
-      setInterval(refresh, 6000);
-      setInterval(checkEmergencies, 30000);
+      collapseLayers();
+      const P = new URLSearchParams(location.search), num = k => (P.has(k) && P.get(k).trim() !== '' && Number.isFinite(+P.get(k))) ? +P.get(k) : null;
+      let saved = null; try { saved = JSON.parse(store.get('view') || 'null'); } catch {}
+      const lat = num('lat'), lon = num('lon'), zoom = num('zoom');
+      if (lat != null && lon != null && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) map.setView([lat, lon], zoom != null ? Math.min(18, Math.max(2, zoom)) : 8);
+      else if (saved && saved.c) map.setView([saved.c.lat, saved.c.lng], saved.z);
+      else map.setView([29.65, -82.34], 7);
+      mode = P.get('mode') === 'mil' ? 'mil' : (P.has('q') || P.has('hex') || lat != null) ? 'view' : (store.get('mode') === 'mil' ? 'mil' : 'view');
+      setMode(mode, false);
+      map.on('moveend', () => { if (mode === 'view') refresh(); syncUrl(); });
+      map.on('zoomend', () => { for (const m of markers.values()) m.setIcon(icon(m._ac)); });
+      await refresh(); checkEmergencies();
+      const target = P.get('q') || P.get('hex');
+      if (target) search(target);
+      setInterval(() => { if (!document.hidden) { refresh(); if (selected && markers.has(selected)) loadTrail(markers.get(selected)._ac); } }, 6000);
+      setInterval(() => { if (!document.hidden) checkEmergencies(); }, 30000);
       if ('Notification' in window && Notification.permission === 'granted') $('notify').textContent = 'Alerts on';
     })();
   </script>
