@@ -1,0 +1,31 @@
+id = "yt-mp3"
+name = "YouTube to MP3"
+description = "Paste a YouTube link, optionally trim it, and download an MP3."
+grid = "Media & Verification"
+port = 8122
+version = "0.1.0"
+
+# Runs the external tools `yt-dlp` and `ffmpeg` (not bundled). The installer adds them after you approve it (see [system] below);
+# the page shows manual commands if they are missing. All temp and output files live under the state dir (/var/lib/osnt-yt-mp3), because the
+# sandbox makes everything else read-only. Limits (all optional):
+#   OSNT_YTMP3_MAX_MINUTES (60)   longest source video accepted
+#   OSNT_YTMP3_MAX_MB (120)       largest MP3 produced
+#   OSNT_YTMP3_MAX_JOBS (1)       concurrent conversions, 1 or 2
+#   OSNT_YTMP3_JOB_TIMEOUT_SECS (1200)   per-job wall clock limit
+#   OSNT_YTMP3_TTL_MINUTES (120)  files are deleted after this long
+#   OSNT_YTMP3_YTDLP / OSNT_YTMP3_FFMPEG   absolute path to a tool, if not on PATH, /usr/local/bin or /usr/bin
+[service]
+state_dir = true
+
+[service.env]
+OSNT_YTMP3_BIND = "127.0.0.1:{port}"
+OSNT_STATE_DIR = "{state_dir}"
+
+# Installed by the hub's Packages page after the user approves it in the install dialog.
+[system]
+apt = ["ffmpeg"]
+
+[[system.download]]
+name = "yt-dlp"
+url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"
+sha256_url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS"

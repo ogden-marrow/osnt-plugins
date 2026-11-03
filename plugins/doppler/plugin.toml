@@ -1,0 +1,17 @@
+id = "doppler"
+name = "Doppler flyby check"
+description = "Estimate speed, closest approach and distance of an aircraft or vehicle pass from the Doppler shift in a recording, to sanity-check a clip's claims."
+grid = "Media & Verification"
+port = 8121
+version = "0.1.0"
+
+# `requires` is deliberately not declared: the repo docs do not describe an optional dependency, and doppler works on its own.
+# Stage 2 uses the adsb-history loopback API when it is installed and reports "unavailable" when it is not.
+
+[service]
+state_dir = false
+
+[service.env]
+OSNT_DOPPLER_BIND = "127.0.0.1:{port}"
+# Optional stage 2: the adsb-history plugin's loopback base URL (loopback hosts only; anything else is ignored).
+OSNT_DOPPLER_ADSB_HISTORY = "http://127.0.0.1:8120"

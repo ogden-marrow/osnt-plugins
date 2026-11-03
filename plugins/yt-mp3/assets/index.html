@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>YouTube to MP3 · OSNT</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%230c7a62%27 stroke-width=%272.2%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%279%27/%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%273.2%27 fill=%27%230c7a62%27 stroke=%27none%27/%3E%3C/svg%3E">
+  <script>if(top!==self)document.documentElement.classList.add('embedded')</script>
+  <link rel="stylesheet" href="/static/osnt-ui.css">
+  <style>
+    .times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    #url, .times input { min-height: 44px; font-size: 16px; }
+    #go { min-height: 44px; }
+    .bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 10px 0 8px; }
+    .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+    pre { margin: 4px 0 12px; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius-sm); font: 12.5px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    details > summary { cursor: pointer; color: var(--ink-2); font-size: var(--fs-sm); margin-top: 8px; }
+    .hist { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--edge); }
+    .hist:first-child { border-top: 0; padding-top: 0; }
+    .hist .t { min-width: 0; }
+    .hist .t a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Back to OSNT hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M12 3v4" stroke-linecap="round"/></svg>
+      OSNT
+    </a>
+    <span class="sep" aria-hidden="true">/</span><h1>YouTube to MP3</h1>
+  </header>
+  <main class="page narrow stack">
+    <div class="page-head">
+      <div><h2 class="h2" style="font-size:22px;margin:0">Convert a YouTube video to MP3</h2>
+      <p>Paste a link, optionally pick a start and end time, then download the file.</p></div>
+    </div>
+
+    <section id="tools" hidden></section>
+
+    <form class="card stack-sm" id="form">
+      <label class="field"><span class="label">YouTube link</span>
+        <input id="url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://www.youtube.com/watch?v=..." required autofocus></label>
+      <div class="times">
+        <label class="field"><span class="label">Start (optional)</span><input id="start" placeholder="0:30" autocomplete="off" inputmode="numeric"></label>
+        <label class="field"><span class="label">End (optional)</span><input id="end" placeholder="2:45" autocomplete="off" inputmode="numeric"></label>
+      </div>
+      <div class="row spread">
+        <p class="hint" id="limits" style="margin:0"></p>
+        <button class="btn primary lg" id="go" type="submit">Convert</button>
+      </div>
+    </form>
+
+    <section class="card" id="job" hidden aria-live="polite">
+      <h3 class="h3" id="jtitle">Working...</h3>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="jbar"></div></div>
+      <div class="muted small" id="jstage"></div>
+      <div id="jdone" hidden style="margin-top:12px"></div>
+    </section>
+
+    <section class="card" id="histcard" hidden><div class="card-head"><h3 class="h3">Recent files</h3></div><div id="hist"></div></section>
+
+    <div class="notice small">
+      <div>Downloading content from YouTube may violate YouTube's Terms of Service and copyright law. You are responsible for
+      what you download and how you use it. Only convert content you have the right to copy.</div>
+    </div>
+  </main>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let timer = null, ready = false;
+
+    function toast(msg, kind) {
+      const t = document.createElement('div');
+      t.className = 'toast ' + (kind || '');
+      t.textContent = msg;
+      $('toasts').appendChild(t);
+      setTimeout(() => t.remove(), 5000);
+    }
+    async function api(path, opts) {
+      const r = await fetch(path, opts);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || ('Request failed (' + r.status + ')'));
+      return data;
+    }
+    const cmd = c => '<pre>' + esc(c) + '</pre>';
+    const mb = n => (n / 1048576).toFixed(1) + ' MB';
+
+    async function loadStatus() {
+      try {
+        const s = await api('api/status');
+        ready = s.ready;
+        $('go').disabled = !ready;
+        $('limits').textContent = 'Up to ' + s.limits.max_minutes + ' min per video, files kept ' + s.limits.ttl_minutes + ' min. Single videos only.';
+        const el = $('tools');
+        const badge = (name, t) => '<span class="badge ' + (t.found ? 'ok' : 'err') + '">' + name + ': ' + (t.found ? esc(t.version || 'found') : 'missing') + '</span>';
+        el.hidden = false;
+        if (s.ready) {
+          el.innerHTML = '<div class="row small muted">' + badge('yt-dlp', s.ytdlp) + badge('ffmpeg', s.ffmpeg) +
+            '<span>If a download fails with an error from YouTube, yt-dlp is probably out of date. Update it on the Pi with <code>sudo yt-dlp -U</code> (the plugin never updates it itself).</span></div>';
+        } else {
+          let h = '<div class="notice warn"><div class="stack-sm"><div><b>Setup needed.</b> ' + badge('yt-dlp', s.ytdlp) + ' ' + badge('ffmpeg', s.ffmpeg) + '</div>' +
+            '<div>Open the hub\'s <a href="/settings#packages" target="_top">Packages</a> page: it installs ffmpeg and yt-dlp for you after you approve it. Then reload this page. Nothing else needs restarting.</div>' +
+            '<details><summary>Manual fallback (run on the Raspberry Pi over SSH)</summary>';
+          if (!s.ffmpeg.found) h += '<div class="small muted" style="margin-top:8px">ffmpeg:</div>' + cmd(s.install.ffmpeg);
+          if (!s.ytdlp.found) h += '<div class="small muted" style="margin-top:8px">yt-dlp (official release binary):</div>' + cmd(s.install.ytdlp) +
+            '<div class="small muted">or with pipx:</div>' + cmd(s.install.ytdlp_pipx) +
+            '<div class="small muted">The tools must be in <code>/usr/local/bin</code> or <code>/usr/bin</code> so the sandboxed service can run them.</div>';
+          el.innerHTML = h + '</details></div></div>';
+        }
+      } catch (e) { $('limits').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+    }
+
+    function showJob(j) {
+      $('job').hidden = false;
+      $('jtitle').textContent = j.title || (j.status === 'error' ? 'Conversion failed' : 'Working...');
+      const pct = j.status === 'error' ? 0 : j.progress;
+      $('jbar').style.width = pct + '%';
+      $('jbar').parentNode.setAttribute('aria-valuenow', Math.round(pct));
+      $('jstage').innerHTML = j.status === 'error' ? '<span class="err">' + esc(j.error || 'Failed') + '</span>' : esc(j.stage) + ' (' + Math.round(j.progress) + '%)';
+      const d = $('jdone');
+      if (j.status === 'done') {
+        d.hidden = false;
+        d.innerHTML = '<div class="row"><a class="btn primary" href="api/jobs/' + j.id + '/file" download>Download MP3</a> <span class="muted small">' + esc(j.filename) + ' &middot; ' + mb(j.size) + '</span></div>';
+      } else d.hidden = true;
+    }
+
+    async function poll(id) {
+      clearTimeout(timer);
+      try {
+        const j = await api('api/jobs/' + id);
+        showJob(j);
+        if (j.status === 'queued' || j.status === 'running') { timer = setTimeout(() => poll(id), 1000); return; }
+      } catch (e) { $('jstage').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+      $('go').disabled = !ready;
+      loadHistory();
+    }
+
+    async function loadHistory() {
+      try {
+        const list = (await api('api/jobs')).filter(j => j.status === 'done');
+        $('histcard').hidden = !list.length;
+        $('hist').innerHTML = list.map(j => '<div class="hist"><div class="t"><a href="api/jobs/' + j.id + '/file" download>' + esc(j.filename) +
+          '</a><div class="muted tiny">' + mb(j.size) + ' &middot; expires ' + new Date(j.expires * 1000).toLocaleTimeString() + '</div></div>' +
+          '<button class="btn sm danger" data-del="' + j.id + '">Delete</button></div>').join('');
+      } catch (e) { /* history is optional */ }
+    }
+
+    $('hist').addEventListener('click', async ev => {
+      const id = ev.target.dataset && ev.target.dataset.del;
+      if (!id) return;
+      try { await api('api/jobs/' + id, { method: 'DELETE' }); } catch (e) { toast(e.message, 'err'); }
+      loadHistory();
+    });
+
+    $('form').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      $('go').disabled = true;
+      $('jdone').hidden = true;
+      try {
+        const r = await api('api/jobs', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url: $('url').value, start: $('start').value, end: $('end').value }) });
+        showJob({ status: 'queued', progress: 0, stage: 'Queued', title: '' });
+        poll(r.id);
+      } catch (e) {
+        $('job').hidden = false; $('jtitle').textContent = 'Could not start';
+        $('jbar').style.width = '0'; $('jstage').innerHTML = '<span class="err">' + esc(e.message) + '</span>';
+        $('go').disabled = !ready;
+        loadStatus();
+      }
+    });
+
+    loadStatus(); loadHistory();
+  </script>
+</body>
+</html>

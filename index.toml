@@ -69,3 +69,17 @@ name = "Packages"
 description = "Package repositories, and which of their plugins are installed on this hub."
 version = "0.2.0"
 path = "plugins/packages"
+
+[[plugin]]
+id = "doppler"
+name = "Doppler flyby check"
+description = "Estimate speed, closest approach and distance of an aircraft or vehicle pass from the Doppler shift in a recording, to sanity-check a clip's claims."
+version = "0.1.0"
+path = "plugins/doppler"
+
+[[plugin]]
+id = "yt-mp3"
+name = "YouTube to MP3"
+description = "Paste a YouTube link, optionally trim it, and download an MP3."
+version = "0.1.0"
+path = "plugins/yt-mp3"
