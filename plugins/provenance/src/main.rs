@@ -1,6 +1,6 @@
-//! Image source finder: an agent loop (DeepSeek reasoning + reverse-image-search backends + page fetch + Wayback)
+//! Image source finder: an agent loop (LLM reasoning + reverse-image-search backends + page fetch + Wayback)
 //! that looks for the earliest known appearance of an image. Images are processed in memory and never stored.
-//! DeepSeek is text-only: it plans tool calls and writes the report, it never sees the image.
+//! The LLM (any OpenAI-compatible provider) is text-only: it plans tool calls and writes the report, it never sees the image.
 
 mod agent;
 mod analysis;
@@ -60,7 +60,7 @@ async fn run(st: Shared, input: agent::Input) -> Result<Json<Value>, ApiError> {
     let _permit = st_permit.slots.try_acquire().map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "another investigation is running; try again in a minute".into()))?;
     let out = tokio::task::spawn_blocking(move || {
         let keys = tools::Keys::load(); // blocking: asks the portal core for credentials
-        agent::investigate(&st.cfg, &keys, &st.guard, agent::Agents { api: &st.api, fetch: &st.fetch }, input, agent::MAX_ITERATIONS)
+        agent::investigate(&keys.apply_to(&st.cfg), &keys, &st.guard, agent::Agents { api: &st.api, fetch: &st.fetch }, input, agent::MAX_ITERATIONS)
     })
     .await
     .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "investigation crashed".into()))?;
@@ -106,7 +106,7 @@ async fn investigate_url(State(st): State<Shared>, Query(q): Query<UrlQuery>) ->
 async fn tools_list() -> Json<Value> {
     Json(json!([{
         "name": "provenance_investigate_url",
-        "description": "Agentic search for the likely ORIGINAL SOURCE of a public image URL: reverse-image search, page dates and Internet Archive, ranked candidates with confidence and caveats. Slow: can take up to about 90 seconds. Sends the image to third-party services (Google/SerpAPI/DeepSeek). Never identifies people. 'Earliest found' is not proof of the original.",
+        "description": "Agentic search for the likely ORIGINAL SOURCE of a public image URL: reverse-image search, page dates and Internet Archive, ranked candidates with confidence and caveats. Slow: can take up to about 90 seconds. Sends the image to third-party services (Google/SerpAPI/your LLM provider). Never identifies people. 'Earliest found' is not proof of the original.",
         "method": "GET",
         "path": "api/investigate",
         "parameters": { "type": "object", "properties": { "url": { "type": "string", "description": "Public http(s) URL of the image" } }, "required": ["url"] }

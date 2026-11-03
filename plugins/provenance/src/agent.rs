@@ -1,6 +1,7 @@
-//! The investigation: local analysis, then (with a DeepSeek key) an LLM tool-calling loop over the evidence tools,
-//! otherwise the raw backends only. DeepSeek is text-only: it never sees the image, it plans the tool calls,
-//! reads the evidence and writes the report.
+//! The investigation: local analysis, then (with an LLM configured) a tool-calling loop over the evidence tools,
+//! otherwise the raw backends only. The LLM can be any OpenAI-compatible chat-completions provider (OpenAI, OpenRouter,
+//! DeepSeek, Groq, Together, Mistral, Anthropic's and Google's compatibility endpoints, or a local Ollama / LM Studio).
+//! It is used as text only: it never sees the image, it plans the tool calls, reads the evidence and writes the report.
 
 use std::{
     cell::RefCell,
@@ -140,29 +141,30 @@ fn chat(ctx: &Ctx, key: &str, messages: &[Value], tools: Option<&[Value]>, json_
     if json_mode {
         body["response_format"] = json!({ "type": "json_object" });
     }
-    let url = format!("{}/chat/completions", ctx.cfg.deepseek_base.trim_end_matches('/'));
-    let res = ctx
-        .api
-        .post(&url)
-        .header("Authorization", format!("Bearer {key}"))
+    let url = format!("{}/chat/completions", ctx.cfg.llm_base.trim_end_matches('/'));
+    let mut req = ctx.api.post(&url);
+    if !key.is_empty() {
+        req = req.header("Authorization", format!("Bearer {key}"));
+    }
+    let res = req
         .config()
         .timeout_global(Some(remaining.min(Duration::from_secs(60))))
         .build()
         .send_json(&body);
     let mut res = res.map_err(|e| {
         let m = match &e {
-            ureq::Error::StatusCode(401) => "DeepSeek rejected the API key (HTTP 401)".to_string(),
-            ureq::Error::StatusCode(402) => "DeepSeek account has insufficient balance (HTTP 402)".to_string(),
-            ureq::Error::StatusCode(429) => "DeepSeek rate limit (HTTP 429)".to_string(),
-            ureq::Error::StatusCode(c) => format!("DeepSeek HTTP {c}"),
-            other => format!("DeepSeek request failed: {other}"),
+            ureq::Error::StatusCode(401) => "the LLM provider rejected the API key (HTTP 401)".to_string(),
+            ureq::Error::StatusCode(402) => "the LLM account has insufficient balance (HTTP 402)".to_string(),
+            ureq::Error::StatusCode(429) => "LLM provider rate limit (HTTP 429)".to_string(),
+            ureq::Error::StatusCode(c) => format!("LLM provider HTTP {c} (check LLM_BASE_URL and LLM_MODEL)"),
+            other => format!("LLM request failed: {other}"),
         };
         ctx.keys.redact(&m)
     })?;
-    let v: Value = res.body_mut().read_json().map_err(|e| ctx.keys.redact(&format!("DeepSeek response unreadable: {e}")))?;
+    let v: Value = res.body_mut().read_json().map_err(|e| ctx.keys.redact(&format!("LLM response unreadable: {e}")))?;
     let msg = v["choices"][0]["message"].clone();
     if msg.is_null() {
-        return Err("DeepSeek returned no message".into());
+        return Err("the LLM returned no message".into());
     }
     Ok(msg)
 }
@@ -324,7 +326,9 @@ pub fn investigate(cfg: &Config, keys: &Keys, guard: &Guard, agents: Agents, inp
         }),
     };
 
-    let (report, llm) = match &keys.deepseek {
+    // Configured = a base URL and model are set (the key is optional: local servers need none).
+    let llm_key: Option<&str> = (!cfg.llm_base.is_empty() && !cfg.model.is_empty()).then(|| keys.llm.as_deref().unwrap_or(""));
+    let (report, llm) = match llm_key {
         Some(key) => {
             let mut avail: Vec<String> = tools::tool_defs(&ctx).iter().filter_map(|d| d["function"]["name"].as_str().map(str::to_string)).collect();
             avail.sort();
@@ -357,7 +361,7 @@ pub fn investigate(cfg: &Config, keys: &Keys, guard: &Guard, agents: Agents, inp
                 let r = tools::dispatch(&ctx, "search_serpapi_lens", &json!({}));
                 push_trace(&mut trace, "search_serpapi_lens", r.1, t);
             }
-            (None, format!("skipped: DEEPSEEK_API_KEY is not set; {CRED_HINT}. Showing local analysis and raw backend results only."))
+            (None, format!("skipped: no LLM configured (set LLM_BASE_URL, LLM_MODEL and usually LLM_API_KEY); {CRED_HINT}. Showing local analysis and raw backend results only."))
         }
     };
 
@@ -456,13 +460,14 @@ mod tests {
     }
 
     fn keys_all() -> Keys {
-        Keys { deepseek: Some("sk-SECRET-deepseek".into()), google: Some("g-SECRET-vision".into()), serpapi: Some("s-SECRET-serp".into()) }
+        Keys { llm: Some("sk-SECRET-llm".into()), google: Some("g-SECRET-vision".into()), serpapi: Some("s-SECRET-serp".into()), ..Default::default() }
     }
 
     fn run(f: &Fake, keys: &Keys, url: bool, max_iters: usize) -> Value {
         let cfg = Config {
-            deepseek_base: format!("http://127.0.0.1:{}", f.port),
-            model: "deepseek-chat".into(),
+            // Without a key these tests model "no LLM configured"; the keyless local-server case is the stored base URL.
+            llm_base: if keys.llm.is_some() { format!("http://127.0.0.1:{}", f.port) } else { String::new() },
+            model: "test-model".into(),
             vision_base: format!("http://127.0.0.1:{}", f.port),
             serpapi_base: format!("http://127.0.0.1:{}", f.port),
             wayback_base: format!("http://127.0.0.1:{}", f.port),
@@ -572,8 +577,8 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_error_degrades_gracefully_without_leaking_key() {
-        let f = fake(|_| Resp { status: 401, headers: vec![], body: b"bad key sk-SECRET-deepseek".to_vec() });
+    fn llm_error_degrades_gracefully_without_leaking_key() {
+        let f = fake(|_| Resp { status: 401, headers: vec![], body: b"bad key sk-SECRET-llm".to_vec() });
         let out = run(&f, &keys_all(), true, MAX_ITERATIONS);
         assert!(out["report"].is_null());
         assert!(out["llm"].as_str().unwrap().contains("rejected the API key"));
@@ -581,11 +586,11 @@ mod tests {
     }
 
     #[test]
-    fn no_deepseek_key_runs_backends_and_points_to_credentials() {
+    fn no_llm_configured_runs_backends_and_points_to_credentials() {
         let f = fake(|_| panic!("the model must not be called"));
-        let keys = Keys { deepseek: None, google: Some("g-SECRET-vision".into()), serpapi: None };
+        let keys = Keys { google: Some("g-SECRET-vision".into()), ..Default::default() };
         let out = run(&f, &keys, true, MAX_ITERATIONS);
-        assert!(out["llm"].as_str().unwrap().starts_with("skipped: DEEPSEEK_API_KEY"));
+        assert!(out["llm"].as_str().unwrap().starts_with("skipped: no LLM configured"));
         assert!(out["llm"].as_str().unwrap().contains("/credentials"));
         assert_eq!(out["backends"]["google_vision"], "used");
         assert!(out["backends"]["serpapi"].as_str().unwrap().contains("/credentials"));
@@ -616,7 +621,7 @@ mod tests {
         });
         let mut keys = keys_all();
         keys.google = Some("g-SECRET-vision".into());
-        let cfg_bad_vision = |f: &Fake| Config { vision_base: format!("http://127.0.0.1:{}/nope", f.port), deepseek_base: format!("http://127.0.0.1:{}", f.port), model: "m".into(), serpapi_base: String::new(), wayback_base: String::new() };
+        let cfg_bad_vision = |f: &Fake| Config { vision_base: format!("http://127.0.0.1:{}/nope", f.port), llm_base: format!("http://127.0.0.1:{}", f.port), model: "m".into(), serpapi_base: String::new(), wayback_base: String::new() };
         let guard = Guard { exempt_loopback_port: Some(f.port) };
         let (api, fetch) = (osnt_common::http_agent("t"), guarded_agent(guard.clone(), "t"));
         let out = investigate(&cfg_bad_vision(&f), &keys, &guard, Agents { api: &api, fetch: &fetch }, Input { bytes: tiny_jpeg_with_exif(), url: None }, 8);

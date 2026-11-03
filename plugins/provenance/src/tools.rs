@@ -20,7 +20,8 @@ pub const CRED_HINT: &str = "add the credential on the portal's Credentials page
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub deepseek_base: String,
+    /// Base URL of any OpenAI-compatible chat-completions API (it serves `<base>/chat/completions`). Empty = not configured.
+    pub llm_base: String,
     pub model: String,
     pub vision_base: String,
     pub serpapi_base: String,
@@ -31,8 +32,8 @@ impl Config {
     pub fn from_env() -> Self {
         let e = |k: &str, d: &str| std::env::var(k).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| d.to_string());
         Self {
-            deepseek_base: e("OSNT_DEEPSEEK_BASE", "https://api.deepseek.com"),
-            model: e("OSNT_DEEPSEEK_MODEL", "deepseek-chat"),
+            llm_base: e("OSNT_LLM_BASE", ""),
+            model: e("OSNT_LLM_MODEL", ""),
             vision_base: e("OSNT_VISION_BASE", "https://vision.googleapis.com"),
             serpapi_base: e("OSNT_SERPAPI_BASE", "https://serpapi.com"),
             wayback_base: e("OSNT_WAYBACK_BASE", "https://web.archive.org"),
@@ -42,7 +43,10 @@ impl Config {
 
 #[derive(Default)]
 pub struct Keys {
-    pub deepseek: Option<String>,
+    /// LLM provider key. Optional: local servers (Ollama, LM Studio, llama.cpp) take none.
+    pub llm: Option<String>,
+    pub llm_base: Option<String>,
+    pub llm_model: Option<String>,
     pub google: Option<String>,
     pub serpapi: Option<String>,
 }
@@ -51,15 +55,28 @@ impl Keys {
     /// Blocking: asks the portal core for credentials. Call from a blocking thread.
     pub fn load() -> Self {
         Self {
-            deepseek: osnt_common::secret("DEEPSEEK_API_KEY"),
+            llm: osnt_common::secret("LLM_API_KEY"),
+            llm_base: osnt_common::secret("LLM_BASE_URL").map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
+            llm_model: osnt_common::secret("LLM_MODEL").map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
             google: osnt_common::secret("GOOGLE_VISION_API_KEY"),
             serpapi: osnt_common::secret("SERPAPI_API_KEY"),
         }
     }
+    /// The configuration with the stored provider settings applied (they win over the environment defaults).
+    pub fn apply_to(&self, cfg: &Config) -> Config {
+        let mut c = cfg.clone();
+        if let Some(b) = &self.llm_base {
+            c.llm_base = b.clone();
+        }
+        if let Some(m) = &self.llm_model {
+            c.model = m.clone();
+        }
+        c
+    }
     /// Remove any secret value from a string that may be logged or returned.
     pub fn redact(&self, s: &str) -> String {
         let mut out = s.to_string();
-        for k in [&self.deepseek, &self.google, &self.serpapi].into_iter().flatten() {
+        for k in [&self.llm, &self.google, &self.serpapi].into_iter().flatten() {
             if !k.is_empty() {
                 out = out.replace(k.as_str(), "[redacted]");
             }
@@ -435,7 +452,7 @@ mod tests {
 
     #[test]
     fn redacts_secrets() {
-        let k = Keys { deepseek: Some("sk-abc123".into()), google: None, serpapi: Some("serp-key".into()) };
+        let k = Keys { llm: Some("sk-abc123".into()), serpapi: Some("serp-key".into()), ..Default::default() };
         let r = k.redact("GET https://x/?api_key=serp-key failed with sk-abc123");
         assert!(!r.contains("serp-key") && !r.contains("sk-abc123"), "{r}");
     }
@@ -476,5 +493,14 @@ mod tests {
         println!("wayback: {}", serde_json::to_string_pretty(&w).unwrap());
         assert!(w["earliest_capture"].is_string());
         println!("blocked: {:?}", fetch_page(&ctx, "http://localhost/").err());
+    }
+
+    #[test]
+    fn stored_provider_settings_override_defaults() {
+        let cfg = Config { llm_base: "http://default".into(), model: "m0".into(), vision_base: String::new(), serpapi_base: String::new(), wayback_base: String::new() };
+        let c = Keys { llm_base: Some("https://api.openai.com/v1".into()), llm_model: Some("gpt-x".into()), ..Default::default() }.apply_to(&cfg);
+        assert_eq!((c.llm_base.as_str(), c.model.as_str()), ("https://api.openai.com/v1", "gpt-x"));
+        let c = Keys::default().apply_to(&cfg);
+        assert_eq!((c.llm_base.as_str(), c.model.as_str()), ("http://default", "m0"));
     }
 }

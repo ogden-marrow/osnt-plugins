@@ -3,7 +3,7 @@ name = "Image source finder"
 description = "Agentic search for the likely original source of an image: reverse-image search, page dates and Wayback, with honest confidence and caveats."
 grid = "Media & Verification"
 port = 8106
-version = "0.1.0"
+version = "0.2.0"
 
 [service]
 state_dir = false
@@ -11,11 +11,26 @@ state_dir = false
 [service.env]
 OSNT_PROVENANCE_BIND = "127.0.0.1:{port}"
 
+# The reasoning loop works with any OpenAI-compatible chat-completions API. Set all three (the key is optional for local servers):
+#   DeepSeek:   https://api.deepseek.com                      deepseek-chat
+#   OpenAI:     https://api.openai.com/v1                     gpt-4o-mini
+#   OpenRouter: https://openrouter.ai/api/v1                  <any model id>
+#   Anthropic:  https://api.anthropic.com/v1                  claude-sonnet-4-5
+#   Ollama:     http://127.0.0.1:11434/v1                     <your model>   (no key)
 [[secret]]
-name = "DEEPSEEK_API_KEY"
-label = "DeepSeek API key (reasoning loop)"
-help_url = "https://platform.deepseek.com/api_keys"
+name = "LLM_BASE_URL"
+label = "LLM API base URL (OpenAI-compatible)"
 required = true
+
+[[secret]]
+name = "LLM_MODEL"
+label = "LLM model name"
+required = true
+
+[[secret]]
+name = "LLM_API_KEY"
+label = "LLM API key (leave empty for local servers)"
+required = false
 
 [[secret]]
 name = "GOOGLE_VISION_API_KEY"
