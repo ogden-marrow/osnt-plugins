@@ -3,7 +3,7 @@ name = "Live cameras"
 description = "Grid of live still-image camera feeds with map placement."
 grid = "Geospatial"
 port = 8105
-version = "0.1.2"
+version = "0.1.3"
 
 [service]
 state_dir = false

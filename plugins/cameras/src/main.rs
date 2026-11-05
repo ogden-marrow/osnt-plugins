@@ -181,7 +181,6 @@ mod tests {
     #[test]
     fn default_config_parses_and_ids_are_unique() {
         let cams = toml::from_str::<Config>(DEFAULT_CAMERAS).unwrap().cameras;
-        assert!(!cams.is_empty());
         let mut ids: Vec<_> = cams.iter().map(|c| c.id.clone()).collect();
         ids.sort();
         ids.dedup();

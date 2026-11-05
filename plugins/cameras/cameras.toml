@@ -1,55 +1,12 @@
 # Camera feeds: still-image URLs that update periodically (the origin replaces the image each time).
 # Only URLs listed here are ever fetched. Add lat/lon to place a camera on the map.
 # Override at runtime with OSNT_CAMERAS=/path/to/cameras.toml (re-read per request).
-# These are publicly published snapshot feeds from UF Recreational Sports (about 1 frame per second).
-# NOTE (2026-11-02): recsports.ufl.edu serves an incomplete TLS chain (missing the InCommon OVG2C intermediate) and
-# redirects http to https, so strict clients, including this one, reject it until UF fixes it. Tiles show a red border meanwhile.
-# This plugin only displays them; it does not analyse or identify people.
-
-[[camera]]
-id = "swrc-weights-1"
-name = "SWRC Weight Room 1"
-group = "Southwest Rec Center"
-url = "http://recsports.ufl.edu/cam/cam1.jpg"
-
-[[camera]]
-id = "swrc-weights-2"
-name = "SWRC Weight Room 2"
-group = "Southwest Rec Center"
-url = "http://recsports.ufl.edu/cam/cam4.jpg"
-
-[[camera]]
-id = "swrc-cardio"
-name = "SWRC Cardio"
-group = "Southwest Rec Center"
-url = "http://recsports.ufl.edu/cam/cam5.jpg"
-
-[[camera]]
-id = "swrc-courts-1-2"
-name = "SWRC Basketball Courts 1-2"
-group = "Southwest Rec Center"
-url = "http://recsports.ufl.edu/cam/cam3.jpg"
-
-[[camera]]
-id = "swrc-courts-3-4"
-name = "SWRC Basketball Courts 3-4"
-group = "Southwest Rec Center"
-url = "http://recsports.ufl.edu/cam/cam2.jpg"
-
-[[camera]]
-id = "swrc-courts-5-6"
-name = "SWRC Basketball Courts 5-6"
-group = "Southwest Rec Center"
-url = "http://recsports.ufl.edu/cam/cam6.jpg"
-
-[[camera]]
-id = "srfc-weights"
-name = "SRFC (Student) Weight Room"
-group = "Student Rec & Fitness Center"
-url = "http://recsports.ufl.edu/cam/cam8.jpg"
-
-[[camera]]
-id = "srfc-cardio"
-name = "SRFC (Student) Cardio"
-group = "Student Rec & Fitness Center"
-url = "http://recsports.ufl.edu/cam/cam7.jpg"
+# No default feeds are shipped. Add your own below, for example:
+#
+# [[camera]]
+# id = "harbour"
+# name = "Harbour webcam"
+# group = "Ports"
+# url = "https://example.com/cam.jpg"
+# lat = 0.0
+# lon = 0.0
