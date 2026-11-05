@@ -31,7 +31,7 @@
   <main class="page">
     <div class="page-head"><div><h2 class="h2" style="font-size:22px;margin:0">Check an aircraft or vehicle pass</h2>
       <p>Estimates speed, closest approach and distance from the Doppler shift in a recording, to test whether a clip's claimed aircraft, speed, place and time hold up. Analysed in memory, never stored. It does not locate or identify anyone.</p></div></div>
-    <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Choose an audio clip to analyse"><strong>Drop an audio clip of one pass or click to choose</strong><span class="small">WAV, MP3, M4A/AAC, OGG, FLAC. Up to 40 MB and 180 s: trim to the pass with a few seconds either side.</span><input id="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac" hidden></div>
+    <div id="drop" class="dropzone" role="button" tabindex="0" aria-label="Choose an audio clip to analyse"><strong>Drop an audio clip of one pass or click to choose</strong><span class="small">WAV, MP3, M4A/AAC, OGG, FLAC. Up to 256 MB. A short clip of one pass is fitted directly; a long recording (up to two hours) is scanned for passes, which you can then open one by one.</span><input id="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac" hidden></div>
     <div class="card" style="margin-top:12px">
       <div class="fields">
         <label class="field"><span class="label">Air temperature, &deg;C</span><input id="temp" type="number" value="15" step="1" min="-60" max="60"></label>
@@ -81,7 +81,7 @@
     drop.ondragleave = () => drop.classList.remove('over');
     drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
     fin.onchange = () => pick(fin.files[0]);
-    function pick(f) { if (!f) return; if (f.size > 40 * 1048576) { $('msg').innerHTML = '<span class="err" role="alert">That file is ' + (f.size / 1048576).toFixed(0) + ' MB; the limit is 40 MB. Trim it to the pass first.</span>'; return; } $('msg').textContent = ''; file = f; drop.querySelector('strong').textContent = f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB). '; $('go').disabled = false; }
+    function pick(f) { if (!f) return; if (f.size > 256 * 1048576) { $('msg').innerHTML = '<span class="err" role="alert">That file is ' + (f.size / 1048576).toFixed(0) + ' MB; the limit is 256 MB. Trim or re-encode it first.</span>'; return; } $('msg').textContent = ''; file = f; drop.querySelector('strong').textContent = f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB). '; $('go').disabled = false; }
 
     const pm = (o, unit, dp = 0) => o && o.value != null
       ? o.value.toFixed(dp) + (o.sigma != null ? ' &plusmn; ' + o.sigma.toFixed(dp) : '') + ' ' + unit : '-';
@@ -107,21 +107,56 @@
 
     $('go').onclick = async () => {
       if (!file) return;
-      $('go').disabled = true; $('msg').innerHTML = '<span class="loading"><span class="spin" aria-hidden="true"></span>Analysing…</span>'; out.innerHTML = ''; $('stage2').hidden = true;
+      $('go').disabled = true; $('msg').innerHTML = '<span class="loading"><span class="spin" aria-hidden="true"></span>Analysing… a long recording is scanned in pieces and can take a minute.</span>'; out.innerHTML = ''; $('stage2').hidden = true;
       const q = new URLSearchParams({ temp_c: $('temp').value, fmin: $('fmin').value, fmax: $('fmax').value });
       if ($('start').value.trim()) q.set('clip_start', $('start').value.trim());
       try {
         const r = await fetch('api/analyze?' + q, { method: 'POST', body: file });
         const j = await r.json();
         if (!r.ok) { $('msg').innerHTML = ''; out.innerHTML = '<div class="state error" role="alert"><div class="h3">Could not analyse that clip</div><p>' + esc(j.error || r.status) + '</p></div>' + (j.caveat ? '<div class="notice warn">' + esc(j.caveat) + '</div>' : ''); return; }
-        $('msg').textContent = ''; last = j; render(j);
+        $('msg').textContent = ''; last = j; settingsQ = q; render(j);
       } catch (e) { $('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
       finally { $('go').disabled = false; }
     };
 
+    let settingsQ = null, scanId = null;
+    const mmss = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+    function scanHtml(sc) {
+      let h = '<section class="card"><h2 class="h3" style="margin-bottom:4px">Passes found in this recording</h2><p class="muted small" style="margin:0 0 8px">' + mmss(sc.duration_s) + ' scanned. Loudness above the background (taller = louder); click a marker or a row to fit that pass.</p>' +
+        '<canvas id="env" width="1000" height="90" role="img" aria-label="Loudness over time with the detected passes marked"></canvas><div class="table-wrap"><table class="kv"><tr><th>Time</th><th>Loudness</th><th>Fit</th><th></th></tr>';
+      sc.passes.forEach((p, i) => {
+        const fit = p.speed_ms != null ? p.speed_kmh + ' km/h, ' + (p.closest_distance_m != null ? p.closest_distance_m + ' m' : '') + ' <span class="badge ' + p.confidence + '">' + p.confidence + '</span>' : '<span class="muted">no tonal line to fit</span>';
+        h += '<tr><td>' + mmss(p.closest_approach_s) + '</td><td>' + (p.loudness_above_background_db != null ? '+' + p.loudness_above_background_db + ' dB' : '-') + '</td><td>' + fit + '</td><td><button class="btn sm seg" type="button" data-i="' + i + '">Fit this pass</button></td></tr>';
+      });
+      return h + '</table></div><p class="muted small" style="margin:8px 0 0">' + esc(sc.note) + '</p></section>';
+    }
+    function drawEnv(sc) {
+      const cv = $('env'); if (!cv) return; const g = cv.getContext('2d'), W = cv.width, H = cv.height, e = sc.envelope_db, mx = Math.max(12, ...e);
+      g.clearRect(0, 0, W, H); g.fillStyle = css('--ink-3') || '#888';
+      e.forEach((v, i) => { const h = Math.max(1, Math.max(0, v) / mx * (H - 6)); g.fillRect(i * W / e.length, H - h, Math.max(1, W / e.length - 0.5), h); });
+      g.fillStyle = css('--accent') || '#0a0';
+      sc.passes.forEach((p, i) => { const x = p.closest_approach_s / sc.duration_s * W; g.fillRect(x - 1, 0, 3, H); g.font = '12px sans-serif'; g.fillText(String(i + 1), x + 4, 12); });
+      cv.style.cursor = 'pointer';
+      cv.onclick = ev => { const r = cv.getBoundingClientRect(), t = (ev.clientX - r.left) / r.width * sc.duration_s; let bi = 0; sc.passes.forEach((p, i) => { if (Math.abs(p.closest_approach_s - t) < Math.abs(sc.passes[bi].closest_approach_s - t)) bi = i; }); fitPass(sc, bi); };
+      document.querySelectorAll('button.seg').forEach(b => b.onclick = () => fitPass(sc, +b.dataset.i));
+    }
+    async function fitPass(sc, i) {
+      const p = sc.passes[i]; const q = new URLSearchParams(settingsQ); q.set('id', scanId); q.set('from', p.from_s); q.set('to', p.to_s);
+      $('msg').innerHTML = '<span class="loading"><span class="spin" aria-hidden="true"></span>Fitting pass ' + (i + 1) + '…</span>';
+      try {
+        const r = await fetch('api/segment?' + q), j = await r.json();
+        $('msg').textContent = '';
+        if (!r.ok) { $('seg').innerHTML = '<div class="state error" role="alert"><div class="h3">No Doppler curve for pass ' + (i + 1) + '</div><p>' + esc(j.error || r.status) + '</p></div>'; return; }
+        j.scan = sc; last = j; render(j);
+      } catch (e) { $('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+    }
+
     function render(j) {
+      if (j.scan && j.scan.id) scanId = j.scan.id;
+      const pre = j.scan ? scanHtml(j.scan) + '<div id="seg"></div>' : '';
+      if (j.no_fit) { out.innerHTML = pre; drawEnv(j.scan); $('stage2').hidden = true; return; }
       const L = j.lines[j.best_line], f = L.fit;
-      let h = '<div class="notice warn" role="note"><div><b>This is an estimate.</b> ' + esc(j.caveat) + '</div></div>';
+      let h = pre + '<div class="notice warn" role="note"><div><b>This is an estimate.</b> ' + esc(j.caveat) + '</div></div>' + (j.window ? '<p class="muted small" style="margin:8px 0 0">Showing the stretch from ' + mmss(j.window.start_s) + ' to ' + mmss(j.window.end_s) + ' of the recording; times below are within that stretch.</p>' : '');
       h += '<section class="card"><div class="card-head"><h2 class="h3">Result</h2><span class="badge ' + L.confidence + '">' + L.confidence + ' confidence</span></div><div class="table-wrap"><table class="kv">' +
         '<tr><th>Source tone frequency (f0)</th><td>' + pm(f.source_frequency_hz, 'Hz', 0) + '</td></tr>' +
         '<tr><th>Speed</th><td>' + pm(f.speed_ms, 'm/s', 0) + ' &nbsp; (' + f.speed_kmh + ' km/h, ' + f.speed_knots + ' kt), relative to the air</td></tr>' +
@@ -138,6 +173,7 @@
       h += '<section class="card"><h2 class="h3" style="margin-bottom:4px">Clip</h2><p class="muted small" style="margin:0">' + j.clip.duration_s + ' s, ' + j.clip.sample_rate_hz + ' Hz, ' + j.clip.channels + ' ch; speed of sound ' + j.settings.speed_of_sound_ms + ' m/s; ' + j.settings.bin_hz + ' Hz bins. ' + esc(j.spectrogram.note) + '. Raw JSON via <code>POST api/analyze</code>.</p></section>';
       out.innerHTML = h;
       $('cpj').onclick = async () => { try { const { spectrogram, lines, ...rest } = j; await navigator.clipboard.writeText(JSON.stringify({ ...rest, best: lines[j.best_line].fit }, null, 2)); toast('JSON copied (without the spectrogram image)'); } catch { toast('Copy failed: the browser blocked clipboard access', 'err'); } };
+      if (j.scan) drawEnv(j.scan);
       draw();
       $('stage2').hidden = false;
     }

@@ -8,13 +8,19 @@ use crate::{
     model::{self, FitResult, Point, freq_at},
 };
 
-pub const MAX_SECONDS: f64 = 180.0;
+/// Longest recording accepted (decoded and decimated in memory; passes are searched for in clips above SCAN_ABOVE_S).
+pub const MAX_SECONDS: f64 = 7200.0;
+/// Clips longer than this are scanned in windows for passes instead of fitted as a single pass.
+pub const SCAN_ABOVE_S: f64 = 150.0;
+const WIN_S: f64 = 60.0;
+const HOP_S: f64 = 30.0;
 
 pub const CAVEAT: &str = "This is an ESTIMATE from one microphone, assuming a constant-speed straight-line pass, a still atmosphere and a \
 steady tone. Speed is relative to the air (wind changes it), distance is slant range to the track (height and sideways offset cannot be \
 separated), and no direction or location is derived. Use it to test whether a clip's claim (aircraft type, speed, place, time) is plausible, \
 not as proof of anything.";
 
+#[derive(Clone)]
 pub struct Options {
     pub temp_c: f64,
     pub fmin: f64,
@@ -103,12 +109,171 @@ fn spectrogram_image(sp: &dsp::Spectrogram) -> Value {
     })
 }
 
+/// Decode and analyse. A clip up to SCAN_ABOVE_S is fitted as one pass; a longer one is scanned for passes.
 pub fn analyze(data: Vec<u8>, bytes: usize, o: &Options) -> Result<Value, String> {
-    let audio = decode::decode(data, MAX_SECONDS)?;
+    analyze_auto(data, bytes, o).map(|r| r.0)
+}
+
+pub fn analyze_auto(data: Vec<u8>, bytes: usize, o: &Options) -> Result<(Value, Option<decode::Audio>), String> {
+    let audio = decode::decode(data, MAX_SECONDS, o.fmax)?;
+    let dur = audio.samples.len() as f64 / audio.sample_rate as f64;
+    if dur <= SCAN_ABOVE_S {
+        let v = analyze_samples(&audio.samples, audio.sample_rate, audio.channels, bytes, o)?;
+        return Ok((v, None));
+    }
+    let v = scan(&audio, bytes, o)?;
+    Ok((v, Some(audio)))
+}
+
+/// Analyse part of an already decoded recording (seconds from the start).
+pub fn analyze_segment(audio: &decode::Audio, from: f64, to: f64, o: &Options) -> Result<Value, String> {
     let fs = audio.sample_rate as f64;
-    let duration = audio.samples.len() as f64 / fs;
+    let a = ((from.max(0.0)) * fs) as usize;
+    let b = ((to * fs) as usize).min(audio.samples.len());
+    if b <= a + (fs as usize) {
+        return Err("segment is empty or shorter than a second".into());
+    }
+    let mut o2 = o.clone();
+    o2.clip_start = o.clip_start.map(|s| s + from.max(0.0));
+    let mut v = analyze_samples(&audio.samples[a..b], audio.sample_rate, audio.channels, 0, &o2)?;
+    v["window"] = json!({ "start_s": round(from.max(0.0), 1), "end_s": round(b as f64 / fs, 1) });
+    Ok(v)
+}
+
+fn level_rank(c: &str) -> u8 {
+    match c { "high" => 3, "medium" => 2, _ => 1 }
+}
+
+/// Slide a window over a long recording, fit each, keep the credible passes (best first, one per pass).
+fn scan(audio: &decode::Audio, bytes: usize, o: &Options) -> Result<Value, String> {
+    let fs = audio.sample_rate as f64;
+    let total = audio.samples.len() as f64 / fs;
+    let mut wins = Vec::new();
+    let mut t = 0.0;
+    while t + 10.0 < total {
+        wins.push((t, (t + WIN_S).min(total)));
+        t += HOP_S;
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let found = std::sync::Mutex::new(Vec::<(f64, f64, Value)>::new());
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 3);
+    std::thread::scope(|sc| {
+        for _ in 0..threads {
+            sc.spawn(|| loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(&(a, b)) = wins.get(i) else { break };
+                if let Ok(v) = analyze_segment(audio, a, b, o) {
+                    found.lock().unwrap().push((a, b, v));
+                }
+            });
+        }
+    });
+    let c: Vec<(f64, f64, Value)> = found.into_inner().unwrap();
+    let (env, events) = loudness_events(audio);
+    let score = |v: &Value| {
+        let bi = v["best_line"].as_u64().unwrap_or(0) as usize;
+        let l = &v["lines"][bi];
+        (level_rank(v["summary"]["confidence"].as_str().unwrap_or("low")), l["median_snr_db"].as_f64().unwrap_or(0.0) * l["points_used"].as_f64().unwrap_or(0.0))
+    };
+    let tca = |a: f64, v: &Value| a + v["summary"]["fit"]["closest_approach_heard_s"]["value"].as_f64().unwrap_or(0.0);
+    // One entry per pass: (heard closest approach or loudness peak, loudness excess dB, window start, optional fit)
+    struct Item { t: f64, loud: Option<f64>, from: f64, fit: Option<Value>, rank: (u8, f64) }
+    let mut items: Vec<Item> = Vec::new();
+    // credible tonal fits from the blind windows (best first, one per ~25 s)
+    let mut cr: Vec<&(f64, f64, Value)> = c.iter().collect();
+    cr.sort_by(|x, y| { let (sx, sy) = (score(&x.2), score(&y.2)); sy.0.cmp(&sx.0).then(sy.1.total_cmp(&sx.1)) });
+    for (a, _, v) in cr {
+        let tc = tca(*a, v);
+        if items.iter().any(|i| (i.t - tc).abs() < 25.0) {
+            continue;
+        }
+        if score(v).0 < 2 && items.iter().filter(|i| i.rank.0 < 2).count() >= 3 {
+            continue;
+        }
+        items.push(Item { t: tc, loud: None, from: *a, fit: Some(v.clone()), rank: score(v) });
+    }
+    // loud events: fit a window around each one (the pass is where the sound swells, tonal or not)
+    for &(pt, excess) in events.iter().take(8) {
+        if let Some(it) = items.iter_mut().find(|i| (i.t - pt).abs() < 25.0) {
+            it.loud = Some(excess);
+            continue;
+        }
+        let (from, to) = ((pt - 40.0).max(0.0), (pt + 40.0).min(total));
+        let fit = analyze_segment(audio, from, to, o).ok();
+        let rank = fit.as_ref().map(&score).unwrap_or((0, 0.0));
+        let t = fit.as_ref().map(|v| tca(from, v)).unwrap_or(pt);
+        items.push(Item { t, loud: Some(excess), from, fit, rank: (rank.0.max(if rank.0 > 0 { 1 } else { 0 }), rank.1) });
+    }
+    // credible fits first; then by how loud the event is (a low-confidence fit never outranks a louder event)
+    items.sort_by(|x, y| (y.rank.0 >= 2).cmp(&(x.rank.0 >= 2)).then(y.loud.unwrap_or(-1.0).total_cmp(&x.loud.unwrap_or(-1.0))).then(y.rank.1.total_cmp(&x.rank.1)));
+    items.truncate(10);
+    if items.is_empty() {
+        return Err(format!("scanned {:.0} minutes and found no loud event and no clear flyby. Try a wider Hz range, or trim to where you know a pass happens.", total / 60.0));
+    }
+    let list: Vec<Value> = items.iter().map(|i| {
+        let f = i.fit.as_ref().map(|v| &v["summary"]["fit"]);
+        let conf = i.fit.as_ref().map(|v| v["summary"]["confidence"].clone()).unwrap_or(json!("none"));
+        json!({
+            "closest_approach_s": round(i.t, 1), "from_s": round((i.t - 30.0).max(0.0), 1), "to_s": round((i.t + 30.0).min(total), 1),
+            "loudness_above_background_db": i.loud.map(|x| round(x, 1)),
+            "confidence": conf,
+            "speed_ms": f.map(|f| f["speed_ms"]["value"].clone()), "speed_kmh": f.map(|f| f["speed_kmh"].clone()),
+            "closest_distance_m": f.map(|f| f["closest_distance_m"]["value"].clone()), "source_frequency_hz": f.map(|f| f["source_frequency_hz"]["value"].clone()),
+        })
+    }).collect();
+    let scan_info = json!({ "duration_s": round(total, 1), "windows": wins.len(), "passes": list, "envelope_db": env,
+        "note": "Passes are ranked by how well a Doppler curve fits, then by how far above the background the sound rises. A pass of broadband noise (jet or road noise) can be loud without a tonal line to fit; those are listed with confidence none." });
+    let first = items.into_iter().find(|i| i.fit.is_some());
+    let mut best = match first {
+        Some(i) => {
+            let mut v = i.fit.unwrap();
+            let a = i.from;
+            v["window"] = json!({ "start_s": round(a, 1), "end_s": round(a + WIN_S.max(80.0), 1).min(round(total, 1)) });
+            v
+        }
+        None => json!({ "ok": true, "caveat": CAVEAT, "clip": { "clip_start_unix": o.clip_start }, "no_fit": true }),
+    };
+    best["clip"]["bytes"] = json!(bytes);
+    best["clip"]["duration_s"] = json!(round(total, 1));
+    best["scan"] = scan_info;
+    Ok(best)
+}
+
+/// Loudness per second (dB, 100 Hz-fmax signal as decoded) above a rolling-median background, and its peaks.
+/// Returns (envelope downsampled to <= 720 points of excess dB, [(peak time s, excess dB)] strongest first).
+fn loudness_events(audio: &decode::Audio) -> (Vec<f64>, Vec<(f64, f64)>) {
+    let fs = audio.sample_rate as usize;
+    let n = audio.samples.len() / fs;
+    let db: Vec<f64> = (0..n).map(|i| {
+        let w = &audio.samples[i * fs..(i + 1) * fs];
+        let ms = w.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / fs as f64;
+        10.0 * (ms + 1e-12).log10()
+    }).collect();
+    let half = 90usize;
+    let ex: Vec<f64> = (0..n).map(|i| {
+        let (a, b) = (i.saturating_sub(half), (i + half + 1).min(n));
+        let mut w: Vec<f64> = db[a..b].to_vec();
+        w.sort_by(f64::total_cmp);
+        db[i] - w[w.len() / 2]
+    }).collect();
+    let mut peaks: Vec<(f64, f64)> = Vec::new();
+    for i in 0..n {
+        let (a, b) = (i.saturating_sub(15), (i + 16).min(n));
+        if ex[i] >= 5.0 && ex[a..b].iter().all(|&e| e <= ex[i]) {
+            peaks.push((i as f64 + 0.5, ex[i]));
+        }
+    }
+    peaks.sort_by(|x, y| y.1.total_cmp(&x.1));
+    let step = n.div_ceil(720).max(1);
+    let env: Vec<f64> = ex.chunks(step).map(|c| round(c.iter().cloned().fold(f64::MIN, f64::max), 1)).collect();
+    (env, peaks)
+}
+
+pub fn analyze_samples(samples: &[f32], sample_rate: u32, channels: usize, bytes: usize, o: &Options) -> Result<Value, String> {
+    let fs = sample_rate as f64;
+    let duration = samples.len() as f64 / fs;
     let c = model::sound_speed(o.temp_c);
-    let sp = dsp::spectrogram(&audio.samples, fs, o.fmin, o.fmax);
+    let sp = dsp::spectrogram(samples, fs, o.fmin, o.fmax);
     if sp.contrast.len() < 12 {
         return Err("clip too short for a spectrogram".into());
     }
@@ -200,7 +365,7 @@ pub fn analyze(data: Vec<u8>, bytes: usize, o: &Options) -> Result<Value, String
     Ok(json!({
         "ok": true,
         "caveat": CAVEAT,
-        "clip": { "bytes": bytes, "duration_s": round(duration, 2), "sample_rate_hz": audio.sample_rate, "channels": audio.channels, "clip_start_unix": o.clip_start },
+        "clip": { "bytes": bytes, "duration_s": round(duration, 2), "sample_rate_hz": sample_rate, "channels": channels, "clip_start_unix": o.clip_start },
         "settings": { "speed_of_sound_ms": round(c, 1), "temperature_c": o.temp_c, "freq_range_hz": [o.fmin, o.fmax], "bin_hz": round(sp.bin_hz, 2) },
         "best_line": bi,
         "summary": { "fit": bl["fit"].clone(), "confidence": bl["confidence"].clone(), "warnings": bl["warnings"].clone() },

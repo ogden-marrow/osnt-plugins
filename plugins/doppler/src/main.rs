@@ -23,13 +23,15 @@ use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 
 const PAGE: &str = include_str!("../assets/index.html");
-const MAX_BYTES: usize = 40 * 1024 * 1024;
+const MAX_BYTES: usize = 256 * 1024 * 1024;
 const UA: &str = "osnt-doppler/0.1 (flyby Doppler check; personal OSINT hub)";
 
 struct AppState {
     agent: ureq::Agent,
     adsb_base: Option<String>,
     slots: Semaphore,
+    /// The last long recording, decoded, so another pass can be fitted without uploading it again.
+    recent: std::sync::Mutex<Option<(String, Arc<decode::Audio>)>>,
 }
 type Shared = Arc<AppState>;
 type ApiErr = (StatusCode, Json<Value>);
@@ -48,10 +50,7 @@ struct AnalyzeQuery {
     clip_start: Option<String>,
 }
 
-async fn analyze(State(st): State<Shared>, Query(q): Query<AnalyzeQuery>, body: Bytes) -> Result<Json<Value>, ApiErr> {
-    if body.is_empty() {
-        return Err(bad("empty body: POST the raw audio file bytes (WAV, MP3, AAC/M4A, OGG, FLAC)"));
-    }
+fn options_from(q: &AnalyzeQuery) -> Result<analysis::Options, ApiErr> {
     let mut o = analysis::Options::default();
     if let Some(t) = q.temp_c {
         if !(-60.0..=60.0).contains(&t) {
@@ -74,15 +73,57 @@ async fn analyze(State(st): State<Shared>, Query(q): Query<AnalyzeQuery>, body: 
     if let Some(s) = q.clip_start.as_deref().filter(|s| !s.is_empty()) {
         o.clip_start = Some(candidates::parse_time(s).ok_or_else(|| bad("clip_start: use unix seconds or YYYY-MM-DDTHH:MM:SSZ (UTC)"))?);
     }
+    Ok(o)
+}
+
+async fn analyze(State(st): State<Shared>, Query(q): Query<AnalyzeQuery>, body: Bytes) -> Result<Json<Value>, ApiErr> {
+    if body.is_empty() {
+        return Err(bad("empty body: POST the raw audio file bytes (WAV, MP3, AAC/M4A, OGG, FLAC)"));
+    }
+    let o = options_from(&q)?;
     let _permit = st.slots.acquire().await.map_err(|_| bad("busy"))?;
     let n = body.len();
-    let res = tokio::task::spawn_blocking(move || analysis::analyze(body.to_vec(), n, &o))
+    let res = tokio::task::spawn_blocking(move || analysis::analyze_auto(body.to_vec(), n, &o))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "ok": false, "error": e.to_string() }))))?;
     match res {
-        Ok(v) => Ok(Json(v)),
+        Ok((mut v, audio)) => {
+            if let Some(a) = audio {
+                let id = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+                v["scan"]["id"] = json!(id);
+                *st.recent.lock().unwrap() = Some((id, Arc::new(a)));
+            }
+            Ok(Json(v))
+        }
         Err(e) => Err((StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "ok": false, "error": e, "caveat": analysis::CAVEAT })))),
     }
+}
+
+#[derive(Deserialize)]
+struct SegmentQuery {
+    id: String,
+    from: f64,
+    to: f64,
+    #[serde(flatten)]
+    opts: AnalyzeQuery,
+}
+
+/// Fit another stretch of the recording last uploaded to `/api/analyze` (kept in memory, one at a time).
+async fn segment(State(st): State<Shared>, Query(q): Query<SegmentQuery>) -> Result<Json<Value>, ApiErr> {
+    let o = options_from(&q.opts)?;
+    let audio = st.recent.lock().unwrap().as_ref().filter(|(id, _)| *id == q.id).map(|(_, a)| a.clone());
+    let Some(audio) = audio else {
+        return Err(bad("that recording is no longer held in memory; upload it again"));
+    };
+    if !(q.from.is_finite() && q.to.is_finite() && q.to - q.from >= 2.0 && q.to - q.from <= 300.0) {
+        return Err(bad("segment must be 2 to 300 seconds long"));
+    }
+    let _permit = st.slots.acquire().await.map_err(|_| bad("busy"))?;
+    let (from, to) = (q.from, q.to);
+    let res = tokio::task::spawn_blocking(move || analysis::analyze_segment(&audio, from, to, &o))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "ok": false, "error": e.to_string() }))))?;
+    res.map(Json).map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "ok": false, "error": e, "caveat": analysis::CAVEAT }))))
 }
 
 #[derive(Deserialize)]
@@ -242,6 +283,7 @@ fn router(state: Shared) -> Router {
         .route("/", get(page))
         .route("/tools", get(tools))
         .route("/api/analyze", post(analyze))
+        .route("/api/segment", get(segment))
         .route("/api/candidates", get(find_candidates))
         .route("/api/predict", get(predict))
         .route("/api/status", get(status))
@@ -252,7 +294,7 @@ fn router(state: Shared) -> Router {
 #[tokio::main]
 async fn main() {
     let adsb_base = env::var("OSNT_DOPPLER_ADSB_HISTORY").ok().and_then(|u| candidates::loopback_base(&u));
-    let state = Arc::new(AppState { agent: osnt_common::http_agent(UA), adsb_base, slots: Semaphore::new(2) });
+    let state = Arc::new(AppState { agent: osnt_common::http_agent(UA), adsb_base, slots: Semaphore::new(2), recent: std::sync::Mutex::new(None) });
     let addr: SocketAddr = env::var("OSNT_DOPPLER_BIND").unwrap_or_else(|_| "127.0.0.1:8121".into()).parse().expect("bind addr");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     println!("doppler plugin on http://{addr}");

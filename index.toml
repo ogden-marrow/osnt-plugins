@@ -74,7 +74,7 @@ path = "plugins/packages"
 id = "doppler"
 name = "Doppler flyby check"
 description = "Estimate speed, closest approach and distance of an aircraft or vehicle pass from the Doppler shift in a recording, to sanity-check a clip's claims."
-version = "0.1.1"
+version = "0.2.0"
 path = "plugins/doppler"
 
 [[plugin]]

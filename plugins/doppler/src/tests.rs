@@ -174,12 +174,12 @@ fn pure_noise_is_rejected_or_low_confidence() {
 }
 
 #[test]
-fn garbage_and_overlong_input_are_rejected() {
+fn garbage_and_silent_long_input_are_rejected() {
     assert!(analysis::analyze(vec![1, 2, 3, 4, 5, 6, 7, 8], 8, &opts()).is_err());
     let x = vec![0.0f32; 22050 * 200];
     let wav = wav16(&x, 22050);
     let e = analysis::analyze(wav.clone(), wav.len(), &opts()).unwrap_err();
-    assert!(e.contains("longer"), "{e}");
+    assert!(e.contains("no clear flyby"), "{e}");
 }
 
 #[tokio::test]
@@ -187,7 +187,7 @@ async fn candidates_degrade_gracefully_when_adsb_history_is_absent() {
     use std::sync::Arc;
     use axum::{body::Body, http::Request};
     use tower_service_shim::call;
-    let st = Arc::new(crate::AppState { agent: osnt_common::http_agent("test"), adsb_base: Some("http://127.0.0.1:1".into()), slots: tokio::sync::Semaphore::new(1) });
+    let st = Arc::new(crate::AppState { agent: osnt_common::http_agent("test"), adsb_base: Some("http://127.0.0.1:1".into()), slots: tokio::sync::Semaphore::new(1), recent: std::sync::Mutex::new(None) });
     let uri = "/api/candidates?speed_ms=200&clip_from=2026-01-01T10:00:00Z&clip_to=2026-01-01T10:30:00Z&lat=51&lon=0&radius_km=5";
     let (status, body) = call(crate::router(st), Request::get(uri).body(Body::empty()).unwrap()).await;
     assert_eq!(status, 200);
@@ -200,7 +200,7 @@ async fn tools_and_predict_endpoints_work() {
     use std::sync::Arc;
     use axum::{body::Body, http::Request};
     use tower_service_shim::call;
-    let st = Arc::new(crate::AppState { agent: osnt_common::http_agent("test"), adsb_base: None, slots: tokio::sync::Semaphore::new(1) });
+    let st = Arc::new(crate::AppState { agent: osnt_common::http_agent("test"), adsb_base: None, slots: tokio::sync::Semaphore::new(1), recent: std::sync::Mutex::new(None) });
     let (_, tools) = call(crate::router(st.clone()), Request::get("/tools").body(Body::empty()).unwrap()).await;
     assert!(tools.as_array().unwrap().len() >= 2);
     let (s, p) = call(crate::router(st), Request::get("/api/predict?f0=1000&speed_ms=200&distance_m=300").body(Body::empty()).unwrap()).await;
@@ -246,4 +246,16 @@ fn debug_track() {
     for (i, (t, f, snr)) in tr[0].points.iter().enumerate() {
         if i % 20 == 0 { println!("t {t:.2} f {f:.1} truth {:.1} snr {snr:.1}", freq_at(*t, &s.p, C)); }
     }
+}
+
+#[test]
+fn a_pass_is_found_inside_a_long_recording() {
+    let s = Synth { p: Params { f0: 520.0, v: 120.0, d: 90.0, tca: 200.0 }, fs: 16000, secs: 400.0, harmonics: &[(1.0, 1.0), (2.0, 0.6)], noise: 0.6, hum: true };
+    let wav = wav16(&render(&s, 1), s.fs);
+    let r = analysis::analyze(wav.clone(), wav.len(), &opts()).expect("scan");
+    let passes = r["scan"]["passes"].as_array().expect("scan list");
+    let tc = passes[0]["closest_approach_s"].as_f64().unwrap();
+    assert!((tc - 200.0).abs() < 8.0, "closest approach {tc}");
+    let v = passes[0]["speed_ms"].as_f64().unwrap();
+    assert!((v - 120.0).abs() < 25.0, "speed {v}");
 }

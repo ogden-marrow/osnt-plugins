@@ -1,9 +1,9 @@
 id = "doppler"
 name = "Doppler flyby check"
-description = "Estimate speed, closest approach and distance of an aircraft or vehicle pass from the Doppler shift in a recording, to sanity-check a clip's claims."
+description = "Estimate speed, closest approach and distance of an aircraft or vehicle pass from the Doppler shift in a recording (long recordings are scanned for passes), to sanity-check a clip's claims."
 grid = "Media & Verification"
 port = 8121
-version = "0.1.1"
+version = "0.2.0"
 
 # `requires` is deliberately not declared: the repo docs do not describe an optional dependency, and doppler works on its own.
 # Stage 2 uses the adsb-history loopback API when it is installed and reports "unavailable" when it is not.

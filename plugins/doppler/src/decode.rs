@@ -15,7 +15,7 @@ pub struct Audio {
 
 /// Decode `data` to a mono signal. Rejects clips longer than `max_seconds` (the decoder stops early, so a huge
 /// compressed file cannot blow up memory).
-pub fn decode(data: Vec<u8>, max_seconds: f64) -> Result<Audio, String> {
+pub fn decode(data: Vec<u8>, max_seconds: f64, fmax: f64) -> Result<Audio, String> {
     let mss = MediaSourceStream::new(Box::new(Cursor::new(data)), Default::default());
     let probed = symphonia::default::get_probe()
         .format(&Hint::new(), mss, &FormatOptions::default(), &MetadataOptions::default())
@@ -34,7 +34,11 @@ pub fn decode(data: Vec<u8>, max_seconds: f64) -> Result<Audio, String> {
     if sample_rate < 4000 {
         return Err("sample rate below 4 kHz is not useful for this analysis".into());
     }
-    let max_samples = (max_seconds * sample_rate as f64) as usize;
+    // Long recordings are decimated (box average) to a little over 2x fmax so an hour fits in memory.
+    let dec = ((sample_rate as f64 / (2.4 * fmax.max(100.0))).floor() as usize).max(1);
+    let out_rate = sample_rate / dec as u32;
+    let max_samples = (max_seconds * out_rate as f64) as usize;
+    let (mut acc, mut cnt) = (0.0f32, 0usize);
     let mut out: Vec<f32> = Vec::new();
     let mut channels = 1usize;
     loop {
@@ -56,14 +60,20 @@ pub fn decode(data: Vec<u8>, max_seconds: f64) -> Result<Audio, String> {
         let mut buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
         buf.copy_interleaved_ref(decoded);
         for frame in buf.samples().chunks(channels) {
-            out.push(frame.iter().sum::<f32>() / channels as f32);
+            acc += frame.iter().sum::<f32>() / channels as f32;
+            cnt += 1;
+            if cnt == dec {
+                out.push(acc / dec as f32);
+                acc = 0.0;
+                cnt = 0;
+            }
         }
         if out.len() > max_samples {
             return Err(format!("clip is longer than {max_seconds:.0} s; trim it around the pass and retry"));
         }
     }
-    if out.len() < sample_rate as usize / 2 {
+    if out.len() < out_rate as usize / 2 {
         return Err("clip is too short (under 0.5 s)".into());
     }
-    Ok(Audio { samples: out, sample_rate, channels })
+    Ok(Audio { samples: out, sample_rate: out_rate, channels })
 }
