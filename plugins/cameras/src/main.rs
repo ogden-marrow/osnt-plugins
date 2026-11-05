@@ -45,7 +45,7 @@ struct Camera {
 
 #[derive(Deserialize)]
 struct Config {
-    #[serde(rename = "camera")]
+    #[serde(rename = "camera", default)]
     cameras: Vec<Camera>,
 }
 
