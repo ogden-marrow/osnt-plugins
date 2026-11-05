@@ -102,10 +102,10 @@ fn dt_get(agent: &ureq::Agent, url: &str) -> Result<Option<Value>> {
 }
 
 /// Positions around a point from Digitraffic, cached briefly per rounded query, and recorded in the store.
-async fn fetch_near(s: &Shared, lat: f64, lon: f64, radius_km: u32) -> Result<Arc<Vec<Pos>>> {
+async fn fetch_near(s: &Shared, lat: f64, lon: f64, radius_km: u32, fresh: bool) -> Result<Arc<Vec<Pos>>> {
     let (lat, lon) = ((lat * 20.0).round() / 20.0, (lon * 20.0).round() / 20.0);
     let key = format!("{lat}/{lon}/{radius_km}");
-    if let Some((at, v)) = s.near_cache.lock().unwrap().get(&key) {
+    if let Some((at, v)) = s.near_cache.lock().unwrap().get(&key).filter(|_| !fresh) {
         if at.elapsed() < NEAR_TTL {
             return Ok(v.clone());
         }
@@ -221,6 +221,8 @@ struct NearQuery {
     lat: f64,
     lon: f64,
     radius: Option<f64>,
+    /// `1` skips the short result cache (the page's Refresh buttons).
+    fresh: Option<String>,
 }
 
 fn bbox_around(lat: f64, lon: f64, km: f64) -> [f64; 4] {
@@ -248,7 +250,7 @@ async fn near_handler(State(s): State<Shared>, method: Method, uri: Uri, headers
     let mut notes = vec![];
     let mut stream_state = json!("not needed");
     if fi_overlap {
-        if let Err(e) = fetch_near(&s, q.lat, q.lon, radius.ceil() as u32).await {
+        if let Err(e) = fetch_near(&s, q.lat, q.lon, radius.ceil() as u32, q.fresh.as_deref() == Some("1")).await {
             notes.push(format!("Digitraffic: {e:#}"));
         }
         let _ = ensure_info(&s).await;
@@ -282,12 +284,14 @@ async fn near_handler(State(s): State<Shared>, method: Method, uri: Uri, headers
         notes.push("Positions come from Digitraffic's land-based receivers; vessels beyond their range are not listed.".into());
     }
     let st = s.store.lock().unwrap();
-    let list: Vec<Value> = st.within(q.lat, q.lon, radius, 30 * 60_000).into_iter().take(MAX_RESULTS).map(|(d, p)| {
+    let all = st.within(q.lat, q.lon, radius, 30 * 60_000);
+    let total = all.len();
+    let list: Vec<Value> = all.into_iter().take(MAX_RESULTS).map(|(d, p)| {
         let mut v = vessel_json(p, st.info.get(&p.mmsi));
         v["distance_km"] = json!((d * 10.0).round() / 10.0);
         v
     }).collect();
-    Ok(Json(json!({ "count": list.len(), "radius_km": radius, "stream": stream_state, "notes": notes, "vessels": list })))
+    Ok(Json(json!({ "count": list.len(), "total": total, "truncated": total > list.len(), "max_age_min": 30, "lat": q.lat, "lon": q.lon, "radius_km": radius, "stream": stream_state, "notes": notes, "vessels": list })))
 }
 
 fn parse_id(id: &str) -> Result<u32, ApiError> {

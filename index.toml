@@ -228,7 +228,7 @@ path = "plugins/link-graph"
 id = "ais-vessels"
 name = "Vessels (AIS)"
 description = "Live ship positions and particulars by MMSI, IMO or name: Finland's Digitraffic AIS (Baltic) with no key, optional AISStream.io worldwide feed and Global Fishing Watch events. Vessels as objects only."
-version = "0.1.1"
+version = "0.2.0"
 path = "plugins/ais-vessels"
 
 [[plugin]]

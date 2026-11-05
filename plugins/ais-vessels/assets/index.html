@@ -22,6 +22,13 @@
     .big { font-size: 18px; font-weight: 650; }
     .links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     .vsl svg { filter: drop-shadow(0 0 1px rgba(0,0,0,.7)); }
+    .area { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; border-bottom: 1px solid var(--edge); }
+    .area .grow { flex: 1; min-width: 0; }
+    .area .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--ok); }
+    .area.loading .dot { background: #e8a317; animation: pulse 1s infinite; }
+    .area.error .dot { background: var(--err); }
+    @keyframes pulse { 50% { opacity: .25; } }
+    @media (prefers-reduced-motion: reduce) { .area.loading .dot { animation: none; } }
     #panelBtn { display: none; }
     @media (max-width: 520px) { .bar-end .status { display: none; } }
     @media (max-width: 700px) {
@@ -52,6 +59,9 @@
       <div>
         <h2>In view</h2>
         <div class="legend"><span><i style="background:#2e9d6f"></i>cargo</span><span><i style="background:#d9473f"></i>tanker</span><span><i style="background:#2f7bd9"></i>passenger</span><span><i style="background:#e8a317"></i>fishing</span><span><i style="background:#8a5ad9"></i>service</span><span><i style="background:#8a97a0"></i>other</span></div>
+        <div class="row" style="gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap"><button id="refreshAll" class="btn sm primary">Refresh view</button><label class="small" style="display:flex;gap:6px;align-items:center"><input id="auto" type="checkbox" checked> Auto-refresh every 10 s</label></div>
+        <div id="areas" style="margin-top:8px" aria-live="polite"></div>
+        <div class="small muted" style="margin-top:6px">Faded markers: last report over 10 minutes ago. Ships silent for 30 minutes are dropped.</div>
         <div id="count" class="muted" style="margin-top:6px" aria-live="polite"></div>
         <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button id="geo" class="btn sm" disabled>GeoJSON</button><button id="share" class="btn sm">Copy link</button></div>
         <div id="notes" class="small muted"></div>
@@ -98,20 +108,68 @@
       }
       for (const [id, m] of markers) if (!keep.has(id)) { layer.removeLayer(m); markers.delete(id); }
     }
-    async function refresh() {
-      if (busyView) return; busyView = true;
-      try {
-        const c = map.getCenter(), b = map.getBounds();
-        const km = Math.min(250, Math.max(2, c.distanceTo(b.getNorthEast()) / 1000));
-        const d = await api(`api/near?lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}&radius=${Math.ceil(km)}`);
-        draw(d.vessels); lastList = d.vessels; $('geo').disabled = !d.vessels.length; saveView();
-        $('count').textContent = `${d.count} vessels within ${Math.round(d.radius_km)} km${c.distanceTo(b.getNorthEast()) / 1000 > 250 ? ' (zoom in to see more)' : ''}`;
-        $('notes').innerHTML = d.notes.map(esc).join('<br>');
-        const s = d.stream; $('status').textContent = typeof s === 'object' ? (s.connected ? 'live · AISStream' : 'AISStream connecting…') : 'live · ' + new Date().toLocaleTimeString();
-        if (selected && markers.has(selected)) showTrack(selected);
-      } catch (e) { $('status').textContent = 'error'; $('count').textContent = e.message; }
-      busyView = false;
+    // The view is split into up to 3x3 areas (each at most 250 km from its centre, the server's limit), loaded in
+    // parallel. Each area is drawn on the map and listed in the panel with its own state and Retry button.
+    let tiles = [], cover, gen = 0, autoOn = true, lastOk = 0;
+    const KM = 250, TILE_KM = KM * Math.SQRT2;
+    function planTiles() {
+      const b = map.getBounds(), c = b.getCenter();
+      const dy = (b.getNorth() - b.getSouth()) * 111, dx = (b.getEast() - b.getWest()) * 111 * Math.cos(c.lat * Math.PI / 180);
+      const cols = Math.min(3, Math.max(1, Math.ceil(dx / TILE_KM))), rows = Math.min(3, Math.max(1, Math.ceil(dy / TILE_KM)));
+      const w = (b.getEast() - b.getWest()) / cols, h = (b.getNorth() - b.getSouth()) / rows, out = [];
+      for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
+        const lat = b.getSouth() + h * (r + .5), lon = b.getWest() + w * (q + .5);
+        const hy = h * 111 / 2, hx = w * 111 * Math.cos(lat * Math.PI / 180) / 2;
+        out.push({ n: out.length + 1, lat: +lat.toFixed(3), lon: +(((lon + 540) % 360) - 180).toFixed(3), km: Math.min(KM, Math.max(2, Math.ceil(Math.hypot(hx, hy)))), state: 'loading', data: null });
+      }
+      tiles = out; tiles.clipped = dx > 3 * TILE_KM || dy > 3 * TILE_KM;
+      return out;
     }
+    function drawCover() {
+      if (cover) cover.clearLayers(); else cover = L.layerGroup().addTo(map);
+      for (const t of tiles) {
+        const col = t.state === 'error' ? '#d9473f' : t.state === 'loading' ? '#e8a317' : '#2e9d6f';
+        t.ring = L.circle([t.lat, t.lon], { radius: t.km * 1000, color: col, weight: 1.5, dashArray: t.state === 'ok' ? '2 6' : '8 6', fillOpacity: t.state === 'ok' ? 0 : .04, interactive: false }).addTo(cover);
+        t.ring.bindTooltip('Area ' + t.n, { permanent: false });
+      }
+    }
+    const ago = ms => { const s = Math.round((Date.now() - ms) / 1000); return s < 5 ? 'just now' : s < 90 ? s + ' s ago' : Math.round(s / 60) + ' min ago'; };
+    function renderAreas() {
+      const el = $('areas'); if (!el) return;
+      el.innerHTML = tiles.map(t => `<div class="area ${t.state}"><span class="dot" aria-hidden="true"></span><span class="grow">Area ${t.n} · ${t.state === 'loading' ? 'loading…' : t.state === 'error' ? 'failed: ' + esc(t.err) : t.data.count + ' ships · ' + ago(t.at)}${t.data && t.data.truncated ? ' · <b>capped at ' + t.data.count + ' of ' + t.data.total + ', zoom in</b>' : ''}</span><button class="btn sm" data-n="${t.n}" ${t.state === 'loading' ? 'disabled' : ''}>${t.state === 'error' ? 'Retry' : 'Reload'}</button></div>`).join('') +
+        (tiles.clipped ? '<div class="notice warn small"><div>The view is wider than 3 × 3 areas (about 1,000 km), so the edges are not loaded. Zoom in to load them.</div></div>' : '');
+      el.querySelectorAll('button[data-n]').forEach(b => b.onclick = async () => { const t = tiles.find(x => x.n == b.dataset.n); await loadTile(t, true); apply(); });
+      const bad = tiles.filter(t => t.state === 'error').length, load = tiles.filter(t => t.state === 'loading').length;
+      $('status').textContent = load ? `Loading ${load} of ${tiles.length} areas…` : bad ? `${bad} of ${tiles.length} areas failed` : 'Live · updated ' + new Date(lastOk).toLocaleTimeString();
+      $('status').className = 'status ' + (bad && !load ? 'err' : '');
+      $('refreshAll').disabled = load > 0;
+    }
+    async function loadTile(t, fresh) {
+      t.state = 'loading'; renderAreas(); drawCover();
+      try {
+        t.data = await api(`api/near?lat=${t.lat}&lon=${t.lon}&radius=${t.km}${fresh ? '&fresh=1' : ''}`);
+        t.state = 'ok'; t.at = Date.now(); lastOk = t.at;
+      } catch (e) { t.state = 'error'; t.err = e.message; }
+      if (tiles.includes(t)) { renderAreas(); drawCover(); }
+    }
+    function apply() {
+      const seen = new Map();
+      for (const t of tiles) {
+        if (t.state === 'ok') for (const v of t.data.vessels) { const o = seen.get(v.mmsi); if (!o || v.age_s < o.age_s) seen.set(v.mmsi, v); }
+        else for (const v of lastList) if (map.distance([t.lat, t.lon], [v.lat, v.lon]) <= t.km * 1000 && !seen.has(v.mmsi)) seen.set(v.mmsi, v);  // keep what was shown for an area that failed
+      }
+      const list = [...seen.values()]; draw(list); lastList = list; $('geo').disabled = !list.length; saveView();
+      const ok = tiles.filter(t => t.state === 'ok');
+      $('count').textContent = `${list.length} vessels in view` + (ok.length < tiles.length ? ` (${tiles.length - ok.length} area${tiles.length - ok.length > 1 ? 's' : ''} not up to date)` : '');
+      $('notes').innerHTML = [...new Set(ok.flatMap(t => t.data.notes))].map(esc).join('<br>');
+      if (selected && markers.has(selected)) showTrack(selected);
+    }
+    async function refresh(fresh) {
+      const my = ++gen; planTiles(); drawCover(); renderAreas();
+      await Promise.all(tiles.map(t => loadTile(t, fresh === true)));
+      if (my === gen) apply();
+    }
+    let mv; const onMove = () => { clearTimeout(mv); mv = setTimeout(() => refresh(false), 350); };
     async function showTrack(mmsi) {
       try {
         const t = await api('api/track/' + mmsi);
@@ -201,7 +259,9 @@
       const q = new URLSearchParams(location.search); let saved = null; try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { /* ignore */ }
       const lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
       if (Number.isFinite(lat) && Number.isFinite(lon)) map.setView([lat, lon], parseInt(q.get('zoom')) || 10, { animate: false }); else if (Array.isArray(saved)) map.setView([saved[0], saved[1]], saved[2], { animate: false });
-      map.on('moveend', refresh); refresh(); setInterval(refresh, 10000);
+      map.on('moveend', onMove); refresh(false); setInterval(() => { if (autoOn && !document.hidden) refresh(false); }, 10000);
+      $('refreshAll').onclick = () => refresh(true);
+      $('auto').onchange = e => { autoOn = e.target.checked; };
       if (/^\d{7,9}$/.test(q.get('mmsi') || q.get('imo') || '')) { const id = q.get('mmsi') || q.get('imo'); $('sq').value = id; pick(id, true); }
       else if (q.get('q')) { $('sq').value = q.get('q'); runSearchNow(q.get('q')).catch(e => { $('sres').innerHTML = `<div class="muted small">${esc(e.message)}</div>`; }); }
     })();
